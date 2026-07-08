@@ -1,0 +1,10 @@
+# data files (e.g. figures, annotations)
+data/
+*.tiff
+*.png
+*.jsonl
+*.xml
+
+# model weights
+*.onnx
+*.m1model
