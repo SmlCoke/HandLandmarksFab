@@ -43,6 +43,8 @@ mediapipe:
 cvat:
   label_name: hand_landmarks
   no_hand_label_name: no_hand
+  left_label_name: Left
+  right_label_name: Right
   xml_version: "1.1"
   skeleton_point_labels:
     - "1"

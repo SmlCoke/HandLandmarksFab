@@ -68,6 +68,50 @@ def _cvat_skeleton_point_labels(cfg: Mapping[str, Any]) -> List[str]:
     return labels
 
 
+def _cvat_handedness_labels(cfg: Mapping[str, Any]) -> Dict[str, str]:
+    cvat = cfg.get("cvat", {})
+    return {
+        "Left": str(cvat.get("left_label_name", "Left")),
+        "Right": str(cvat.get("right_label_name", "Right")),
+    }
+
+
+def _normalize_handedness_label(value: Any) -> str:
+    label = str(value or "").strip().lower()
+    if label == "left":
+        return "Left"
+    if label == "right":
+        return "Right"
+    return "unknown"
+
+
+def _cvat_handedness_tag_for_label(label: Any, handedness_labels: Mapping[str, str]) -> Optional[str]:
+    normalized = _normalize_handedness_label(label)
+    if normalized in {"Left", "Right"}:
+        return handedness_labels[normalized]
+    return None
+
+
+def _parse_cvat_handedness_tags(image_el: ET.Element, handedness_labels: Mapping[str, str]) -> tuple[str, List[str], List[str]]:
+    warnings: List[str] = []
+    errors: List[str] = []
+    tag_to_label = {tag_name: label for label, tag_name in handedness_labels.items()}
+    present = []
+    for tag_el in image_el.findall("tag"):
+        tag_name = str(tag_el.attrib.get("label", ""))
+        if tag_name in tag_to_label:
+            present.append(tag_to_label[tag_name])
+    unique = sorted(set(present))
+    if len(present) > len(unique):
+        warnings.append("duplicate_handedness_tag")
+    if len(unique) > 1:
+        errors.append("conflicting_handedness_tags")
+        return "unknown", warnings, errors
+    if not unique:
+        return "unknown", warnings, errors
+    return unique[0], warnings, errors
+
+
 def _hand_skeleton_svg(point_labels: Sequence[str]) -> str:
     parts: List[str] = []
     for start, end in HAND_SKELETON_EDGES:
@@ -148,6 +192,7 @@ def export_cvat_xml(
     label_name = str(cfg["cvat"].get("label_name", "hand_landmarks"))
     no_hand_label = str(cfg["cvat"].get("no_hand_label_name", "no_hand"))
     point_labels = _cvat_skeleton_point_labels(cfg)
+    handedness_labels = _cvat_handedness_labels(cfg)
 
     annotations = ET.Element("annotations")
     ET.SubElement(annotations, "version").text = str(cfg["cvat"].get("xml_version", "1.1"))
@@ -167,11 +212,14 @@ def export_cvat_xml(
     for point_label in point_labels:
         _add_cvat_label(labels, point_label, "#2ca02c", "points", parent=label_name)
     _add_cvat_label(labels, no_hand_label, "#d62728", "tag")
+    _add_cvat_label(labels, handedness_labels["Left"], "#9467bd", "tag")
+    _add_cvat_label(labels, handedness_labels["Right"], "#ff7f0e", "tag")
 
     width = int(cfg["hand_roi"]["output_width"])
     height = int(cfg["hand_roi"]["output_height"])
     positives = 0
     negatives = 0
+    handedness_tags = {"Left": 0, "Right": 0, "unknown": 0}
     for idx, manifest in enumerate(manifest_rows):
         crop_name = Path(str(manifest["crop_path"])).name
         image_el = ET.SubElement(annotations, "image", id=str(idx), name=crop_name, width=str(width), height=str(height))
@@ -188,6 +236,13 @@ def export_cvat_xml(
                     outside="0",
                     points=_point_to_cvat(point),
                 )
+            handedness_label = _normalize_handedness_label((label.get("handedness") or {}).get("label"))
+            handedness_tag = _cvat_handedness_tag_for_label(handedness_label, handedness_labels)
+            if handedness_tag is not None:
+                ET.SubElement(image_el, "tag", label=handedness_tag, source="auto")
+                handedness_tags[handedness_label] += 1
+            else:
+                handedness_tags["unknown"] += 1
             positives += 1
         else:
             ET.SubElement(image_el, "tag", label=no_hand_label, source="auto")
@@ -203,6 +258,8 @@ def export_cvat_xml(
         "upload_images_dir": str(cfg["paths"].get("roi_crops_dir", "data/02_roi_crops")).rstrip("/") + "/images",
         "positive_shape_type": "skeleton",
         "skeleton_point_labels": point_labels,
+        "handedness_tag_labels": handedness_labels,
+        "handedness_tags": handedness_tags,
         "positive_shapes": positives,
         "negative_tags": negatives,
         "xml_path": relpath(xml_path, root),
@@ -256,6 +313,7 @@ def import_cvat_xml(
     label_name = str(cfg["cvat"].get("label_name", "hand_landmarks"))
     no_hand_label = str(cfg["cvat"].get("no_hand_label_name", "no_hand"))
     point_labels = _cvat_skeleton_point_labels(cfg)
+    handedness_labels = _cvat_handedness_labels(cfg)
     manifest_by_name = basename_index_by_path(manifest_rows, "crop_path")
     draft_by_crop = index_by(draft_rows, "crop_id")
     tree = ET.parse(xml_path)
@@ -276,16 +334,23 @@ def import_cvat_xml(
             continue
         draft = draft_by_crop.get(str(manifest["crop_id"]), {})
         no_hand = any(tag.attrib.get("label") == no_hand_label for tag in image_el.findall("tag"))
+        handedness_label, handedness_warnings, handedness_errors = _parse_cvat_handedness_tags(image_el, handedness_labels)
         skeleton_shapes = [s for s in image_el.findall("skeleton") if s.attrib.get("label") == label_name]
         legacy_point_shapes = [p for p in image_el.findall("points") if p.attrib.get("label") == label_name]
         row_warnings: List[str] = []
         row_errors: List[str] = []
+        row_warnings.extend(handedness_warnings)
+        row_errors.extend(handedness_errors)
         if legacy_point_shapes:
             row_errors.append(f"legacy_points_shape_not_supported:{len(legacy_point_shapes)}")
         if len(skeleton_shapes) > 1:
             row_warnings.append(f"multiple_hand_skeletons:{len(skeleton_shapes)}")
         if no_hand and skeleton_shapes:
             row_errors.append("conflicting_no_hand_and_skeleton")
+        if no_hand and handedness_label != "unknown":
+            row_errors.append("conflicting_no_hand_and_handedness_tag")
+        if not skeleton_shapes and handedness_label != "unknown":
+            row_errors.append("handedness_tag_without_skeleton")
 
         base = merge_label_with_manifest(dict(draft), manifest, cfg)
         if no_hand or not skeleton_shapes:
@@ -315,6 +380,8 @@ def import_cvat_xml(
         row_errors.extend(skeleton_errors)
         if len(pts) != 21:
             row_errors.append(f"point_count_not_21:{len(pts)}")
+        if len(pts) == 21 and handedness_label == "unknown":
+            row_warnings.append("missing_handedness_tag")
         crop_px = [{"id": idx, "x": float(x), "y": float(y)} for idx, (x, y) in enumerate(pts)]
         for p in crop_px:
             if p["x"] < 0.0 or p["y"] < 0.0 or p["x"] > width - 1 or p["y"] > height - 1:
@@ -331,7 +398,7 @@ def import_cvat_xml(
             {
                 "hand_id": (base.get("hand_id") or make_hand_id(str(manifest["crop_id"]))) if present else None,
                 "hand_presence": {"present": present},
-                "handedness": base.get("handedness") or {"label": "unknown", "score": None},
+                "handedness": {"label": handedness_label if present else "unknown", "score": None},
                 "landmarks_crop_norm": crop_norm if present else [],
                 "landmarks_crop_px": crop_px if present else [],
                 "landmarks_image_px": image_px if present else [],

@@ -96,6 +96,8 @@ python -m pip install -r requirements.txt
 
 ### 3.3 运行顺序
 
+首先，将待处理图片放入 `data/images` 中，然后：
+
 ```powershell
 python scripts/00_validate_images.py --config configs/autolabel.yaml
 python scripts/01_export_palm_detections.py --config configs/autolabel.yaml
@@ -209,14 +211,17 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 
 - **输入**: `data/03_reviewed/hand_landmarks_reviewed.jsonl`、ROI manifest
 - **输出**: `data/05_labels/hand_training_labels.jsonl`、`data/qc/final_training_label_stats.json`
-- **功能**: 严格校验训练样本。正样本必须有 21 个 `landmarks_crop_norm`；负样本 landmarks 为空，并写入 loss weight: `landmark_loss_weight=0`、`handedness_loss_weight=0`。
+- **功能**: 严格校验训练样本。正样本必须有 21 个 `landmarks_crop_norm`；负样本 landmarks 为空，并写入 loss weight: `landmark_loss_weight=0`、`handedness_loss_weight=0`。更多关于脚本 `07_finalize_training_labels.py` 的信息可以参考：
+    - [常见问题解答文档](docs/question_answers.md)
+    - [数据标注-训练接口文档](docs/hand_training_interface.md)
 
 ### 3.5 CVAT 复核
 
 1. 运行到 `04_export_cvat_xml.py`。
 2. 在 CVAT 创建 image task，上传 `data/02_roi_crops/images/` 中的 crop 图片，然后：
    1. "Add Label"，创建 "tag"，命名为 "no_hand"。进行标注时，如果发现对应图片没有手，则打上这个 tag。如果发现没有手，但是有错误的标注，请删除标注并打上 "no_hand" tag。
-   2. "Setup skeleton"，创建 21 关键点，命名为 "hand_landmarks"，按照 MediaPipe 21 点顺序创建 21 个关键点。
+   2. "Add Label"，创建 "Left" 和 "Right" 两个 label，分别对应左手和右手。进行标注时，注意甄别左右手，打上对应的 label。
+   3. "Setup skeleton"，创建 21 关键点，命名为 "hand_landmarks"，按照 MediaPipe 21 点顺序创建 21 个关键点。
 3. 将 `data/02_roi_crops/cvat_autolabel.xml` 作为初始标注上传到 CVAT。
 4. 每张 crop 最多保留一个 `hand_landmarks` points shape，点数必须为 21，点顺序必须是 MediaPipe 21 点顺序。
 5. 无手 crop 删除 points，并保留或添加 `no_hand` tag。
@@ -245,6 +250,5 @@ python scripts/01_export_palm_detections.py --config configs/autolabel.yaml --ba
 
 ### 3.7 需要人工复核的部分
 
-- MediaPipe 自动 21 点只是草稿，遮挡、交叉手、边缘手、强暗光/反光样本必须人工复核。
-- handedness 低置信度、`present=false` 但 Palm score 很高、点越界、同一 crop 多手等情况会写入 QC 报告并标记 `needs_review`。
-- MediaPipe 不提供 hand presence score，本项目不会自动补造这个分数。
+- MediaPipe 自动 21 点只是草稿，遮挡、交叉手、边缘手、强暗光/反光样本必须人工复核（即 CVAT 自行复核）。
+- handedness 低置信度、`present=false` 但 Palm score 很高、点越界、同一 crop 多手等情况会写入 QC 报告并标记 `needs_review`。最终标注文件 `data\05_labels\hand_training_labels.jsonl` 亦会为每个样本的信息中标明这个字段，**在训练阶段，建议直接忽略所有 `needs_review:true` 的样本，即不让它们参与训练**。
