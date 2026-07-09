@@ -1,12 +1,52 @@
 # question.md 问题解答
 
-本文解释当前半自动标注系统的数据流、几何关系、负样本语义和后续建议。本文面向人工阅读，不修改当前代码。
+本文面向当前仓库版本，解释半自动标注系统中仍然需要理解的关键问题。已经在代码中解决、且不再影响当前流程的历史建议不再保留。
 
-## 1. `compatible_bbox_expand` 的含义
+## 1. 当前数据流总览
+
+当前默认输出目录如下：
+
+```text
+data/
+  images/
+  01_palm/
+    palm_detections.jsonl
+  02_roi_crops/
+    images/
+    hand_roi_crops_manifest.jsonl
+    hand_landmarks_autolabel_draft.jsonl
+    cvat_autolabel.xml
+  03_reviewed/
+    cvat_reviewed.xml
+    hand_landmarks_reviewed.jsonl
+  04_visualization/
+    global_images/
+    crop_images/
+    review_index.csv
+  05_labels/
+    hand_training_labels.jsonl
+  qc/
+```
+
+核心流程是：
+
+```text
+原图
+  -> Palm detection
+  -> 256x256 rotated ROI crop
+  -> MediaPipe 自动标注 draft
+  -> CVAT skeleton/no_hand 人工复核
+  -> reviewed JSONL
+  -> training JSONL
+```
+
+`data/05_labels/hand_training_labels.jsonl` 是后续训练 Hand Landmarker 的主输入标注文件。
+
+## 2. `compatible_bbox_expand` 的含义
 
 `compatible_bbox_expand` 只用于 `palm.backend=mediapipe_official`。
 
-MediaPipe Tasks HandLandmarker 对外只给出 21 个手部关键点和 handedness，不暴露官方内部 Palm ROI。因此我们需要从公开的 21 点中派生一个“palm-compatible detection”，让后续 ROI crop 流程继续使用统一的 Palm schema。
+MediaPipe Tasks HandLandmarker 对外给出 21 个手部关键点和 handedness，但不暴露官方内部 Palm ROI。因此我们从公开的 21 点中派生一个 palm-compatible detection，让后续 ROI crop 流程继续使用统一 Palm schema。
 
 当前做法是取 palm 相关点：
 
@@ -43,9 +83,9 @@ ymax' = ymax + e * h
 
 它不是官方内部 Palm ROI，也不用于 `aethersign_onnx` 后端。ONNX 后端直接使用 Palm 模型解码出的 bbox。
 
-## 2. Palm detection 如何变成 Hand ROI
+## 3. Palm detection 如何变成 Hand ROI
 
-`01_export_palm_detections.py` 输出的是：
+`01_export_palm_detections.py` 输出：
 
 ```text
 palm bbox + p0/p9 + score
@@ -57,7 +97,7 @@ palm bbox + p0/p9 + score
 - `p0` 是 wrist。
 - `p9` 是 middle MCP。
 
-`02_build_hand_roi_crops.py` 使用 `hand_autolabel/roi_geometry.py` 中的 `build_roi_rect_from_palm()` 复刻板端 `materials/preminilary/device/src/hand_landmarker.cpp` 的 ROI 几何。
+`02_build_hand_roi_crops.py` 使用 `hand_autolabel/roi_geometry.py` 中的 `build_roi_rect_from_palm()` 复刻板端 ROI 几何。
 
 步骤如下：
 
@@ -78,7 +118,7 @@ dy = p9_y - p0_y
 rotation = normalize(pi/2 - atan2(-dy, dx))
 ```
 
-这里与板端保持一致。注意图像 y 轴向下，所以公式中是 `atan2(-dy, dx)`。
+这里与板端保持一致。图像 y 轴向下，所以公式中是 `atan2(-dy, dx)`。
 
 3. 按旋转坐标系平移 ROI 中心：
 
@@ -112,27 +152,15 @@ scale_x = 1.8
 scale_y = 1.8
 ```
 
-5. 根据中心、宽高和旋转角计算四角，并把这块旋转 ROI 仿射采样成 `256x256` crop。
+5. 根据中心、宽高和旋转角计算四角，并把旋转 ROI 仿射采样成 `256x256` crop。
 
-### 是否会出现黑色区域
+如果旋转/平移/扩大后的 ROI 超出原图边界，crop 中超出原图的部分会被填充为黑色。Python 实现使用 `cv2.BORDER_CONSTANT, borderValue=0`，与板端采样越界返回 0 的行为一致。
 
-会。
+这些黑色区域会作为 crop 图片的一部分进入 MediaPipe 自动标注、CVAT 人工复核、训练和板端推理。系统不会额外 mask 掉黑边，因为训练分布应尽量模拟板端推理分布。
 
-如果旋转/平移/扩大后的 ROI 超出原图边界，crop 中超出原图的部分会被填充为黑色。当前 Python 实现使用：
+## 4. `roi_rect`、`roi_corners_px` 和反投影
 
-```python
-cv2.warpAffine(..., borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-```
-
-这与板端逻辑一致。板端 `SampleBilinear()` 在采样点远离图像或像素越界时返回 `0`，因此超出原图的区域也是黑色。
-
-这些黑色区域会作为 `256x256` crop 图片的一部分直接参与后续 MediaPipe 标注、人工复核、训练和板端推理。系统不会额外 mask 掉这些黑边，因为训练分布必须尽量模拟板端推理分布。
-
-如果黑色区域过多，应该通过 QC 标记或人工复核处理，而不是在 crop 阶段自动裁掉。
-
-## 3. `roi_rect` 和 `roi_corners_px` 的含义与反投影
-
-`hand_roi_crops_manifest.jsonl` 每行表示一个 crop。核心几何字段是：
+`data/02_roi_crops/hand_roi_crops_manifest.jsonl` 每行表示一个 crop。核心几何字段是：
 
 ```json
 "roi_rect": {
@@ -150,7 +178,7 @@ cv2.warpAffine(..., borderMode=cv2.BORDER_CONSTANT, borderValue=0)
 ]
 ```
 
-`roi_rect` 是 ROI 的参数化描述，全部属于原图 `1280x720` 坐标系：
+`roi_rect` 是 ROI 的参数化描述，属于原图 `1280x720` 坐标系：
 
 - `x_center/y_center`：ROI 中心点。
 - `width/height`：ROI 在原图像素坐标中的宽高。
@@ -165,17 +193,17 @@ C2 = bottom_right
 C3 = bottom_left
 ```
 
-它们也属于原图 `1280x720` 坐标系，允许越界。
+这些角点也属于原图 `1280x720` 坐标系，允许越界。
 
 ### 从 crop 坐标反投影回原图
 
-MediaPipe 在 `256x256` crop 上输出归一化点：
+对于 crop 归一化坐标：
 
 ```text
-(u, v),  u in [0,1], v in [0,1]
+(u, v), u in [0,1], v in [0,1]
 ```
 
-反投影公式是双线性仿射插值：
+反投影公式是：
 
 ```text
 P_image = C0 + u * (C1 - C0) + v * (C3 - C0)
@@ -197,57 +225,33 @@ v = y_crop / (crop_height - 1)
 
 当前 `crop_width=crop_height=256`，所以分母是 `255`。
 
-这就是 `landmarks_crop_norm` 和 `landmarks_crop_px` 反投影为 `landmarks_image_px` 的方法。它与 crop 生成时的三点仿射关系互为正反方向。
+这就是 `landmarks_crop_norm` 和 `landmarks_crop_px` 反投影为 `landmarks_image_px` 的方法。
 
-## 4. `hand_landmarks_mediapipe_raw.jsonl` 和 `hand_landmarks_autolabel_draft.jsonl`
+## 5. `palm_valid` 与 `hand_presence.present`
 
-当前这两份文件内容完全相同：
+`palm_valid` 和 `hand_presence.present` 是两个层级的语义，不能互相替代。
 
-```text
-data/labels/hand_landmarks_mediapipe_raw.jsonl
-data/labels/hand_landmarks_autolabel_draft.jsonl
-```
-
-原本的设计意图是：
-
-- `hand_landmarks_mediapipe_raw.jsonl`：保存 MediaPipe teacher 的直接输出。
-- `hand_landmarks_autolabel_draft.jsonl`：保存准备进入 CVAT 的自动标注草稿，包含恢复元数据所需的字段。
-
-但当前实现已经在 `03_run_mediapipe_on_rois.py` 中直接把 MediaPipe 输出和 manifest 元数据合并成完整 crop 级标注，所以两份文件实际重复。
-
-可以简化为只保留一份，推荐保留：
-
-```text
-hand_landmarks_autolabel_draft.jsonl
-```
-
-如果后续仍想保留 raw，则 raw 应该变成真正的“裸 MediaPipe 输出”，不包含 ROI manifest 的冗余字段。否则保留两份没有实际价值。
-
-### `hand_presence.present` 是否完全取决于 `palm_valid`
-
-不是。
-
-`palm_valid` 表示这个 crop 来源于 Palm 正检还是低分负候选：
+`palm_valid` 表示这个 crop 的 Palm 来源：
 
 ```text
 palm_valid=true   -> 来自有效 Palm detection
-palm_valid=false  -> 来自 negative_candidates
+palm_valid=false  -> 来自低分 negative candidate
 ```
 
-`hand_presence.present` 表示 MediaPipe 或人工复核认为该 `256x256` crop 内是否有手：
+`hand_presence.present` 表示当前 `256x256` crop 内是否有有效手：
 
 ```text
 hand_presence.present=true   -> crop 内有手
-hand_presence.present=false  -> crop 内无手
+hand_presence.present=false  -> crop 内无有效手
 ```
 
-两者是不同层级的语义。实际可能出现：
+因此可能出现：
 
 ```text
 palm_valid=false, hand_presence.present=true
 ```
 
-这表示 Palm 分数低，但 crop 里确实有手。当前烟测中已经出现这种情况。
+这表示 Palm 分数低，但 crop 里确实有手。对于 Hand Landmarker 来说，它仍然是正样本。
 
 也可能出现：
 
@@ -255,327 +259,222 @@ palm_valid=false, hand_presence.present=true
 palm_valid=true, hand_presence.present=false
 ```
 
-这表示 Palm 有效检测触发了 ROI，但 Hand teacher 或人工复核认为 crop 内没有有效手。这是 hard negative。
+这表示 Palm 有效检测触发了 ROI，但人工复核认为 crop 内没有有效手。这是 hard negative。
 
-## 5. `crop_id`、`palm_det_id`、`hand_id` 的唯一性
+训练时应以 `hand_presence.present` 决定 Hand Landmarker 的正负，以 `palm_valid` 辅助分析样本来源和异常类型。
 
-当前系统中：
+## 6. CVAT skeleton 与 `no_hand` tag
 
-- 一个 `palm_det_id` 只生成一个 `crop_id`。
-- 一个 `crop_id` 最多生成一个 `hand_id`。
-- 如果 `hand_presence.present=false`，则 `hand_id=null`。
+当前 CVAT 复核对象是 `data/02_roi_crops/images/` 下的 crop 图片，不是原始大图。每张 crop 最多一只手。
 
-当前 ID 形式是：
+当前导出规则：
 
-```text
-palm_det_id = image_stem:palm0 或 image_stem:neg0
-crop_id     = palm_det_id:crop0
-hand_id     = palm_det_id:hand0
-```
+- 有手样本导出一个 `hand_landmarks` skeleton shape。
+- skeleton 内有 21 个子 points，CVAT 子点 label 为 `1` 到 `21`。
+- 无手样本导出一个 `no_hand` tag。
+- `04_export_cvat_xml.py` 不复制图片；CVAT 中直接上传 `data/02_roi_crops/images/`，再导入 `data/02_roi_crops/cvat_autolabel.xml`。
 
-在现有约束下，每个 Palm detection 只构造一个 crop，每个 crop 最多一只手，所以 `:crop0` 和 `:hand0` 的数字后缀确实没有必要。
-
-可以简化为：
+CVAT 编号与内部 id 的对应关系是：
 
 ```text
-crop_id = palm_det_id:crop
-hand_id = crop_id:hand
+CVAT 1  -> internal id 0
+CVAT 2  -> internal id 1
+...
+CVAT 21 -> internal id 20
 ```
 
-这样更符合当前数据结构，也更容易人工阅读。
+也就是说，CVAT 上看到的是 1-based 编号；JSONL、训练和 MediaPipe 语义里使用 0-based id。
 
-唯一需要注意的是：如果未来打算从同一个 Palm detection 派生多个不同 scale/shift 的 crops，或者允许一个 crop 中多个 hand shapes，那么数字后缀会重新有用。但本项目当前明确“一 palm 一 crop，一 crop 最多一手”，因此建议采纳这个简化。
-
-## 6. `cvat_upload_images/` 与 `roi_crops/images/*.png`
-
-当前 `04_export_cvat_xml.py` 会把：
+人工复核后的 XML 保存为：
 
 ```text
-data/roi_crops/images/*.png
+data/03_reviewed/cvat_reviewed.xml
 ```
 
-复制一份到：
+`05_import_cvat_xml.py` 导入规则：
+
+- 有且仅有一个 `hand_landmarks` skeleton，且 21 个子点都存在：`hand_presence.present=true`。
+- 无 skeleton 且有 `no_hand` tag：`hand_presence.present=false`。
+- 无 skeleton 且无 `no_hand` tag：按无手导入，并写 QC warning `missing_no_hand_tag`。
+- 同时存在 `no_hand` 和 skeleton：按无手保守导入，并写 QC error `conflicting_no_hand_and_skeleton`。
+- 旧式顶层 `hand_landmarks` points shape 不再支持，会写 QC error `legacy_points_shape_not_supported`。
+
+## 7. 三份 JSONL 的关系
+
+当前系统中有三份 crop 级 hand label JSONL：
 
 ```text
-data/review/cvat_upload_images/
+data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+data/03_reviewed/hand_landmarks_reviewed.jsonl
+data/05_labels/hand_training_labels.jsonl
 ```
 
-这两份图片内容应完全一致，只是路径不同。
-
-从节省磁盘空间的角度看，确实不需要复制。CVAT XML 中保存的是图片文件名，而不是仓库内的绝对路径。只要上传到 CVAT 的图片文件名与 XML 中的 `<image name="...">` 对得上，就可以直接上传 `data/roi_crops/images/*.png`。
-
-因此这个建议合理：后续可以删除 `cvat_upload_images/` 复制逻辑，让 `04_export_cvat_xml.py` 只生成 XML，并在 README 中说明直接上传 ROI crop 图片目录。
-
-## 7. CVAT 中负样本如何处理
-
-当前导出到 CVAT 的对象是 crop 图片，不是原始大图。每张 crop 最多一只手。
-
-导出规则：
-
-- 如果草稿中 `hand_presence.present=true` 且有 21 个点，则导出一个 `hand_landmarks` points shape。
-- 否则导出一个 `no_hand` tag。
-
-人工复核时可以遇到以下情况。
-
-### 情况 A：负样本确实没有手
-
-例如：
-
-```text
-palm_valid=false
-hand_presence.present=false
-```
-
-人工确认没有手，则保持 `no_hand` tag，不添加 points。
-
-导回 JSONL 后：
+它们一行都对应一个 crop。landmark 点字段统一为：
 
 ```json
-"hand_presence": {"present": false},
+{"id": 0, "x": 0.5357, "y": 0.4884}
+```
+
+不再保留 `z` 或 `visible`：
+
+- `z` 是 MediaPipe 的相对深度输出，本项目当前只训练二维 landmark，不使用它。
+- `visible` 在当前系统里始终为 1，没有形成单点 loss mask，因此删除。
+
+### draft
+
+`hand_landmarks_autolabel_draft.jsonl` 是 MediaPipe teacher 对每个 ROI crop 的自动标注草稿。它保留完整 manifest 元数据，例如 `crop_path`、`roi_rect`、`roi_corners_px`、`palm_valid`、`palm_score`。
+
+### reviewed
+
+`hand_landmarks_reviewed.jsonl` 是从 CVAT reviewed XML 导回后的人工复核结果。CVAT XML 本身只保存图片名、skeleton 点和 tag，因此导入时必须结合 draft 与 manifest 恢复 ROI 几何、原图反投影坐标和样本来源字段。
+
+### training
+
+`hand_training_labels.jsonl` 是 `07_finalize_training_labels.py` 生成的最终训练标注文件。它在 reviewed 基础上做严格清洗，并补充 loss weight 字段。
+
+## 8. `07_finalize_training_labels.py` 做了什么
+
+`07_finalize_training_labels.py` 的目标是把人工复核后的 crop 级标注变成训练可以直接读取的干净主文件：
+
+```text
+输入:
+  data/03_reviewed/hand_landmarks_reviewed.jsonl
+  data/02_roi_crops/hand_roi_crops_manifest.jsonl
+
+输出:
+  data/05_labels/hand_training_labels.jsonl
+  data/qc/final_training_label_stats.json
+```
+
+它做的事情可以分成五类。
+
+### 8.1 合并 manifest 元数据
+
+脚本先按 `crop_id` 读取 ROI manifest。对于 reviewed 中每一行，它会用 manifest 补齐或确认：
+
+- `image`
+- `crop_path`
+- `palm_det_id`
+- `palm_valid`
+- `palm_score`
+- `width/height`
+- `source_image_width/source_image_height`
+- `roi_rect`
+- `roi_corners_px`
+
+这样最终训练文件单独拿出来也能知道每个 crop 来自哪张原图、哪个 Palm 候选、怎样反投影回原图。
+
+### 8.2 执行 QC 检查
+
+脚本调用 `label_issues()` 检查每个样本是否有结构或质量问题。典型检查包括：
+
+- `hand_presence.present=true` 但 `landmarks_crop_norm` 不是 21 点。
+- `hand_presence.present=false` 但仍然带 landmarks。
+- `landmarks_crop_px` 中存在越界点。
+- 一个 crop 中 MediaPipe 曾检测到多只手。
+- 正样本 handedness 分数过低。
+- 负样本来自高分 palm，可能是 hard negative 或漏标。
+
+QC 结果会体现在两个地方：
+
+- 行内 `needs_review`。
+- `data/qc/final_training_label_stats.json` 中的 warnings/errors/skipped 统计。
+
+### 8.3 跳过结构上不能训练的样本
+
+有两类样本不会写入最终训练 JSONL：
+
+```text
+hand_presence.present=true  但 landmarks_crop_norm 不是 21 点
+hand_presence.present=false 但仍然带 landmarks
+```
+
+前者无法监督 21 点输出；后者正负语义冲突。脚本会把它们写入 `final_training_label_stats.json` 的 `skipped`，而不是强行进入训练。
+
+### 8.4 规范负样本
+
+如果 `hand_presence.present=false`，脚本会强制清空所有手部监督字段：
+
+```json
 "hand_id": null,
+"handedness": {"label": "unknown", "score": null},
 "landmarks_crop_norm": [],
 "landmarks_crop_px": [],
 "landmarks_image_px": []
 ```
 
-### 情况 B：负样本其实有手
+这样可以保证负样本只监督 hand presence，不会意外参与 landmark 或 handedness 训练。
 
-例如：
+### 8.5 写入 loss weight
 
-```text
-palm_valid=false
-hand_presence.present=false
-```
-
-但人工看到 crop 里其实有手。这时应删除或忽略 `no_hand`，添加一个 `hand_landmarks` points shape，标满 21 点。
-
-导回 JSONL 后：
+最终训练文件会新增三个 loss weight：
 
 ```json
-"hand_presence": {"present": true},
-"hand_id": "...:hand",
-"landmarks_crop_norm": [21 points],
-"landmarks_crop_px": [21 points],
-"landmarks_image_px": [21 points]
+"hand_presence_loss_weight": 1.0,
+"landmark_loss_weight": 1.0,
+"handedness_loss_weight": 1.0
 ```
 
-`palm_valid=false` 会被保留，表示它来自低分 Palm 候选，但对于 Hand Landmarker 训练来说，它已经是一个正样本。
+规则如下：
 
-### 情况 C：正样本其实没有手
+- `hand_presence_loss_weight` 当前总是 `1.0`。正样本和负样本都监督 hand flag。
+- `landmark_loss_weight=1.0` 仅当 `hand_presence.present=true`，否则为 `0.0`。
+- `handedness_loss_weight=1.0` 仅当 `hand_presence.present=true` 且 `handedness.label` 是 `Left` 或 `Right`，否则为 `0.0`。
 
-例如：
+因此负样本不会参与 landmark loss 和 handedness loss；handedness 不确定的正样本仍可参与 hand presence 与 landmark 训练，但不参与 handedness 训练。
+
+### 8.6 统一 landmark schema
+
+最终输出前会清洗三个 landmark 字段：
 
 ```text
-palm_valid=true
-hand_presence.present=true
+landmarks_crop_norm
+landmarks_crop_px
+landmarks_image_px
 ```
 
-但人工发现 crop 中没有有效手。这时应删除 points，添加或保留 `no_hand` tag。
-
-导回 JSONL 后会变成：
+每个点只保留：
 
 ```json
-"hand_presence": {"present": false},
-"hand_id": null,
-"landmarks_crop_norm": []
+{"id": 0, "x": ..., "y": ...}
 ```
 
-这类样本是非常有价值的 hard negative，因为它来自 Palm 正检，却不应参与 landmark 训练。
+这一步保证 draft、reviewed、training 三份 JSONL 的 landmark 点结构一致。
 
-### 情况 D：同时有 `no_hand` 和 points
+### 8.7 `needs_review` 如何影响训练
 
-当前导入逻辑中，只要存在 `no_hand` tag，就会按无手处理。这可以避免错误 points 被误当成正样本。
+`07_finalize_training_labels.py` 不会因为 `needs_review=true` 自动把样本丢掉，也不会自动降低 loss weight。它只负责把这个标记保留到最终训练文件。
 
-更严格的后续实现可以把“同时有 no_hand 和 points”写入 QC error，要求人工重新检查。
+后续训练脚本可以根据策略选择：
 
-## 8. 异常样本如何参与训练
+- 过滤 `needs_review=true`。
+- 只过滤严重错误，保留轻微越界或低置信样本。
+- 使用更低的采样权重或 loss 权重。
 
-训练最小单位是 crop，不是原图，也不是 palm detection。
+当前推荐做法是：正式训练前先查看 `data/qc/final_training_label_stats.json` 和 `data/04_visualization/review_index.csv`，确认 `needs_review=true` 的样本是否已经人工处理。
 
-### `palm_valid=true, hand_presence.present=true`
+## 9. 可视化如何使用
 
-这是标准正样本。
-
-训练方式：
+`06_visualize_autolabels.py` 生成两类可视化：
 
 ```text
-hand_presence target = 1
-landmark loss weight = 1
-handedness loss weight = 1，前提是 label 为 Left/Right
+data/04_visualization/global_images/*.png
+data/04_visualization/crop_images/*.png
 ```
 
-它监督 Hand Landmarker 的三类输出：是否有手、21 点、左右手。
+`global_images/` 在原图上绘制：
 
-### `palm_valid=true, hand_presence.present=false`
+- Palm bbox。
+- Palm p0/p9。
+- rotated Hand ROI 四边形。
+- 反投影到原图上的 21 点骨架。
 
-这是 Palm 正检触发的 hard negative。
+`crop_images/` 在 `256x256` crop 图上直接绘制 `landmarks_crop_px`。
 
-训练方式：
+同时生成：
 
 ```text
-hand_presence target = 0
-landmark loss weight = 0
-handedness loss weight = 0
-landmarks = []
+data/04_visualization/review_index.csv
 ```
 
-它不监督 landmarks 和 handedness，但应该参与 hand presence 训练，让 Hand Landmarker 学会拒绝错误 ROI。
-
-### `palm_valid=false, hand_presence.present=false`
-
-这是低分 Palm 负候选且人工/MediaPipe 确认无手。
-
-训练方式：
-
-```text
-hand_presence target = 0
-landmark loss weight = 0
-handedness loss weight = 0
-```
-
-这类样本可以参与训练，但要注意数量不要远超正样本，否则 hand presence head 可能偏向预测无手。后续训练脚本可以做负样本采样或 loss reweight。
-
-### `palm_valid=false, hand_presence.present=true`
-
-这是低分 Palm 候选，但 crop 内确实有手。
-
-训练方式：
-
-```text
-hand_presence target = 1
-landmark loss weight = 1
-handedness loss weight = 1，前提是 label 为 Left/Right
-```
-
-它对 Hand Landmarker 是正样本。它也提示 Palm Detector 可能漏检或低估了该手，但本工具链当前不训练 Palm，因此这里只把它作为 Hand 正样本使用。
-
-### `hand_presence.present=true` 但点数不是 21
-
-这是错误样本，不应进入最终训练。
-
-当前 `07_finalize_training_labels.py` 会跳过这类正样本，并写入 QC。
-
-### 点越界或 handedness 低置信度
-
-当前实现会保留样本并标记 `needs_review`。建议人工复核后再用于正式训练。
-
-训练阶段可以选择：
-
-- 直接过滤 `needs_review=true`。
-- 或者只过滤严重越界样本。
-- 或者降低这类样本的 landmark/handedness loss 权重。
-
-## 9. 输出结构调整建议
-
-建议是合理的，尤其是把流水线阶段编号后，数据流会更清楚。
-
-但建议中的目录有两个小问题：
-
-1. `03_reviewd` 应修正为 `03_reviewed`。
-2. 示例树没有列出 `05_labels/`，但文字中提到了，应补上。
-
-建议目标结构为：
-
-```text
-data/
-  images/
-  01_palm/
-    palm_detections.jsonl
-  02_roi_crops/
-    images/
-    hand_roi_crops_manifest.jsonl
-    hand_landmarks_mediapipe_raw.jsonl
-    hand_landmarks_autolabel_draft.jsonl
-    cvat_autolabel.xml
-  03_reviewed/
-    cvat_reviewed.xml
-    hand_landmarks_reviewed.jsonl
-  04_visualization/
-    crop_images/
-    global_images/
-    review_index.csv
-  05_labels/
-    hand_training_labels.jsonl
-  qc/
-```
-
-其中 `hand_landmarks_autolabel_draft.jsonl` 虽然 question.md 没列出，但当前 `05_import_cvat_xml.py` 需要它恢复 CVAT XML 中丢失的字段，所以应该放在 `02_roi_crops/`。
-
-`data/review/` 可以逐步废弃，不再作为主要输出目录。CVAT 上传图片可以直接使用 `02_roi_crops/images/`。
-
-## 10. 可视化如何做
-
-当前 `06_visualize_autolabels.py` 主要生成原图级可视化：
-
-```text
-data/review/overlay_images/*.png
-```
-
-它读取：
-
-- 原图：`data/images/*.tiff`
-- Palm 结果：`palm_detections.jsonl`
-- ROI manifest：`hand_roi_crops_manifest.jsonl`
-- Reviewed labels：`hand_landmarks_reviewed.jsonl`
-
-然后在原图上画：
-
-1. Palm bbox。
-2. Palm p0/p9。
-3. rotated Hand ROI 四边形。
-4. 反投影到原图上的 21 点骨架。
-5. `hand_presence`、`handedness`、score、source 等文本。
-
-### crop 坐标如何反投影到原图
-
-仍然使用第 3 节公式。
-
-对于 crop 内点：
-
-```text
-(x_crop, y_crop)
-```
-
-先归一化：
-
-```text
-u = x_crop / 255
-v = y_crop / 255
-```
-
-然后使用 ROI 四角点：
-
-```text
-C0 = top_left
-C1 = top_right
-C3 = bottom_left
-```
-
-反投影：
-
-```text
-P_image = C0 + u * (C1 - C0) + v * (C3 - C0)
-```
-
-这样得到：
-
-```text
-(x_image, y_image)
-```
-
-也就是 `landmarks_image_px`。原图可视化直接使用 `landmarks_image_px` 绘制骨架。
-
-### crop 小图可视化
-
-question.md 建议增加：
-
-```text
-04_visualization/crop_images/
-```
-
-这是合理的。它应在 `256x256` crop 图上直接绘制 `landmarks_crop_px`，无需反投影。这样可以同时检查：
-
-- MediaPipe/人工点在 crop 内是否合理。
-- 反投影到原图后是否仍然与手对齐。
-
-后续实现时建议同时生成 crop 级和 global 级两类可视化。
+它把每个 crop 的 `crop_overlay_path`、`global_overlay_path`、`hand_presence`、`handedness`、`needs_review`、`palm_valid`、`palm_score` 汇总在一起，方便人工定位需要复查的样本。
