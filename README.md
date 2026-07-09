@@ -7,7 +7,7 @@
 - `project-8.md`、`docs/HandFab/*` 
 - `materials/preminilary/device` 中的板端 ROI 几何；
 
-如文档与本任务冲突，以 `prompt.md` 的最终方案和板端 `hand_landmarker.cpp` 为准。
+如文档与本任务冲突，以本文档为准。
 
 输入图片必须已经是 `1280x720` 正向灰度 `.tiff`。脚本不会旋转原图。
 
