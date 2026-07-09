@@ -103,9 +103,9 @@ python scripts/02_build_hand_roi_crops.py --config configs/autolabel.yaml
 python scripts/03_run_mediapipe_on_rois.py --config configs/autolabel.yaml
 python scripts/04_export_cvat_xml.py --config configs/autolabel.yaml
 
-# 将 data/review/cvat_upload_images/ 和 data/review/cvat_autolabel.xml 上传到 CVAT
+# 将 data/02_roi_crops/images 和 data/02_roi_crops/cvat_autolabel.xml 上传到 CVAT
 # 在 CVAT 中复核每张 256x256 crop 的 21 点
-# 导出 CVAT for images 1.1 XML，保存为 data/review/cvat_reviewed.xml
+# 导出 CVAT for images 1.1 XML，保存为 data/03_reviewed/cvat_reviewed.xml
 
 python scripts/05_import_cvat_xml.py --config configs/autolabel.yaml
 python scripts/06_visualize_autolabels.py --config configs/autolabel.yaml
@@ -134,7 +134,7 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
     - `detections`: 有效 palm detections；每项包含:
         - `palm_det_id`: palm detection 级唯一 ID。
         - `score`: palm detection 分数。
-        - `bbox_norm/bbox_px`: 边界框坐标 (`norm`代表相对原始 tiff 图的归一化值，`px`代表原图中的像素坐标)。
+        - `bbox_norm/bbox_px`: 边界框坐标 (`norm`代表相对原始 tiff 图的归一化值，`px`代表原图中的像素坐标)，顺序分别为：`[xmin, ymin, xmax, ymax]`。
         - `keypoints_norm/keypoints_px.p0/p9`: 关键点坐标。
         - `source`: 检测模型来源。
         - `head`: 14x14 或 7x7。
@@ -197,7 +197,7 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 
 - **输入**: `data/03_reviewed/cvat_reviewed.xml`、`hand_roi_crops_manifest.jsonl`、`hand_landmarks_autolabel_draft.jsonl`
 - **输出**: `data/03_reviewed/hand_landmarks_reviewed.jsonl`、`data/qc/cvat_import_stats.json`
-- **功能**: 解析 CVAT 复核后的 21 点，并用 manifest 恢复 ROI 几何、反投影坐标和原始元数据。
+- **功能**: 解析 CVAT 复核后的 21 点，**并用之前的 `.jsonl` 文件恢复 ROI 几何、反投影坐标和原始元数据等在 cvat 1.1 标注文件中被删除的信息**。
 
 #### (6) `06_visualize_autolabels.py`
 
@@ -214,13 +214,13 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 ### 3.5 CVAT 复核
 
 1. 运行到 `04_export_cvat_xml.py`。
-2. 在 CVAT 创建 image task，上传 `data/review/cvat_upload_images/` 中的 crop 图片，然后：
-   1. "Add Label"，创建 "tag"，命名为 "no_hand"，如果对应图片没有手，则打上这个 tag。
+2. 在 CVAT 创建 image task，上传 `data/02_roi_crops/images/` 中的 crop 图片，然后：
+   1. "Add Label"，创建 "tag"，命名为 "no_hand"。进行标注时，如果发现对应图片没有手，则打上这个 tag。如果发现没有手，但是有错误的标注，请删除标注并打上 "no_hand" tag。
    2. "Setup skeleton"，创建 21 关键点，命名为 "hand_landmarks"，按照 MediaPipe 21 点顺序创建 21 个关键点。
-3. 导入 `data/review/cvat_autolabel.xml` 作为初始标注。
+3. 将 `data/02_roi_crops/cvat_autolabel.xml` 作为初始标注上传到 CVAT。
 4. 每张 crop 最多保留一个 `hand_landmarks` points shape，点数必须为 21，点顺序必须是 MediaPipe 21 点顺序。
 5. 无手 crop 删除 points，并保留或添加 `no_hand` tag。
-6. 导出 `CVAT for images 1.1` XML，保存为 `data/review/cvat_reviewed.xml`。
+6. 导出 `CVAT for images 1.1` XML，保存为 `data/03_reviewed/cvat_reviewed.xml`。
 7. 运行 `05_import_cvat_xml.py` 和 `07_finalize_training_labels.py`。
 
 ### 3.6 小样例
