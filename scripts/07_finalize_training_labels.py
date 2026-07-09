@@ -55,9 +55,13 @@ def main() -> None:
 
     rows = []
     skipped = []
+    ignored_for_training = []
     for raw in read_jsonl(reviewed_path):
         manifest = manifest_by_crop.get(str(raw.get("crop_id")), {})
         row = merge_label_with_manifest(raw, manifest, cfg) if manifest else dict(raw)
+        if bool(row.get("ignore_for_training", False)):
+            ignored_for_training.append({"crop_id": row.get("crop_id"), "reason": "ignore_for_training"})
+            continue
         warnings, errors, needs_review = label_issues(row, cfg)
         present = bool((row.get("hand_presence") or {}).get("present", False))
         if present and len(row.get("landmarks_crop_norm") or []) != 21:
@@ -72,7 +76,7 @@ def main() -> None:
 
     write_jsonl(output_path, rows)
     stats = summarize_label_rows(rows, cfg)
-    stats.update({"skipped": skipped, "output_jsonl": str(output_path)})
+    stats.update({"skipped": skipped, "ignored_for_training": ignored_for_training, "output_jsonl": str(output_path)})
     write_json(qc_dir / "final_training_label_stats.json", stats)
     print(f"training_rows={len(rows)} positive={stats['positive']} negative={stats['negative']} skipped={len(skipped)} output={output_path}")
 

@@ -49,6 +49,7 @@ cvat:
   no_hand_label_name: no_hand
   left_label_name: Left
   right_label_name: Right
+  ignore_for_training_label_name: ignore_for_training
   xml_version: "1.1"
   skeleton_point_labels:
     - "1"

@@ -76,6 +76,10 @@ def _cvat_handedness_labels(cfg: Mapping[str, Any]) -> Dict[str, str]:
     }
 
 
+def _cvat_ignore_label(cfg: Mapping[str, Any]) -> str:
+    return str(cfg.get("cvat", {}).get("ignore_for_training_label_name", "ignore_for_training"))
+
+
 def _normalize_handedness_label(value: Any) -> str:
     label = str(value or "").strip().lower()
     if label == "left":
@@ -191,6 +195,7 @@ def export_cvat_xml(
     label_by_crop = index_by(label_rows, "crop_id")
     label_name = str(cfg["cvat"].get("label_name", "hand_landmarks"))
     no_hand_label = str(cfg["cvat"].get("no_hand_label_name", "no_hand"))
+    ignore_label = _cvat_ignore_label(cfg)
     point_labels = _cvat_skeleton_point_labels(cfg)
     handedness_labels = _cvat_handedness_labels(cfg)
 
@@ -214,6 +219,7 @@ def export_cvat_xml(
     _add_cvat_label(labels, no_hand_label, "#d62728", "tag")
     _add_cvat_label(labels, handedness_labels["Left"], "#9467bd", "tag")
     _add_cvat_label(labels, handedness_labels["Right"], "#ff7f0e", "tag")
+    _add_cvat_label(labels, ignore_label, "#7f7f7f", "tag")
 
     width = int(cfg["hand_roi"]["output_width"])
     height = int(cfg["hand_roi"]["output_height"])
@@ -259,6 +265,7 @@ def export_cvat_xml(
         "positive_shape_type": "skeleton",
         "skeleton_point_labels": point_labels,
         "handedness_tag_labels": handedness_labels,
+        "ignore_for_training_label": ignore_label,
         "handedness_tags": handedness_tags,
         "positive_shapes": positives,
         "negative_tags": negatives,
@@ -312,6 +319,7 @@ def import_cvat_xml(
         raise FileNotFoundError(f"CVAT reviewed XML not found: {xml_path}")
     label_name = str(cfg["cvat"].get("label_name", "hand_landmarks"))
     no_hand_label = str(cfg["cvat"].get("no_hand_label_name", "no_hand"))
+    ignore_label = _cvat_ignore_label(cfg)
     point_labels = _cvat_skeleton_point_labels(cfg)
     handedness_labels = _cvat_handedness_labels(cfg)
     manifest_by_name = basename_index_by_path(manifest_rows, "crop_path")
@@ -334,6 +342,7 @@ def import_cvat_xml(
             continue
         draft = draft_by_crop.get(str(manifest["crop_id"]), {})
         no_hand = any(tag.attrib.get("label") == no_hand_label for tag in image_el.findall("tag"))
+        ignore_for_training = any(tag.attrib.get("label") == ignore_label for tag in image_el.findall("tag"))
         handedness_label, handedness_warnings, handedness_errors = _parse_cvat_handedness_tags(image_el, handedness_labels)
         skeleton_shapes = [s for s in image_el.findall("skeleton") if s.attrib.get("label") == label_name]
         legacy_point_shapes = [p for p in image_el.findall("points") if p.attrib.get("label") == label_name]
@@ -366,6 +375,7 @@ def import_cvat_xml(
                     "landmarks_image_px": [],
                     "source": "cvat_reviewed",
                     "needs_review": bool(row_warnings or row_errors),
+                    "ignore_for_training": bool(ignore_for_training),
                 }
             )
             rows.append(base)
@@ -404,6 +414,7 @@ def import_cvat_xml(
                 "landmarks_image_px": image_px if present else [],
                 "source": "cvat_reviewed",
                 "needs_review": bool(row_warnings or row_errors),
+                "ignore_for_training": bool(ignore_for_training),
             }
         )
         rows.append(base)

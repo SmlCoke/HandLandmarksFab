@@ -227,8 +227,9 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 1. 运行到 `04_export_cvat_xml.py`。
 2. 在 CVAT 创建 image task，上传 `data/02_roi_crops/images/` 中的 crop 图片，然后：
    1. "Add Label"，创建 "tag"，命名为 "no_hand"。进行标注时，如果发现对应图片没有手，则打上这个 tag。如果发现没有手，但是有错误的标注，请删除标注并打上 "no_hand" tag。
-   2. "Add Label"，创建 "Left" 和 "Right" 两个 label，分别对应左手和右手。进行标注时，注意甄别左右手，打上对应的 label。
-   3. "Setup skeleton"，创建 21 关键点，命名为 "hand_landmarks"，按照 MediaPipe 21 点顺序创建 21 个关键点。
+   2. "Add Label"，创建 "Left" 和 "Right" 两个 tag，分别对应左手和右手。进行标注时，注意甄别左右手，打上对应的 label。
+   3. "Add Label"，创建 "tag"，命名为 "ignore_for_training"，进行标注时，如果发现 MediaPipe 自动标注的 21 点有严重错误，或者遮挡、交叉手、边缘手、强暗光/反光样本等情况，并且时间紧迫不值得人工修复，请打上这个 tag。在 07 阶段，所有打上这个 tag 的样本都会被忽略，不参与训练。
+   4. "Setup skeleton"，创建 21 关键点，命名为 "hand_landmarks"，按照 MediaPipe 21 点顺序创建 21 个关键点。
 3. 将 `data/02_roi_crops/cvat_autolabel.xml` 作为初始标注上传到 CVAT。
 4. 每张 crop 最多保留一个 `hand_landmarks` points shape，点数必须为 21，点顺序必须是 MediaPipe 21 点顺序。
 5. 无手 crop 删除 points，并保留或添加 `no_hand` tag。
