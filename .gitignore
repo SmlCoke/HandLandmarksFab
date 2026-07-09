@@ -13,3 +13,6 @@ model/
 
 # temp/cache
 __pycache__/
+
+# config
+.vscode/
