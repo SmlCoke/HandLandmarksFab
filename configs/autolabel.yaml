@@ -1,10 +1,11 @@
 paths:
   images_dir: data/images
   palm_model_onnx: materials/preminilary/palm/model_opt.onnx
-  palm_outputs_dir: data/palm
-  roi_crops_dir: data/roi_crops
-  labels_dir: data/labels
-  review_dir: data/review
+  palm_outputs_dir: data/01_palm
+  roi_crops_dir: data/02_roi_crops
+  reviewed_dir: data/03_reviewed
+  visualization_dir: data/04_visualization
+  labels_dir: data/05_labels
   qc_dir: data/qc
 
 image:
@@ -43,6 +44,28 @@ cvat:
   label_name: hand_landmarks
   no_hand_label_name: no_hand
   xml_version: "1.1"
+  skeleton_point_labels:
+    - "1"
+    - "2"
+    - "3"
+    - "4"
+    - "5"
+    - "6"
+    - "7"
+    - "8"
+    - "9"
+    - "10"
+    - "11"
+    - "12"
+    - "13"
+    - "14"
+    - "15"
+    - "16"
+    - "17"
+    - "18"
+    - "19"
+    - "20"
+    - "21"
 
 review:
   draw_palm_bbox: true

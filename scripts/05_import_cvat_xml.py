@@ -28,14 +28,13 @@ def main() -> None:
     config_path = resolve_path(ROOT, args.config)
     cfg = load_yaml_config(config_path)
     root = repo_root_from_config(config_path)
-    review_dir = cfg_path(cfg, root, "review_dir")
     roi_dir = cfg_path(cfg, root, "roi_crops_dir")
-    labels_dir = cfg_path(cfg, root, "labels_dir")
+    reviewed_dir = cfg_path(cfg, root, "reviewed_dir")
     qc_dir = cfg_path(cfg, root, "qc_dir")
-    xml_path = resolve_path(root, args.reviewed_xml) if args.reviewed_xml else review_dir / "cvat_reviewed.xml"
+    xml_path = resolve_path(root, args.reviewed_xml) if args.reviewed_xml else reviewed_dir / "cvat_reviewed.xml"
     manifest_path = resolve_path(root, args.manifest) if args.manifest else roi_dir / "hand_roi_crops_manifest.jsonl"
-    draft_path = resolve_path(root, args.draft_jsonl) if args.draft_jsonl else labels_dir / "hand_landmarks_autolabel_draft.jsonl"
-    output_path = resolve_path(root, args.output_jsonl) if args.output_jsonl else labels_dir / "hand_landmarks_reviewed.jsonl"
+    draft_path = resolve_path(root, args.draft_jsonl) if args.draft_jsonl else roi_dir / "hand_landmarks_autolabel_draft.jsonl"
+    output_path = resolve_path(root, args.output_jsonl) if args.output_jsonl else reviewed_dir / "hand_landmarks_reviewed.jsonl"
     rows, import_stats = import_cvat_xml(xml_path, read_jsonl(manifest_path), read_jsonl(draft_path), cfg)
     write_jsonl(output_path, rows)
     stats = summarize_label_rows(rows, cfg)

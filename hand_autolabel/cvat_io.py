@@ -1,17 +1,127 @@
 from __future__ import annotations
 
-import shutil
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from .formats import basename_index_by_path, index_by, merge_label_with_manifest, relpath, resolve_path
+from .formats import basename_index_by_path, index_by, make_hand_id, merge_label_with_manifest, relpath
 from .projection import project_px_points_to_image
 
 
-def _points_to_cvat(points: Sequence[Mapping[str, Any]]) -> str:
-    return ";".join(f"{float(p['x']):.3f},{float(p['y']):.3f}" for p in points)
+DEFAULT_HAND_SKELETON_POINT_LABELS = tuple(str(i) for i in range(1, 22))
+HAND_SKELETON_EDGES = (
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 4),
+    (0, 5),
+    (5, 6),
+    (6, 7),
+    (7, 8),
+    (5, 9),
+    (9, 10),
+    (10, 11),
+    (11, 12),
+    (9, 13),
+    (13, 14),
+    (14, 15),
+    (15, 16),
+    (13, 17),
+    (0, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
+)
+HAND_SKELETON_SVG_POSITIONS = (
+    (50, 92),
+    (36, 76),
+    (26, 60),
+    (18, 46),
+    (10, 34),
+    (42, 58),
+    (38, 40),
+    (35, 26),
+    (32, 12),
+    (52, 56),
+    (52, 36),
+    (52, 20),
+    (52, 6),
+    (62, 60),
+    (68, 42),
+    (72, 28),
+    (76, 14),
+    (72, 68),
+    (82, 54),
+    (88, 42),
+    (94, 30),
+)
+
+
+def _cvat_skeleton_point_labels(cfg: Mapping[str, Any]) -> List[str]:
+    raw = cfg.get("cvat", {}).get("skeleton_point_labels")
+    labels = [str(v) for v in (raw or DEFAULT_HAND_SKELETON_POINT_LABELS)]
+    if len(labels) != 21:
+        raise ValueError(f"cvat.skeleton_point_labels must contain 21 labels, got {len(labels)}")
+    if len(set(labels)) != len(labels):
+        raise ValueError("cvat.skeleton_point_labels must be unique")
+    return labels
+
+
+def _hand_skeleton_svg(point_labels: Sequence[str]) -> str:
+    parts: List[str] = []
+    for start, end in HAND_SKELETON_EDGES:
+        x1, y1 = HAND_SKELETON_SVG_POSITIONS[start]
+        x2, y2 = HAND_SKELETON_SVG_POSITIONS[end]
+        line = ET.Element(
+            "line",
+            {
+                "x1": str(x1),
+                "y1": str(y1),
+                "x2": str(x2),
+                "y2": str(y2),
+                "stroke": "black",
+                "data-type": "edge",
+                "data-node-from": str(start + 1),
+                "data-node-to": str(end + 1),
+                "stroke-width": "0.5",
+            },
+        )
+        parts.append(ET.tostring(line, encoding="unicode"))
+    for idx, (x, y) in enumerate(HAND_SKELETON_SVG_POSITIONS):
+        circle = ET.Element(
+            "circle",
+            {
+                "r": "1.5",
+                "stroke": "black",
+                "fill": "#b3b3b3",
+                "cx": str(x),
+                "cy": str(y),
+                "stroke-width": "0.1",
+                "data-type": "element node",
+                "data-element-id": str(idx + 1),
+                "data-node-id": str(idx + 1),
+                "data-label-name": point_labels[idx],
+            },
+        )
+        parts.append(ET.tostring(circle, encoding="unicode"))
+    return "".join(parts)
+
+
+def _add_cvat_label(labels_el: ET.Element, name: str, color: str, shape_type: str, parent: Optional[str] = None, svg: Optional[str] = None) -> None:
+    label = ET.SubElement(labels_el, "label")
+    ET.SubElement(label, "name").text = name
+    ET.SubElement(label, "color").text = color
+    ET.SubElement(label, "type").text = shape_type
+    ET.SubElement(label, "attributes")
+    if svg is not None:
+        ET.SubElement(label, "svg").text = svg
+    if parent is not None:
+        ET.SubElement(label, "parent").text = parent
+
+
+def _point_to_cvat(point: Mapping[str, Any]) -> str:
+    return f"{float(point['x']):.3f},{float(point['y']):.3f}"
 
 
 def _parse_cvat_points(text: str) -> List[Tuple[float, float]]:
@@ -27,30 +137,17 @@ def _parse_cvat_points(text: str) -> List[Tuple[float, float]]:
     return points
 
 
-def prepare_cvat_upload_images(manifest_rows: Iterable[Mapping[str, Any]], root: Path, upload_dir: Path) -> int:
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    count = 0
-    for row in manifest_rows:
-        src = resolve_path(root, row["crop_path"])
-        dst = upload_dir / src.name
-        if src.exists():
-            shutil.copy2(src, dst)
-            count += 1
-    return count
-
-
 def export_cvat_xml(
     manifest_rows: List[Mapping[str, Any]],
     label_rows: List[Mapping[str, Any]],
     root: Path,
-    upload_dir: Path,
     xml_path: Path,
     cfg: Mapping[str, Any],
 ) -> Dict[str, Any]:
     label_by_crop = index_by(label_rows, "crop_id")
     label_name = str(cfg["cvat"].get("label_name", "hand_landmarks"))
     no_hand_label = str(cfg["cvat"].get("no_hand_label_name", "no_hand"))
-    copied = prepare_cvat_upload_images(manifest_rows, root, upload_dir)
+    point_labels = _cvat_skeleton_point_labels(cfg)
 
     annotations = ET.Element("annotations")
     ET.SubElement(annotations, "version").text = str(cfg["cvat"].get("xml_version", "1.1"))
@@ -66,12 +163,10 @@ def export_cvat_xml(
     ET.SubElement(task, "created").text = now
     ET.SubElement(task, "updated").text = now
     labels = ET.SubElement(task, "labels")
-    for name in (label_name, no_hand_label):
-        label = ET.SubElement(labels, "label")
-        ET.SubElement(label, "name").text = name
-        ET.SubElement(label, "color").text = "#1f77b4" if name == label_name else "#d62728"
-        ET.SubElement(label, "type").text = "any"
-        ET.SubElement(label, "attributes")
+    _add_cvat_label(labels, label_name, "#1f77b4", "skeleton", svg=_hand_skeleton_svg(point_labels))
+    for point_label in point_labels:
+        _add_cvat_label(labels, point_label, "#2ca02c", "points", parent=label_name)
+    _add_cvat_label(labels, no_hand_label, "#d62728", "tag")
 
     width = int(cfg["hand_roi"]["output_width"])
     height = int(cfg["hand_roi"]["output_height"])
@@ -82,15 +177,17 @@ def export_cvat_xml(
         image_el = ET.SubElement(annotations, "image", id=str(idx), name=crop_name, width=str(width), height=str(height))
         label = label_by_crop.get(str(manifest["crop_id"]))
         if label and bool((label.get("hand_presence") or {}).get("present", False)) and len(label.get("landmarks_crop_px") or []) == 21:
-            ET.SubElement(
-                image_el,
-                "points",
-                label=label_name,
-                source="auto",
-                occluded="0",
-                points=_points_to_cvat(label["landmarks_crop_px"]),
-                z_order="0",
-            )
+            skeleton_el = ET.SubElement(image_el, "skeleton", label=label_name, source="auto", z_order="0")
+            for point_label, point in zip(point_labels, label["landmarks_crop_px"]):
+                ET.SubElement(
+                    skeleton_el,
+                    "points",
+                    label=point_label,
+                    source="auto",
+                    occluded="0",
+                    outside="0",
+                    points=_point_to_cvat(point),
+                )
             positives += 1
         else:
             ET.SubElement(image_el, "tag", label=no_hand_label, source="auto")
@@ -99,7 +196,53 @@ def export_cvat_xml(
     ET.indent(annotations, space="  ")
     xml_path.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(annotations).write(xml_path, encoding="utf-8", xml_declaration=True)
-    return {"images": len(manifest_rows), "copied_images": copied, "positive_shapes": positives, "negative_tags": negatives, "xml_path": relpath(xml_path, root)}
+    return {
+        "images": len(manifest_rows),
+        "copied_images": 0,
+        "copy_policy": "disabled_use_roi_crops_images_directly",
+        "upload_images_dir": str(cfg["paths"].get("roi_crops_dir", "data/02_roi_crops")).rstrip("/") + "/images",
+        "positive_shape_type": "skeleton",
+        "skeleton_point_labels": point_labels,
+        "positive_shapes": positives,
+        "negative_tags": negatives,
+        "xml_path": relpath(xml_path, root),
+    }
+
+
+def _parse_cvat_skeleton(skeleton_el: ET.Element, point_labels: Sequence[str]) -> tuple[List[Tuple[float, float]], List[str], List[str]]:
+    warnings: List[str] = []
+    errors: List[str] = []
+    expected = set(point_labels)
+    children: Dict[str, ET.Element] = {}
+    for point_el in skeleton_el.findall("points"):
+        label = str(point_el.attrib.get("label", ""))
+        if label not in expected:
+            warnings.append(f"unexpected_skeleton_point_label:{label}")
+            continue
+        if label in children:
+            errors.append(f"duplicate_skeleton_point:{label}")
+            continue
+        children[label] = point_el
+
+    points: List[Tuple[float, float]] = []
+    for label in point_labels:
+        point_el = children.get(label)
+        if point_el is None:
+            errors.append(f"missing_skeleton_point:{label}")
+            continue
+        if str(point_el.attrib.get("outside", "0")) == "1":
+            errors.append(f"skeleton_point_outside:{label}")
+            continue
+        try:
+            parsed = _parse_cvat_points(point_el.attrib.get("points", ""))
+        except Exception as exc:
+            errors.append(f"invalid_skeleton_point:{label}:{exc}")
+            continue
+        if len(parsed) != 1:
+            errors.append(f"skeleton_point_coordinate_count_not_1:{label}:{len(parsed)}")
+            continue
+        points.append(parsed[0])
+    return points, warnings, errors
 
 
 def import_cvat_xml(
@@ -112,6 +255,7 @@ def import_cvat_xml(
         raise FileNotFoundError(f"CVAT reviewed XML not found: {xml_path}")
     label_name = str(cfg["cvat"].get("label_name", "hand_landmarks"))
     no_hand_label = str(cfg["cvat"].get("no_hand_label_name", "no_hand"))
+    point_labels = _cvat_skeleton_point_labels(cfg)
     manifest_by_name = basename_index_by_path(manifest_rows, "crop_path")
     draft_by_crop = index_by(draft_rows, "crop_id")
     tree = ET.parse(xml_path)
@@ -132,14 +276,21 @@ def import_cvat_xml(
             continue
         draft = draft_by_crop.get(str(manifest["crop_id"]), {})
         no_hand = any(tag.attrib.get("label") == no_hand_label for tag in image_el.findall("tag"))
-        point_shapes = [p for p in image_el.findall("points") if p.attrib.get("label") == label_name]
+        skeleton_shapes = [s for s in image_el.findall("skeleton") if s.attrib.get("label") == label_name]
+        legacy_point_shapes = [p for p in image_el.findall("points") if p.attrib.get("label") == label_name]
         row_warnings: List[str] = []
         row_errors: List[str] = []
-        if len(point_shapes) > 1:
-            row_warnings.append(f"multiple_hand_shapes:{len(point_shapes)}")
+        if legacy_point_shapes:
+            row_errors.append(f"legacy_points_shape_not_supported:{len(legacy_point_shapes)}")
+        if len(skeleton_shapes) > 1:
+            row_warnings.append(f"multiple_hand_skeletons:{len(skeleton_shapes)}")
+        if no_hand and skeleton_shapes:
+            row_errors.append("conflicting_no_hand_and_skeleton")
 
         base = merge_label_with_manifest(dict(draft), manifest, cfg)
-        if no_hand or not point_shapes:
+        if no_hand or not skeleton_shapes:
+            if not no_hand and not skeleton_shapes:
+                row_warnings.append("missing_no_hand_tag")
             base.update(
                 {
                     "hand_id": None,
@@ -155,13 +306,13 @@ def import_cvat_xml(
             rows.append(base)
             if row_warnings:
                 warnings.append({"crop_id": base.get("crop_id"), "warnings": row_warnings})
+            if row_errors:
+                errors.append({"crop_id": base.get("crop_id"), "errors": row_errors})
             continue
 
-        try:
-            pts = _parse_cvat_points(point_shapes[0].attrib.get("points", ""))
-        except Exception as exc:
-            pts = []
-            row_errors.append(f"invalid_points:{exc}")
+        pts, skeleton_warnings, skeleton_errors = _parse_cvat_skeleton(skeleton_shapes[0], point_labels)
+        row_warnings.extend(skeleton_warnings)
+        row_errors.extend(skeleton_errors)
         if len(pts) != 21:
             row_errors.append(f"point_count_not_21:{len(pts)}")
         crop_px = [{"id": idx, "x": float(x), "y": float(y), "visible": 1} for idx, (x, y) in enumerate(pts)]
@@ -175,14 +326,15 @@ def import_cvat_xml(
         ]
         image_pts = project_px_points_to_image([(p["x"], p["y"]) for p in crop_px], manifest["roi_corners_px"], width, height)
         image_px = [{"id": idx, "x": x, "y": y, "visible": 1} for idx, (x, y) in enumerate(image_pts)]
+        present = len(pts) == 21
         base.update(
             {
-                "hand_id": base.get("hand_id") or f"{manifest['palm_det_id']}:hand0",
-                "hand_presence": {"present": len(pts) == 21},
+                "hand_id": (base.get("hand_id") or make_hand_id(str(manifest["crop_id"]))) if present else None,
+                "hand_presence": {"present": present},
                 "handedness": base.get("handedness") or {"label": "unknown", "score": None},
-                "landmarks_crop_norm": crop_norm if len(pts) == 21 else [],
-                "landmarks_crop_px": crop_px if len(pts) == 21 else [],
-                "landmarks_image_px": image_px if len(pts) == 21 else [],
+                "landmarks_crop_norm": crop_norm if present else [],
+                "landmarks_crop_px": crop_px if present else [],
+                "landmarks_image_px": image_px if present else [],
                 "source": "cvat_reviewed",
                 "needs_review": bool(row_warnings or row_errors),
             }

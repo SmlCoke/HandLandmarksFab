@@ -27,15 +27,13 @@ def main() -> None:
     cfg = load_yaml_config(config_path)
     root = repo_root_from_config(config_path)
     roi_dir = cfg_path(cfg, root, "roi_crops_dir")
-    labels_dir = cfg_path(cfg, root, "labels_dir")
-    review_dir = cfg_path(cfg, root, "review_dir")
     qc_dir = cfg_path(cfg, root, "qc_dir")
     manifest_path = resolve_path(root, args.manifest) if args.manifest else roi_dir / "hand_roi_crops_manifest.jsonl"
-    draft_path = resolve_path(root, args.draft_jsonl) if args.draft_jsonl else labels_dir / "hand_landmarks_autolabel_draft.jsonl"
-    xml_path = resolve_path(root, args.output_xml) if args.output_xml else review_dir / "cvat_autolabel.xml"
-    stats = export_cvat_xml(read_jsonl(manifest_path), read_jsonl(draft_path), root, review_dir / "cvat_upload_images", xml_path, cfg)
+    draft_path = resolve_path(root, args.draft_jsonl) if args.draft_jsonl else roi_dir / "hand_landmarks_autolabel_draft.jsonl"
+    xml_path = resolve_path(root, args.output_xml) if args.output_xml else roi_dir / "cvat_autolabel.xml"
+    stats = export_cvat_xml(read_jsonl(manifest_path), read_jsonl(draft_path), root, xml_path, cfg)
     write_json(qc_dir / "cvat_export_stats.json", stats)
-    print(f"images={stats['images']} positives={stats['positive_shapes']} xml={xml_path}")
+    print(f"images={stats['images']} positives={stats['positive_shapes']} xml={xml_path} upload_images={roi_dir / 'images'}")
 
 
 if __name__ == "__main__":

@@ -48,8 +48,8 @@ def _draw_roi(out, manifest: Mapping[str, Any]) -> None:
     cv2.polylines(out, [poly], True, (0, 255, 0), 2, cv2.LINE_AA)
 
 
-def _draw_landmarks(out, label: Mapping[str, Any]) -> None:
-    pts = label.get("landmarks_image_px") or []
+def _draw_landmarks(out, label: Mapping[str, Any], key: str = "landmarks_image_px") -> None:
+    pts = label.get(key) or []
     if len(pts) != 21:
         return
     coords = [(int(round(float(p["x"]))), int(round(float(p["y"])))) for p in pts]
@@ -61,7 +61,20 @@ def _draw_landmarks(out, label: Mapping[str, Any]) -> None:
             _draw_text(out, str(idx), (x + 3, y + 3), (255, 255, 255))
 
 
-def render_overlays(
+def _label_summary(label: Mapping[str, Any], manifest: Mapping[str, Any]) -> Dict[str, Any]:
+    present = bool((label.get("hand_presence") or {}).get("present", False))
+    handed = label.get("handedness") or {}
+    return {
+        "hand_presence": present,
+        "handedness": handed.get("label", "unknown"),
+        "source": label.get("source", ""),
+        "needs_review": bool(label.get("needs_review", False)),
+        "palm_valid": bool(manifest.get("palm_valid", False)),
+        "palm_score": manifest.get("palm_score"),
+    }
+
+
+def render_global_overlays(
     images_dir: Path,
     palm_rows: List[Mapping[str, Any]],
     manifest_rows: List[Mapping[str, Any]],
@@ -110,19 +123,111 @@ def render_overlays(
                     "image": image_name,
                     "crop_id": manifest.get("crop_id"),
                     "crop_path": manifest.get("crop_path"),
-                    "hand_presence": present,
-                    "handedness": handed.get("label", "unknown"),
-                    "source": label.get("source", ""),
-                    "overlay_path": relpath(output_dir / (Path(image_name).stem + "_overlay.png"), root),
+                    **_label_summary(label, manifest),
+                    "global_overlay_path": relpath(output_dir / (Path(image_name).stem + "_overlay.png"), root),
                 }
             )
         out_path = output_dir / (Path(image_name).stem + "_overlay.png")
         if write_image(out_path, out):
             saved += 1
 
+    return {"global_overlay_images": saved, "index_rows": index_rows, "missing_images": missing_images}
+
+
+def render_crop_overlays(
+    manifest_rows: List[Mapping[str, Any]],
+    label_rows: List[Mapping[str, Any]],
+    root: Path,
+    output_dir: Path,
+) -> Dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    labels_by_crop = index_by(label_rows, "crop_id")
+    index_rows: List[Dict[str, Any]] = []
+    saved = 0
+    missing_crops = 0
+    for manifest in manifest_rows:
+        crop_path = resolve_path(root, manifest["crop_path"])
+        img = read_image(crop_path)
+        label = labels_by_crop.get(str(manifest.get("crop_id")), {})
+        if img is None:
+            missing_crops += 1
+            continue
+        out = ensure_bgr(img)
+        if bool((label.get("hand_presence") or {}).get("present", False)):
+            _draw_landmarks(out, label, key="landmarks_crop_px")
+        summary = _label_summary(label, manifest)
+        text = (
+            f"{manifest.get('crop_id')} present={int(summary['hand_presence'])} "
+            f"{summary['handedness']} palm={summary['palm_score']}"
+        )
+        _draw_text(out, text, (6, 18), (0, 255, 255))
+        out_path = output_dir / crop_path.name
+        if write_image(out_path, out):
+            saved += 1
+        index_rows.append(
+            {
+                "image": manifest.get("image"),
+                "crop_id": manifest.get("crop_id"),
+                "crop_path": manifest.get("crop_path"),
+                **summary,
+                "crop_overlay_path": relpath(out_path, root),
+            }
+        )
+    return {"crop_overlay_images": saved, "index_rows": index_rows, "missing_crops": missing_crops}
+
+
+def render_overlays(
+    images_dir: Path,
+    palm_rows: List[Mapping[str, Any]],
+    manifest_rows: List[Mapping[str, Any]],
+    label_rows: List[Mapping[str, Any]],
+    root: Path,
+    global_output_dir: Path,
+    crop_output_dir: Path,
+    review_index_csv: Path,
+    cfg: Mapping[str, Any],
+) -> Dict[str, Any]:
+    global_stats = render_global_overlays(
+        images_dir,
+        palm_rows,
+        manifest_rows,
+        label_rows,
+        root,
+        global_output_dir,
+        review_index_csv,
+        cfg,
+    )
+    crop_stats = render_crop_overlays(manifest_rows, label_rows, root, crop_output_dir)
+
+    by_crop: Dict[str, Dict[str, Any]] = {}
+    for row in global_stats.pop("index_rows"):
+        by_crop[str(row["crop_id"])] = row
+    for row in crop_stats.pop("index_rows"):
+        merged = by_crop.setdefault(str(row["crop_id"]), row)
+        merged.update(row)
+
+    rows = list(by_crop.values())
+    fieldnames = [
+        "image",
+        "crop_id",
+        "crop_path",
+        "hand_presence",
+        "handedness",
+        "source",
+        "needs_review",
+        "palm_valid",
+        "palm_score",
+        "global_overlay_path",
+        "crop_overlay_path",
+    ]
     review_index_csv.parent.mkdir(parents=True, exist_ok=True)
     with review_index_csv.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["image", "crop_id", "crop_path", "hand_presence", "handedness", "source", "overlay_path"])
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(index_rows)
-    return {"overlay_images": saved, "index_rows": len(index_rows), "missing_images": missing_images, "review_index_csv": relpath(review_index_csv, root)}
+        writer.writerows(rows)
+    return {
+        **global_stats,
+        **crop_stats,
+        "index_rows": len(rows),
+        "review_index_csv": relpath(review_index_csv, root),
+    }

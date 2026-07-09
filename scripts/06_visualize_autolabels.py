@@ -27,22 +27,27 @@ def main() -> None:
     images_dir = cfg_path(cfg, root, "images_dir")
     palm_dir = cfg_path(cfg, root, "palm_outputs_dir")
     roi_dir = cfg_path(cfg, root, "roi_crops_dir")
-    labels_dir = cfg_path(cfg, root, "labels_dir")
-    review_dir = cfg_path(cfg, root, "review_dir")
+    reviewed_dir = cfg_path(cfg, root, "reviewed_dir")
+    visualization_dir = cfg_path(cfg, root, "visualization_dir")
     qc_dir = cfg_path(cfg, root, "qc_dir")
-    labels_path = resolve_path(root, args.labels_jsonl) if args.labels_jsonl else labels_dir / "hand_landmarks_reviewed.jsonl"
+    labels_path = resolve_path(root, args.labels_jsonl) if args.labels_jsonl else reviewed_dir / "hand_landmarks_reviewed.jsonl"
     stats = render_overlays(
         images_dir,
         read_jsonl(palm_dir / "palm_detections.jsonl"),
         read_jsonl(roi_dir / "hand_roi_crops_manifest.jsonl"),
         read_jsonl(labels_path),
         root,
-        review_dir / "overlay_images",
-        review_dir / "review_index.csv",
+        visualization_dir / "global_images",
+        visualization_dir / "crop_images",
+        visualization_dir / "review_index.csv",
         cfg,
     )
     write_json(qc_dir / "visualization_stats.json", stats)
-    print(f"overlays={stats['overlay_images']} review_index={review_dir / 'review_index.csv'}")
+    print(
+        f"global_overlays={stats['global_overlay_images']} "
+        f"crop_overlays={stats['crop_overlay_images']} "
+        f"review_index={visualization_dir / 'review_index.csv'}"
+    )
 
 
 if __name__ == "__main__":

@@ -26,21 +26,19 @@ def main() -> None:
     cfg = load_yaml_config(config_path)
     root = repo_root_from_config(config_path)
     roi_dir = cfg_path(cfg, root, "roi_crops_dir")
-    labels_dir = cfg_path(cfg, root, "labels_dir")
     qc_dir = cfg_path(cfg, root, "qc_dir")
     manifest_path = resolve_path(root, args.manifest) if args.manifest else roi_dir / "hand_roi_crops_manifest.jsonl"
     manifest_rows = read_jsonl(manifest_path)
     rows, mode = label_roi_manifest(manifest_rows, cfg, root)
-    raw_path = labels_dir / "hand_landmarks_mediapipe_raw.jsonl"
-    draft_path = labels_dir / "hand_landmarks_autolabel_draft.jsonl"
-    write_jsonl(raw_path, rows)
+    draft_path = roi_dir / "hand_landmarks_autolabel_draft.jsonl"
     write_jsonl(draft_path, rows)
     stats = summarize_label_rows(rows, cfg)
     stats.update(
         {
             "mediapipe_mode": mode,
-            "raw_jsonl": str(raw_path),
             "draft_jsonl": str(draft_path),
+            "raw_jsonl": None,
+            "raw_output_policy": "omitted_to_avoid_duplicate_of_autolabel_draft",
             "hand_presence_score_policy": "omitted: current MediaPipe Python API does not expose hand presence score",
         }
     )

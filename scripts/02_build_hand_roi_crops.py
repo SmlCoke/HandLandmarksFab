@@ -68,7 +68,7 @@ def main() -> None:
                     int(cfg["hand_roi"]["output_width"]),
                     int(cfg["hand_roi"]["output_height"]),
                 )
-                crop_id = make_crop_id(det["palm_det_id"], 0)
+                crop_id = make_crop_id(det["palm_det_id"])
                 crop_path = crop_images_dir / f"{_safe_name(crop_id)}.png"
                 if not write_image(crop_path, crop):
                     raise RuntimeError(f"failed_to_write_crop:{crop_path}")

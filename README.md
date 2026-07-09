@@ -12,12 +12,13 @@ HandLandmarkerFab/
 │
 ├─ data/
 │  ├─ images/                # 原始图片
-│  ├─ palm/                  # Palm 检测结果
-│  ├─ roi_crops/             # ROI crop 图片和 manifest
-│  ├─ labels/                # MediaPipe 自动标注和复核结果
-│  ├─ review/                # CVAT 上传、复核和可视化
+│  ├─ 01_palm/               # Palm 检测结果
+│  ├─ 02_roi_crops/          # ROI crop 图片、Mediapipe Hand Landmark 标注初稿、转化的 xml
+│  ├─ 03_reviewed/           # 人工复核结果
+│  ├─ 04_visualization/      # 可视化结果
+│  ├─ 05_labels/             # 最终训练标签
 │  └─ qc/                    # QC 报告
-│
+│ 
 ├─ materials/                # 板端模型和预训练模型
 │
 ├─ scripts/                  # 半自动标注脚本
@@ -122,7 +123,7 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 #### (1) `01_export_palm_detections.py`
 
 - **输入**: `data/images/`、`configs/autolabel.yaml`
-- **输出**: `data/palm/palm_detections.jsonl`、`data/qc/palm_detection_stats.json`
+- **输出**: `data/01_palm/palm_detections.jsonl`、`data/qc/palm_detection_stats.json`
 - **功能**: 对每张图进行 plam detection, 从生成的 392 个 14x14 anchors 和 98 个 7x7 anchors 中**解码**、根据**置信度阈值**进行筛选、**NMS**、**跨 head 抑制**，最多输出 2 个有效 palm detections。**低 score 候选会被保留为负样本候选**。
 
 **输出标注** `palm_detections.jsonl` 每行含义: 
@@ -141,11 +142,11 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 
 #### (2) `02_build_hand_roi_crops.py`
 
-- **输入**: `data/images/`、`data/palm/palm_detections.jsonl`
-- **输出**: `data/roi_crops/images/*.png`、`data/roi_crops/hand_roi_crops_manifest.jsonl`、`data/qc/roi_crop_stats.json`
+- **输入**: `data/images/`、`data/01_palm/palm_detections.jsonl`
+- **输出**: `data/02_roi_crops/images/*.png`、`data/02_roi_crops/hand_roi_crops_manifest.jsonl`、`data/qc/roi_crop_stats.json`
 - **功能**: 使用 palm bbox + p0/p9 进行旋转、平移、扩张构造 Hand ROI，参数与板端默认一致: `scale_x=1.8`、`scale_y=1.8`、`shift_y=-0.1`，输出 `256x256` 灰度 crop。注意，由于存在旋转、平移和扩张取样操作，因此旋转/平移/扩大后的 ROI 超出原图边界，**crop 中超出原图的部分会被填充为黑色**: `cv2.warpAffine(..., borderMode=cv2.BORDER_CONSTANT, borderValue=0)`。这**与板端逻辑一致**。板端 `SampleBilinear()` 在采样点**远离图像或像素越界时返回 0**，因此超出原图的区域也是黑色。
 
-`hand_roi_crops_manifest.jsonl` 每行都对应 `data/roi_crops/images/` 下的着一张 `256x256` ROI crop，含义: 
+`hand_roi_crops_manifest.jsonl` 每行都对应 `data/02_roi_crops/images/` 下的着一张 `256x256` ROI crop，含义: 
 
 - 前序 image 级信息: 
     - `image`: 绑定回原图。
@@ -162,11 +163,11 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 
 #### (3) `03_run_mediapipe_on_rois.py`
 
-- **输入**: `data/roi_crops/images/`、`data/roi_crops/hand_roi_crops_manifest.jsonl`
-- **输出**: `data/labels/hand_landmarks_mediapipe_raw.jsonl`、`data/labels/hand_landmarks_autolabel_draft.jsonl`、`data/qc/mediapipe_roi_stats.json`
+- **输入**: `data/02_roi_crops/images/`、`data/02_roi_crops/hand_roi_crops_manifest.jsonl`
+- **输出**: `data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl`、`data/qc/mediapipe_roi_stats.json`
 - **功能**: 每个 crop 独立运行 MediaPipe，最多一只手；有手则保存 21 点 crop 坐标和原图反投影坐标，无手则保留负样本。
 
-`hand_landmarks_autolabel_draft.jsonl` 每行含义: 
+`hand_landmarks_autolabel_draft.jsonl` 每行代表一个 crop 小图的标注信息，具体含义: 
 
 - 前序 image 级信息: 
     - `image`: 绑定回原图。
@@ -189,31 +190,33 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 #### (4) `04_export_cvat_xml.py`
 
 - **输入**: `hand_roi_crops_manifest.jsonl`、`hand_landmarks_autolabel_draft.jsonl`
-- **输出**: `data/review/cvat_autolabel.xml`、`data/review/cvat_upload_images/`、`data/qc/cvat_export_stats.json`
+- **输出**: `data/02_roi_crops/cvat_autolabel.xml`、`data/03_reviewed/cvat_upload_images/`、`data/qc/cvat_export_stats.json`
 - **功能**: 将 crop 图片复制到 CVAT 上传目录，并导出 `CVAT for images 1.1` XML。有手 crop 写一个 `points` shape，无手 crop 写 `no_hand` tag。
 
 #### (5) `05_import_cvat_xml.py`
 
-- **输入**: `data/review/cvat_reviewed.xml`、`hand_roi_crops_manifest.jsonl`、`hand_landmarks_autolabel_draft.jsonl`
-- **输出**: `data/labels/hand_landmarks_reviewed.jsonl`、`data/qc/cvat_import_stats.json`
+- **输入**: `data/03_reviewed/cvat_reviewed.xml`、`hand_roi_crops_manifest.jsonl`、`hand_landmarks_autolabel_draft.jsonl`
+- **输出**: `data/03_reviewed/hand_landmarks_reviewed.jsonl`、`data/qc/cvat_import_stats.json`
 - **功能**: 解析 CVAT 复核后的 21 点，并用 manifest 恢复 ROI 几何、反投影坐标和原始元数据。
 
 #### (6) `06_visualize_autolabels.py`
 
 - **输入**: 原图、Palm JSONL、ROI manifest、reviewed JSONL
-- **输出**: `data/review/overlay_images/*.png`、`data/review/review_index.csv`、`data/qc/visualization_stats.json`
+- **输出**: `data\04_visualization\crop_images`, `data\04_visualization\global_images`, `data\04_visualization\review_index.csv`
 - **功能**: 在原图上绘制 Palm bbox、p0/p9、rotated ROI 和反投影后的 21 点骨架。
 
 #### (7) `07_finalize_training_labels.py`
 
 - **输入**: `hand_landmarks_reviewed.jsonl`、ROI manifest
-- **输出**: `data/labels/hand_training_labels.jsonl`、`data/qc/final_training_label_stats.json`
+- **输出**: `data/05_labels/hand_training_labels.jsonl`、`data/qc/final_training_label_stats.json`
 - **功能**: 严格校验训练样本。正样本必须有 21 个 `landmarks_crop_norm`；负样本 landmarks 为空，并写入 loss weight: `landmark_loss_weight=0`、`handedness_loss_weight=0`。
 
 ### 3.5 CVAT 复核
 
 1. 运行到 `04_export_cvat_xml.py`。
-2. 在 CVAT 创建 image task，上传 `data/review/cvat_upload_images/` 中的 crop 图片。
+2. 在 CVAT 创建 image task，上传 `data/review/cvat_upload_images/` 中的 crop 图片，然后：
+   1. "Add Label"，创建 "tag"，命名为 "no_hand"，如果对应图片没有手，则打上这个 tag。
+   2. "Setup skeleton"，创建 21 关键点，命名为 "hand_landmarks"，按照 MediaPipe 21 点顺序创建 21 个关键点。
 3. 导入 `data/review/cvat_autolabel.xml` 作为初始标注。
 4. 每张 crop 最多保留一个 `hand_landmarks` points shape，点数必须为 21，点顺序必须是 MediaPipe 21 点顺序。
 5. 无手 crop 删除 points，并保留或添加 `no_hand` tag。

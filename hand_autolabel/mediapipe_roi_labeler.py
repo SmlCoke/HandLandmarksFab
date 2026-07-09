@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
-from .formats import merge_label_with_manifest, resolve_path
+from .formats import make_hand_id, merge_label_with_manifest, resolve_path
 from .image_io import gray_to_rgb, read_image
 from .palm_mediapipe import _category_label_and_score, create_mediapipe_detector
 from .projection import landmark_dicts_from_norm
@@ -53,7 +53,7 @@ def label_one_roi(manifest: Mapping[str, Any], image, detector, cfg: Mapping[str
         "crop_id": manifest["crop_id"],
         "image": manifest["image"],
         "palm_det_id": manifest["palm_det_id"],
-        "hand_id": f"{manifest['palm_det_id']}:hand0",
+        "hand_id": make_hand_id(str(manifest["crop_id"])),
         "hand_presence": {"present": True},
         "handedness": {"label": label, "score": score},
         "landmarks_crop_norm": crop_norm,

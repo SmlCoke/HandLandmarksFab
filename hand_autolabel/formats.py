@@ -38,6 +38,15 @@ def cfg_path(cfg: Mapping[str, Any], root: Path, key: str) -> Path:
     return resolve_path(root, value)
 
 
+def cfg_path_any(cfg: Mapping[str, Any], root: Path, keys: Iterable[str]) -> Path:
+    for key in keys:
+        value = cfg.get("paths", {}).get(key)
+        if value is not None:
+            return resolve_path(root, value)
+    joined = ", ".join(keys)
+    raise KeyError(f"Missing all configured paths: {joined}")
+
+
 def relpath(path: Path, root: Path) -> str:
     try:
         return str(Path(path).resolve().relative_to(Path(root).resolve())).replace("\\", "/")
@@ -106,8 +115,12 @@ def make_palm_det_id(image_name: str, index: int, prefix: str = "palm") -> str:
     return f"{image_stem(image_name)}:{prefix}{index}"
 
 
-def make_crop_id(palm_det_id: str, index: int = 0) -> str:
-    return f"{palm_det_id}:crop{index}"
+def make_crop_id(palm_det_id: str) -> str:
+    return f"{palm_det_id}:crop"
+
+
+def make_hand_id(crop_id: str) -> str:
+    return f"{crop_id}:hand"
 
 
 def clamp(v: float, lo: float, hi: float) -> float:

@@ -45,8 +45,9 @@ def main() -> None:
     root = repo_root_from_config(config_path)
     labels_dir = cfg_path(cfg, root, "labels_dir")
     roi_dir = cfg_path(cfg, root, "roi_crops_dir")
+    reviewed_dir = cfg_path(cfg, root, "reviewed_dir")
     qc_dir = cfg_path(cfg, root, "qc_dir")
-    reviewed_path = resolve_path(root, args.reviewed_jsonl) if args.reviewed_jsonl else labels_dir / "hand_landmarks_reviewed.jsonl"
+    reviewed_path = resolve_path(root, args.reviewed_jsonl) if args.reviewed_jsonl else reviewed_dir / "hand_landmarks_reviewed.jsonl"
     manifest_path = resolve_path(root, args.manifest) if args.manifest else roi_dir / "hand_roi_crops_manifest.jsonl"
     output_path = resolve_path(root, args.output_jsonl) if args.output_jsonl else labels_dir / "hand_training_labels.jsonl"
     manifest_by_crop = index_by(read_jsonl(manifest_path), "crop_id")
