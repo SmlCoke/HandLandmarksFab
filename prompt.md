@@ -42,9 +42,9 @@ materials/preminilary/device/main.cpp: 板端调度程序的 main.cpp
 6. 没有手的 ROI crop 需要保留为负样本候选，但后续训练中只能监督 `hand_presence.present=false`，不能参与 landmark loss 和 handedness loss。
 7. 官方 MediaPipe HandLandmarker 的高层 Python Tasks API 不要假设能输出内部 Palm ROI。MediaPipe 在本任务中主要作为“关键点老师”：对 Hand ROI crop 进行识别，输出 21 点和 handedness 等草稿。
 8. 官方 MediaPipe 文档说明，HandLandmarkerResult 对外包含三类结果：handedness、image landmarks、world landmarks。image landmarks 是 21 个 `x/y/z`，其中 `x/y` 归一化到输入图宽高；world landmarks 是以米为单位的 3D 坐标（这一个数据我们不用）。请按这个定义解析结果。
-9. 如果当前 mediapipe Python API 不暴露 hand presence score，立刻终止工作，马上向我汇报。不要伪造 hand presence score。
+9. 如果当前 mediapipe Python API 不暴露 hand presence score，请自行采取最优方式处理，允许直接删除这个字段，并在 README 中说明。
 10. 本份文档中提供的输出数据的值、图片文件的名字（例如"seq001_f000123"）均为示例，请不要硬编码在脚本中。
-11. 
+
 ## II. Palm 与 Hand ROI 约定
 
 Palm 后端需要支持两种方式，输出文件格式必须完全相同：
@@ -608,7 +608,7 @@ data/qc/mediapipe_roi_stats.json
 - 如果检测到手，保存 21 点 crop 坐标、反投影回原图的坐标、handedness。
 - 如果未检测到手，保存 `hand_presence.present=false`，landmarks 为空。
 - 不要假设 MediaPipe 输出内部 ROI。
-- 不要伪造 hand presence score；如果 API 没有提供，立刻停止工作并向我汇报
+- 不要伪造 hand presence score；如果 API 没有提供，请自行采取最优方式处理，允许直接删除这个字段，并在 README 中说明。
 
 ### `04_export_cvat_xml.py`
 

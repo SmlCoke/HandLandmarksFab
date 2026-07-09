@@ -8,3 +8,8 @@ data/
 # model weights
 *.onnx
 *.m1model
+models/
+model/
+
+# temp/cache
+__pycache__/
