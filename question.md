@@ -12,9 +12,9 @@
     │  ├─ images/                # 原始图片
     │  ├─ 01_palm/               # Palm 检测结果
     │  ├─ 02_roi_crops/          # ROI crop 图片、Mediapipe Hand Landmark 标注初稿、转化的 xml
-    │  ├─ 03_reviewd/            # 人工复核结果
+    │  ├─ 03_reviewed/           # 人工复核结果
     │  ├─ 04_visualization/      # 可视化结果
-    │  ├─ review/                # CVAT 上传、复核和可视化
+    │  ├─ 05_labels/             # 最终训练标签
     │  └─ qc/                    # QC 报告
     ```
 
@@ -35,3 +35,4 @@
         - `07_finalize_training_labels.py` 输出的：`hand_training_labels.jsonl`
     
     注意，只调整输出文件的存放结构，不改变内容、也不改变 `qc\` 下的报告结构。
+10. 可视化是如何做得？最终 crop 内部的坐标是如何反投影回原图上的坐标的？请进行解释，可以用数学公式辅助。

@@ -61,11 +61,11 @@ conda activate anfab
 python -m pip install -r requirements.txt
 ```
 
-说明：
+说明: 
 
 - `mediapipe` 用于 `mediapipe_official` Palm 后端和 ROI 自动关键点标注。
 - `onnxruntime` 仅在 `palm.backend=aethersign_onnx` 时需要。
-- 当前 MediaPipe Python API 的 `HandLandmarkerResult` 不暴露 hand presence score。因此本工具链按用户确认后的方案处理：`hand_presence` 只写 `{"present": true/false}`，不写 `score` 字段，也不伪造分数。
+- 当前 MediaPipe Python API 的 `HandLandmarkerResult` 不暴露 hand presence score。因此本工具链按用户确认后的方案处理: `hand_presence` 只写 `{"present": true/false}`，不写 `score` 字段，也不伪造分数。
 
 ### 3.2 配置
 
@@ -75,23 +75,23 @@ python -m pip install -r requirements.txt
 
 
 - `palm` 字段:
-    - `backend`：Palm detection 来源。可取值：
+    - `backend`: Palm detection 来源。可取值: 
         - `mediapipe_official` **默认**。表示使用官方 MediaPipe 的公开手部关键点/handedness 结果，派生 palm-compatible detection。它不是官方内部 Palm ROI。
         - `aethersign_onnx` 按 14x14 与 7x7 共 490 anchors 解码、阈值、NMS、跨 head 抑制，最多输出 2 个有效 palm detections。
-    - `input_size`：`aethersign_onnx` Palm 模型输入尺寸，当前为 `224x224`。`mediapipe_official` 后端可以不使用这个值。
-    - `score_threshold`：**Palm 候选进入有效 `detections` 的最低分数，默认 0.5**。低于此阈值的候选不能作为正样本，而标记为**负样本候选**：`negative_candidates`。
-    - `nms_iou_threshold`：同一 head 内做 NMS 时的 IoU 阈值，默认 0.3。**IoU 高于该阈值的重叠候选会被抑制**。
-    - `cross_head_suppress_iou`：`14x14` 与 `7x7` **两个 head 之间做跨 head 抑制时的 IoU 阈值**，默认0.35。
-    - `max_detections`：每张原图最多保留多少个有效 Palm detections。本项目为最多 2 个，但不保证一定有 2 个。
-    - `keep_low_score_candidates_for_negatives`：是否保留低分候选作为未来负样本候选。它们不进入 `detections`，只能进入 `negative_candidates`。
-    - `negative_candidate_threshold`：低分负候选的最低分数，默认 0.15。**低于该阈值的候选通常直接丢弃**。
-    - `compatible_bbox_expand`：
+    - `input_size`: `aethersign_onnx` Palm 模型输入尺寸，当前为 `224x224`。`mediapipe_official` 后端可以不使用这个值。
+    - `score_threshold`: **Palm 候选进入有效 `detections` 的最低分数，默认 0.5**。低于此阈值的候选不能作为正样本，而标记为**负样本候选**: `negative_candidates`。
+    - `nms_iou_threshold`: 同一 head 内做 NMS 时的 IoU 阈值，默认 0.3。**IoU 高于该阈值的重叠候选会被抑制**。
+    - `cross_head_suppress_iou`: `14x14` 与 `7x7` **两个 head 之间做跨 head 抑制时的 IoU 阈值**，默认0.35。
+    - `max_detections`: 每张原图最多保留多少个有效 Palm detections。本项目为最多 2 个，但不保证一定有 2 个。
+    - `keep_low_score_candidates_for_negatives`: 是否保留低分候选作为未来负样本候选。它们不进入 `detections`，只能进入 `negative_candidates`。
+    - `negative_candidate_threshold`: 低分负候选的最低分数，默认 0.15。**低于该阈值的候选通常直接丢弃**。
+    - `compatible_bbox_expand`: 只用于 `palm.backend=mediapipe_official`, 默认 0.25。ediaPipe Tasks HandLandmarker 对外只给出 21 个手部关键点和 handedness，不暴露官方内部 Palm ROI。因此我们需要从公开的 21 点中派生一个“palm-compatible detection”，让后续 ROI crop 流程继续使用统一的 Palm schema。派生逻辑就是对 [0,1,5,9,13,17] 6 个关键点构建外接框，并且按照 `compatible_bbox_expand=e` 进行扩大（在 palm 近似外接框四周各扩展 `e` 倍的宽高）
 - `mediapipe` 字段
-    - `mediapipe.model_asset_path`：指向官方 `hand_landmarker.task`；`.task` **模型文件可单独下载后放入仓库或本地路径**。若该字段为空，`mediapipe_official` 和 ROI MediaPipe 自动标注会直接报错，不会尝试其他 MediaPipe API。
-    - `num_hands`：最多检测几只手。对每个 `256x256` ROI crop 运行时建议为 `1`，因为每个 crop 理论上最多一只手；对整图 official backend 派生 Palm detections 时可以临时覆盖为 `2`。
-    - `min_hand_detection_confidence`：**Palm detection 被认为成功的最低置信度阈值**。
-    - `min_hand_presence_confidence`：**Hand landmark 模型内部 hand presence score 的最低阈值**。官方文档说明，在视频/直播模式中，**如果 hand presence 低于该阈值，会重新触发 palm detection**。
-    - `min_tracking_confidence`：视频/直播模式下的跟踪成功阈值，**本质上是当前帧与上一帧手框的 IoU 阈值**。当前半自动标注主要使用 IMAGE 模式，这个参数通常影响不大，但保留在配置里保持接口完整。
+    - `mediapipe.model_asset_path`: 指向官方 `hand_landmarker.task`；`.task` **模型文件可单独下载后放入仓库或本地路径**。若该字段为空，`mediapipe_official` 和 ROI MediaPipe 自动标注会直接报错，不会尝试其他 MediaPipe API。
+    - `num_hands`: 最多检测几只手。对每个 `256x256` ROI crop 运行时建议为 `1`，因为每个 crop 理论上最多一只手；对整图 official backend 派生 Palm detections 时可以临时覆盖为 `2`。
+    - `min_hand_detection_confidence`: **Palm detection 被认为成功的最低置信度阈值**。
+    - `min_hand_presence_confidence`: **Hand landmark 模型内部 hand presence score 的最低阈值**。官方文档说明，在视频/直播模式中，**如果 hand presence 低于该阈值，会重新触发 palm detection**。
+    - `min_tracking_confidence`: 视频/直播模式下的跟踪成功阈值，**本质上是当前帧与上一帧手框的 IoU 阈值**。当前半自动标注主要使用 IMAGE 模式，这个参数通常影响不大，但保留在配置里保持接口完整。
 
 ### 3.3 运行顺序
 
@@ -115,101 +115,100 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 
 #### (0) `00_validate_images.py`
 
-- **输入**：`data/images/`、`configs/autolabel.yaml`
-- **输出**：`data/qc/image_validation_report.json`
-- **功能**：检查图片是否可读、是否为 `1280x720`、是否灰度或可转灰度；不旋转图片。
+- **输入**: `data/images/`、`configs/autolabel.yaml`
+- **输出**: `data/qc/image_validation_report.json`
+- **功能**: 检查图片是否可读、是否为 `1280x720`、是否灰度或可转灰度；不旋转图片。
 
 #### (1) `01_export_palm_detections.py`
 
-- **输入**：`data/images/`、`configs/autolabel.yaml`
-- **输出**：`data/palm/palm_detections.jsonl`、`data/qc/palm_detection_stats.json`
-- **功能**：对每张图进行 plam detection, 从生成的 392 个 14x14 anchors 和 98 个 7x7 anchors 中**解码**、根据**置信度阈值**进行筛选、**NMS**、**跨 head 抑制**，最多输出 2 个有效 palm detections。**低 score 候选会被保留为负样本候选**。
+- **输入**: `data/images/`、`configs/autolabel.yaml`
+- **输出**: `data/palm/palm_detections.jsonl`、`data/qc/palm_detection_stats.json`
+- **功能**: 对每张图进行 plam detection, 从生成的 392 个 14x14 anchors 和 98 个 7x7 anchors 中**解码**、根据**置信度阈值**进行筛选、**NMS**、**跨 head 抑制**，最多输出 2 个有效 palm detections。**低 score 候选会被保留为负样本候选**。
 
-**输出标注** `palm_detections.jsonl` 每行含义：
+**输出标注** `palm_detections.jsonl` 每行含义: 
 
-- `image/width/height`：原图文件名和尺寸。
+- `image/width/height`: 原图文件名和尺寸。
 
-- 当前 Palm detection 级信息：
-    - `detections`：有效 palm detections；每项包含:
+- 当前 Palm detection 级信息: 
+    - `detections`: 有效 palm detections；每项包含:
         - `palm_det_id`: palm detection 级唯一 ID。
         - `score`: palm detection 分数。
         - `bbox_norm/bbox_px`: 边界框坐标 (`norm`代表相对原始 tiff 图的归一化值，`px`代表原图中的像素坐标)。
         - `keypoints_norm/keypoints_px.p0/p9`: 关键点坐标。
         - `source`: 检测模型来源。
         - `head`: 14x14 或 7x7。
-    - `negative_candidates`：低分候选，只能作为负样本候选，不作为正样本。
+    - `negative_candidates`: 低分候选，只能作为负样本候选，不作为正样本。
 
 #### (2) `02_build_hand_roi_crops.py`
 
-- **输入**：`data/images/`、`data/palm/palm_detections.jsonl`
-- **输出**：`data/roi_crops/images/*.png`、`data/roi_crops/hand_roi_crops_manifest.jsonl`、`data/qc/roi_crop_stats.json`
-- **功能**：使用 palm bbox + p0/p9 进行旋转、平移、缩放构造 Hand ROI，参数与板端默认一致：`scale_x=1.8`、`scale_y=1.8`、`shift_y=-0.1`，输出 `256x256` 灰度 crop。
+- **输入**: `data/images/`、`data/palm/palm_detections.jsonl`
+- **输出**: `data/roi_crops/images/*.png`、`data/roi_crops/hand_roi_crops_manifest.jsonl`、`data/qc/roi_crop_stats.json`
+- **功能**: 使用 palm bbox + p0/p9 进行旋转、平移、扩张构造 Hand ROI，参数与板端默认一致: `scale_x=1.8`、`scale_y=1.8`、`shift_y=-0.1`，输出 `256x256` 灰度 crop。注意，由于存在旋转、平移和扩张取样操作，因此旋转/平移/扩大后的 ROI 超出原图边界，**crop 中超出原图的部分会被填充为黑色**: `cv2.warpAffine(..., borderMode=cv2.BORDER_CONSTANT, borderValue=0)`。这**与板端逻辑一致**。板端 `SampleBilinear()` 在采样点**远离图像或像素越界时返回 0**，因此超出原图的区域也是黑色。
 
-`hand_roi_crops_manifest.jsonl` 每行都对应 `data/roi_crops/images/` 下的着一张 `256x256` ROI crop，含义：
+`hand_roi_crops_manifest.jsonl` 每行都对应 `data/roi_crops/images/` 下的着一张 `256x256` ROI crop，含义: 
 
-
-- 前序 image 级信息：
+- 前序 image 级信息: 
     - `image`: 绑定回原图。
-- 前序 Palm detection 级信息：
-    - `palm_det_id`：绑定回原 Palm detection。
+- 前序 Palm detection 级信息: 
+    - `palm_det_id`: 绑定回原 Palm detection。
     - `palm_valid`: 该 crop 来自有效有效检测结果 `detections` 还是低分负候选 `negative_candidates`。
     - `palm_score`: Palm detection 的分数。
-- **当前 Hand ROI 级信息**：
-  - `crop_id`：crop 级唯一 ID。
-  - `crop_path`：ROI crop 图片路径。
-  - `roi_rect`:
-  - `roi_corners_px`：反投影和可视化所需的 ROI 几何。
+- **当前 Hand ROI 级信息**: 
+  - `crop_id`: crop 级唯一 ID。
+  - `crop_path`: ROI crop 图片路径。
+  - `roi_rect`: 属于原图 1280x720 坐标系，x_center/y_center 是 ROI 中心点, width/height 是 ROI 在原图像素坐标中的宽高, rotation_rad 是 ROI 相对原图坐标系的旋转角，单位弧度。
+  - `roi_corners_px`: 属于原图  1280x720 坐标系，是由 roi_rect 计算出的四个角点，顺序固定为: C0 = top_left, C1 = top_right, C2 = bottom_right, C3 = bottom_left
   - `output_size`: 输出尺寸大小，默认 `[256,256]`。
 
 #### (3) `03_run_mediapipe_on_rois.py`
 
-- **输入**：`data/roi_crops/images/`、`data/roi_crops/hand_roi_crops_manifest.jsonl`
-- **输出**：`data/labels/hand_landmarks_mediapipe_raw.jsonl`、`data/labels/hand_landmarks_autolabel_draft.jsonl`、`data/qc/mediapipe_roi_stats.json`
-- **功能**：每个 crop 独立运行 MediaPipe，最多一只手；有手则保存 21 点 crop 坐标和原图反投影坐标，无手则保留负样本。
+- **输入**: `data/roi_crops/images/`、`data/roi_crops/hand_roi_crops_manifest.jsonl`
+- **输出**: `data/labels/hand_landmarks_mediapipe_raw.jsonl`、`data/labels/hand_landmarks_autolabel_draft.jsonl`、`data/qc/mediapipe_roi_stats.json`
+- **功能**: 每个 crop 独立运行 MediaPipe，最多一只手；有手则保存 21 点 crop 坐标和原图反投影坐标，无手则保留负样本。
 
-`hand_landmarks_autolabel_draft.jsonl` 每行含义：
+`hand_landmarks_autolabel_draft.jsonl` 每行含义: 
 
-- 前序 image 级信息：
+- 前序 image 级信息: 
     - `image`: 绑定回原图。
-- 前序 Palm detection 级信息：
-    - `palm_det_id`：绑定回原 Palm detection。
+- 前序 Palm detection 级信息: 
+    - `palm_det_id`: 绑定回原 Palm detection。
     - `palm_valid`: 该 crop 来自有效有效检测结果 `detections` 还是低分负候选 `negative_candidates`。
     - `palm_score`: Palm detection 的分数。
-- 前序 Hand ROI 级信息：
+- 前序 Hand ROI 级信息: 
     - `crop_id`: crop 级唯一 ID。
     - `crop_path`: ROI crop 中间图片路径。
     - `roi_rect`:
     - `roi_corners_px`:
-- **当前 Landmarks 级信息**：
-    - `hand_presence`：只包含 `present`，不包含 score。`present` 取值只有 `true/false`，即有手/无手
-    - `handedness`：`{"label": "Left/Right/unknown", "score": ...}`。
-    - `landmarks_crop_norm`：21 点在 crop 内归一化坐标。
-    - `landmarks_crop_px`：21 点在 `256x256` crop 内像素坐标。
-    - `landmarks_image_px`：21 点反投影回 `1280x720` 原图坐标。
+- **当前 Landmarks 级信息**: 
+    - `hand_presence`: 只包含 `present`，不包含 score。`present` 取值只有 `true/false`，即有手/无手。该变量来自于官方 MediaPipe Hand Landmarker，后续可以人工复核时进行修改。
+    - `handedness`: `{"label": "Left/Right/unknown", "score": ...}`。
+    - `landmarks_crop_norm`: 21 点在 crop 内归一化坐标。
+    - `landmarks_crop_px`: 21 点在 `256x256` crop 内像素坐标。
+    - `landmarks_image_px`: 21 点反投影回 `1280x720` 原图坐标。
 
 #### (4) `04_export_cvat_xml.py`
 
-- **输入**：`hand_roi_crops_manifest.jsonl`、`hand_landmarks_autolabel_draft.jsonl`
-- **输出**：`data/review/cvat_autolabel.xml`、`data/review/cvat_upload_images/`、`data/qc/cvat_export_stats.json`
-- **功能**：将 crop 图片复制到 CVAT 上传目录，并导出 `CVAT for images 1.1` XML。有手 crop 写一个 `points` shape，无手 crop 写 `no_hand` tag。
+- **输入**: `hand_roi_crops_manifest.jsonl`、`hand_landmarks_autolabel_draft.jsonl`
+- **输出**: `data/review/cvat_autolabel.xml`、`data/review/cvat_upload_images/`、`data/qc/cvat_export_stats.json`
+- **功能**: 将 crop 图片复制到 CVAT 上传目录，并导出 `CVAT for images 1.1` XML。有手 crop 写一个 `points` shape，无手 crop 写 `no_hand` tag。
 
 #### (5) `05_import_cvat_xml.py`
 
-- **输入**：`data/review/cvat_reviewed.xml`、`hand_roi_crops_manifest.jsonl`、`hand_landmarks_autolabel_draft.jsonl`
-- **输出**：`data/labels/hand_landmarks_reviewed.jsonl`、`data/qc/cvat_import_stats.json`
-- **功能**：解析 CVAT 复核后的 21 点，并用 manifest 恢复 ROI 几何、反投影坐标和原始元数据。
+- **输入**: `data/review/cvat_reviewed.xml`、`hand_roi_crops_manifest.jsonl`、`hand_landmarks_autolabel_draft.jsonl`
+- **输出**: `data/labels/hand_landmarks_reviewed.jsonl`、`data/qc/cvat_import_stats.json`
+- **功能**: 解析 CVAT 复核后的 21 点，并用 manifest 恢复 ROI 几何、反投影坐标和原始元数据。
 
 #### (6) `06_visualize_autolabels.py`
 
-- **输入**：原图、Palm JSONL、ROI manifest、reviewed JSONL
-- **输出**：`data/review/overlay_images/*.png`、`data/review/review_index.csv`、`data/qc/visualization_stats.json`
-- **功能**：在原图上绘制 Palm bbox、p0/p9、rotated ROI 和反投影后的 21 点骨架。
+- **输入**: 原图、Palm JSONL、ROI manifest、reviewed JSONL
+- **输出**: `data/review/overlay_images/*.png`、`data/review/review_index.csv`、`data/qc/visualization_stats.json`
+- **功能**: 在原图上绘制 Palm bbox、p0/p9、rotated ROI 和反投影后的 21 点骨架。
 
 #### (7) `07_finalize_training_labels.py`
 
-- **输入**：`hand_landmarks_reviewed.jsonl`、ROI manifest
-- **输出**：`data/labels/hand_training_labels.jsonl`、`data/qc/final_training_label_stats.json`
-- **功能**：严格校验训练样本。正样本必须有 21 个 `landmarks_crop_norm`；负样本 landmarks 为空，并写入 loss weight：`landmark_loss_weight=0`、`handedness_loss_weight=0`。
+- **输入**: `hand_landmarks_reviewed.jsonl`、ROI manifest
+- **输出**: `data/labels/hand_training_labels.jsonl`、`data/qc/final_training_label_stats.json`
+- **功能**: 严格校验训练样本。正样本必须有 21 个 `landmarks_crop_norm`；负样本 landmarks 为空，并写入 loss weight: `landmark_loss_weight=0`、`handedness_loss_weight=0`。
 
 ### 3.5 CVAT 复核
 
@@ -223,19 +222,19 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 
 ### 3.6 小样例
 
-当前 `data/images/` 已有一批 `.tiff`。先运行：
+当前 `data/images/` 已有一批 `.tiff`。先运行: 
 
 ```powershell
 python scripts/00_validate_images.py --config configs/autolabel.yaml
 ```
 
-然后选择 Palm 后端：
+然后选择 Palm 后端: 
 
 ```powershell
 python scripts/01_export_palm_detections.py --config configs/autolabel.yaml --backend mediapipe_official
 ```
 
-若要使用 ONNX 后端，请先确认已安装 `onnxruntime`，再改为：
+若要使用 ONNX 后端，请先确认已安装 `onnxruntime`，再改为: 
 
 ```powershell
 python scripts/01_export_palm_detections.py --config configs/autolabel.yaml --backend aethersign_onnx
