@@ -1,0 +1,160 @@
+[
+  {
+    "name": "no_hand",
+    "color": "#33ddff",
+    "type": "tag",
+    "attributes": []
+  },
+  {
+    "name": "Left",
+    "color": "#ffcc33",
+    "type": "tag",
+    "attributes": []
+  },
+  {
+    "name": "Right",
+    "color": "#8c78f0",
+    "type": "tag",
+    "attributes": []
+  },
+  {
+    "name": "ignore_for_training",
+    "color": "#ff355e",
+    "type": "tag",
+    "attributes": []
+  },
+  {
+    "name": "hand_landmarks",
+    "type": "skeleton",
+    "sublabels": [
+      {
+        "name": "1",
+        "color": "#ff9999",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "2",
+        "color": "#ff9999",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "3",
+        "color": "#ff9999",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "4",
+        "color": "#ff9999",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "5",
+        "color": "#ff9999",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "6",
+        "color": "#a089cb",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "7",
+        "color": "#a089cb",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "8",
+        "color": "#a089cb",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "9",
+        "color": "#a089cb",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "10",
+        "color": "#fecb4f",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "11",
+        "color": "#fecb4f",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "12",
+        "color": "#fecb4f",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "13",
+        "color": "#fecb4f",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "14",
+        "color": "#89afc0",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "15",
+        "color": "#89afc0",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "16",
+        "color": "#89afc0",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "18",
+        "color": "#df5e5b",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "19",
+        "color": "#df5e5b",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "20",
+        "color": "#df5e5b",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "21",
+        "color": "#df5e5b",
+        "type": "points",
+        "attributes": []
+      },
+      {
+        "name": "17",
+        "color": "#89afc0",
+        "type": "points",
+        "attributes": []
+      }
+    ],
+    "svg": "<line x1=\"70.19290924072266\" y1=\"21.841394424438477\" x2=\"71.33142852783203\" y2=\"11.025456428527832\" data-type=\"edge\" data-node-from=\"16\" data-node-to=\"22\"></line>\n<line x1=\"64.12079620361328\" y1=\"46.50932693481445\" x2=\"71.33142852783203\" y2=\"47.268341064453125\" data-type=\"edge\" data-node-from=\"14\" data-node-to=\"18\"></line>\n<line x1=\"55.01264190673828\" y1=\"45.37080764770508\" x2=\"64.12079620361328\" y2=\"46.50932693481445\" data-type=\"edge\" data-node-from=\"10\" data-node-to=\"14\"></line>\n<line x1=\"43.2479362487793\" y1=\"46.129817962646484\" x2=\"55.01264190673828\" y2=\"45.37080764770508\" data-type=\"edge\" data-node-from=\"6\" data-node-to=\"10\"></line>\n<line x1=\"79.68057250976562\" y1=\"25.256954193115234\" x2=\"84.99366760253906\" y2=\"13.302495956420898\" data-type=\"edge\" data-node-from=\"20\" data-node-to=\"21\"></line>\n<line x1=\"75.88550567626953\" y1=\"35.12412643432617\" x2=\"79.68057250976562\" y2=\"25.256954193115234\" data-type=\"edge\" data-node-from=\"19\" data-node-to=\"20\"></line>\n<line x1=\"71.33142852783203\" y1=\"47.268341064453125\" x2=\"75.88550567626953\" y2=\"35.12412643432617\" data-type=\"edge\" data-node-from=\"18\" data-node-to=\"19\"></line>\n<line x1=\"47.04300308227539\" y1=\"75.3518295288086\" x2=\"71.33142852783203\" y2=\"47.268341064453125\" data-type=\"edge\" data-node-from=\"1\" data-node-to=\"18\"></line>\n<line x1=\"64.12079620361328\" y1=\"46.50932693481445\" x2=\"70.19290924072266\" y2=\"21.841394424438477\" data-type=\"edge\" data-node-from=\"14\" data-node-to=\"16\"></line>\n<line x1=\"47.04300308227539\" y1=\"75.3518295288086\" x2=\"64.12079620361328\" y2=\"46.50932693481445\" data-type=\"edge\" data-node-from=\"1\" data-node-to=\"14\"></line>\n<line x1=\"56.91017532348633\" y1=\"22.03114891052246\" x2=\"57.479434967041016\" y2=\"10.835702896118164\" data-type=\"edge\" data-node-from=\"12\" data-node-to=\"13\"></line>\n<line x1=\"56.151161193847656\" y1=\"31.518814086914062\" x2=\"56.91017532348633\" y2=\"22.03114891052246\" data-type=\"edge\" data-node-from=\"11\" data-node-to=\"12\"></line>\n<line x1=\"55.01264190673828\" y1=\"45.37080764770508\" x2=\"56.151161193847656\" y2=\"31.518814086914062\" data-type=\"edge\" data-node-from=\"10\" data-node-to=\"11\"></line>\n<line x1=\"47.04300308227539\" y1=\"75.3518295288086\" x2=\"55.01264190673828\" y2=\"45.37080764770508\" data-type=\"edge\" data-node-from=\"1\" data-node-to=\"10\"></line>\n<line x1=\"36.796321868896484\" y1=\"21.461889266967773\" x2=\"33.76026916503906\" y2=\"11.59471607208252\" data-type=\"edge\" data-node-from=\"8\" data-node-to=\"9\"></line>\n<line x1=\"40.59138870239258\" y1=\"33.41634750366211\" x2=\"36.796321868896484\" y2=\"21.461889266967773\" data-type=\"edge\" data-node-from=\"7\" data-node-to=\"8\"></line>\n<line x1=\"43.2479362487793\" y1=\"46.129817962646484\" x2=\"40.59138870239258\" y2=\"33.41634750366211\" data-type=\"edge\" data-node-from=\"6\" data-node-to=\"7\"></line>\n<line x1=\"47.04300308227539\" y1=\"75.3518295288086\" x2=\"43.2479362487793\" y2=\"46.129817962646484\" data-type=\"edge\" data-node-from=\"1\" data-node-to=\"6\"></line>\n<line x1=\"22.75457763671875\" y1=\"36.26264572143555\" x2=\"18.769758224487305\" y2=\"24.87744903564453\" data-type=\"edge\" data-node-from=\"4\" data-node-to=\"5\"></line>\n<line x1=\"28.067670822143555\" y1=\"48.7863655090332\" x2=\"22.75457763671875\" y2=\"36.26264572143555\" data-type=\"edge\" data-node-from=\"3\" data-node-to=\"4\"></line>\n<line x1=\"34.89878845214844\" y1=\"61.120330810546875\" x2=\"28.067670822143555\" y2=\"48.7863655090332\" data-type=\"edge\" data-node-from=\"2\" data-node-to=\"3\"></line>\n<line x1=\"47.04300308227539\" y1=\"75.3518295288086\" x2=\"34.89878845214844\" y2=\"61.120330810546875\" data-type=\"edge\" data-node-from=\"1\" data-node-to=\"2\"></line>\n<circle r=\"0.75\" cx=\"47.04300308227539\" cy=\"75.3518295288086\" data-type=\"element node\" data-element-id=\"1\" data-node-id=\"1\" data-label-name=\"1\"></circle>\n<circle r=\"0.75\" cx=\"34.89878845214844\" cy=\"61.120330810546875\" data-type=\"element node\" data-element-id=\"2\" data-node-id=\"2\" data-label-name=\"2\"></circle>\n<circle r=\"0.75\" cx=\"28.067670822143555\" cy=\"48.7863655090332\" data-type=\"element node\" data-element-id=\"3\" data-node-id=\"3\" data-label-name=\"3\"></circle>\n<circle r=\"0.75\" cx=\"22.75457763671875\" cy=\"36.26264572143555\" data-type=\"element node\" data-element-id=\"4\" data-node-id=\"4\" data-label-name=\"4\"></circle>\n<circle r=\"0.75\" cx=\"18.769758224487305\" cy=\"24.87744903564453\" data-type=\"element node\" data-element-id=\"5\" data-node-id=\"5\" data-label-name=\"5\"></circle>\n<circle r=\"0.75\" cx=\"43.2479362487793\" cy=\"46.129817962646484\" data-type=\"element node\" data-element-id=\"6\" data-node-id=\"6\" data-label-name=\"6\"></circle>\n<circle r=\"0.75\" cx=\"40.59138870239258\" cy=\"33.41634750366211\" data-type=\"element node\" data-element-id=\"7\" data-node-id=\"7\" data-label-name=\"7\"></circle>\n<circle r=\"0.75\" cx=\"36.796321868896484\" cy=\"21.461889266967773\" data-type=\"element node\" data-element-id=\"8\" data-node-id=\"8\" data-label-name=\"8\"></circle>\n<circle r=\"0.75\" cx=\"33.76026916503906\" cy=\"11.59471607208252\" data-type=\"element node\" data-element-id=\"9\" data-node-id=\"9\" data-label-name=\"9\"></circle>\n<circle r=\"0.75\" cx=\"55.01264190673828\" cy=\"45.37080764770508\" data-type=\"element node\" data-element-id=\"10\" data-node-id=\"10\" data-label-name=\"10\"></circle>\n<circle r=\"0.75\" cx=\"56.151161193847656\" cy=\"31.518814086914062\" data-type=\"element node\" data-element-id=\"11\" data-node-id=\"11\" data-label-name=\"11\"></circle>\n<circle r=\"0.75\" cx=\"56.91017532348633\" cy=\"22.03114891052246\" data-type=\"element node\" data-element-id=\"12\" data-node-id=\"12\" data-label-name=\"12\"></circle>\n<circle r=\"0.75\" cx=\"57.479434967041016\" cy=\"10.835702896118164\" data-type=\"element node\" data-element-id=\"13\" data-node-id=\"13\" data-label-name=\"13\"></circle>\n<circle r=\"0.75\" cx=\"64.12079620361328\" cy=\"46.50932693481445\" data-type=\"element node\" data-element-id=\"14\" data-node-id=\"14\" data-label-name=\"14\"></circle>\n<circle r=\"0.75\" cx=\"67.72611236572266\" cy=\"32.277828216552734\" data-type=\"element node\" data-element-id=\"15\" data-node-id=\"15\" data-label-name=\"15\"></circle>\n<circle r=\"0.75\" cx=\"70.19290924072266\" cy=\"21.841394424438477\" data-type=\"element node\" data-element-id=\"16\" data-node-id=\"16\" data-label-name=\"16\"></circle>\n<circle r=\"0.75\" cx=\"71.33142852783203\" cy=\"47.268341064453125\" data-type=\"element node\" data-element-id=\"18\" data-node-id=\"18\" data-label-name=\"18\"></circle>\n<circle r=\"0.75\" cx=\"75.88550567626953\" cy=\"35.12412643432617\" data-type=\"element node\" data-element-id=\"19\" data-node-id=\"19\" data-label-name=\"19\"></circle>\n<circle r=\"0.75\" cx=\"79.68057250976562\" cy=\"25.256954193115234\" data-type=\"element node\" data-element-id=\"20\" data-node-id=\"20\" data-label-name=\"20\"></circle>\n<circle r=\"0.75\" cx=\"84.99366760253906\" cy=\"13.302495956420898\" data-type=\"element node\" data-element-id=\"21\" data-node-id=\"21\" data-label-name=\"21\"></circle>\n<circle r=\"0.75\" cx=\"71.33142852783203\" cy=\"11.025456428527832\" data-type=\"element node\" data-element-id=\"22\" data-node-id=\"22\" data-label-name=\"17\"></circle>",
+    "attributes": []
+  }
+]
