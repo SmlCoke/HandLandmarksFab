@@ -16,7 +16,7 @@ image:
 
 # backend choices = ["mediapipe_official", "aethersign_onnx"] 
 palm:
-  backend: mediapipe_official
+  backend: aethersign_onnx
   input_size: 224
   score_threshold: 0.50
   nms_iou_threshold: 0.30
@@ -25,6 +25,9 @@ palm:
   keep_low_score_candidates_for_negatives: true
   negative_candidate_threshold: 0.15
   compatible_bbox_expand: 0.25
+  mediapipe_official_full_image_first: false
+  mediapipe_official_tile_sizes: [512]
+  mediapipe_official_tile_overlap: 0.5
 
 hand_roi:
   output_width: 256

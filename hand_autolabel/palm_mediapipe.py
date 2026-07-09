@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
 
 from .formats import clamp01, make_palm_det_id, normalize_detection_schema
 from .image_io import gray_to_rgb, read_image
+from .nms import nms_indices
 
 
 PALM_BBOX_LANDMARK_IDS = (0, 1, 5, 9, 13, 17)
@@ -57,6 +59,67 @@ def _detection_from_landmarks(image_name: str, idx: int, landmarks: Sequence, ha
         "handedness_hint": {"label": label, "score": score},
     }
     return det
+
+
+def _tile_windows(width: int, height: int, tile_size: int, overlap: float) -> Iterable[tuple[int, int, int, int]]:
+    tile_size = int(tile_size)
+    if tile_size <= 0 or tile_size > width or tile_size > height:
+        return
+    step = max(64, int(round(tile_size * (1.0 - float(overlap)))))
+    max_x = max(0, width - tile_size)
+    max_y = max(0, height - tile_size)
+    xs = list(range(0, max_x + 1, step))
+    ys = list(range(0, max_y + 1, step))
+    if not xs or xs[-1] != max_x:
+        xs.append(max_x)
+    if not ys or ys[-1] != max_y:
+        ys.append(max_y)
+    for y in ys:
+        for x in xs:
+            yield x, y, tile_size, tile_size
+
+
+def _landmarks_from_tile_to_image(landmarks: Sequence, x0: int, y0: int, tile_width: int, tile_height: int, image_width: int, image_height: int) -> List[Any]:
+    mapped = []
+    for lm in landmarks:
+        mapped.append(
+            SimpleNamespace(
+                x=(float(x0) + float(lm.x) * float(tile_width)) / float(image_width),
+                y=(float(y0) + float(lm.y) * float(tile_height)) / float(image_height),
+            )
+        )
+    return mapped
+
+
+def _schema_from_landmarks(
+    image_name: str,
+    idx: int,
+    landmarks: Sequence,
+    handedness: Sequence,
+    cfg: Mapping[str, Any],
+    width: int,
+    height: int,
+    source_suffix: str,
+) -> Dict[str, Any]:
+    det = _detection_from_landmarks(image_name, idx, landmarks, handedness, cfg)
+    det["source"] = f"mediapipe_official_{source_suffix}"
+    schema = normalize_detection_schema(det, image_name, idx, width, height)
+    schema["mediapipe_detection_strategy"] = source_suffix
+    return schema
+
+
+def _select_palm_candidates(candidates: List[Dict[str, Any]], image_name: str, cfg: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    if not candidates:
+        return []
+    boxes = np.asarray([det["bbox_norm"] for det in candidates], dtype=np.float32)
+    scores = np.asarray([float(det["score"]) for det in candidates], dtype=np.float32)
+    keep = nms_indices(boxes, scores, float(cfg["palm"].get("nms_iou_threshold", 0.3)))
+    selected = []
+    for out_idx, cand_idx in enumerate(keep[: int(cfg["palm"].get("max_detections", 2))]):
+        det = dict(candidates[cand_idx])
+        det["palm_det_id"] = make_palm_det_id(image_name, out_idx, "palm")
+        selected.append(det)
+    return selected
 
 
 class _TasksHandDetector:
@@ -110,28 +173,55 @@ def run_mediapipe_palm_detector(image_paths: Iterable[Path], cfg: Mapping[str, A
     height = int(image_cfg["height"])
     detector, mode = create_mediapipe_detector(cfg, num_hands=int(palm_cfg.get("max_detections", 2)))
     rows: List[Dict[str, Any]] = []
+    tiled_mode: Optional[str] = None
     try:
         for image_path in image_paths:
             img = read_image(image_path)
             if img is None:
                 rows.append({"image": image_path.name, "width": width, "height": height, "detections": [], "negative_candidates": [], "error": "unreadable_image"})
                 continue
-            rgb = gray_to_rgb(img)
-            landmarks, handedness = detector.detect(rgb)
-            detections = []
+            candidates = []
             negatives = []
-            for idx, lms in enumerate(landmarks):
-                cats = handedness[idx] if idx < len(handedness) else []
-                det = _detection_from_landmarks(image_path.name, idx, lms, cats, cfg)
-                schema = normalize_detection_schema(det, image_path.name, idx, width, height)
-                if float(schema["score"]) >= float(palm_cfg["score_threshold"]):
-                    detections.append(schema)
-                elif bool(palm_cfg.get("keep_low_score_candidates_for_negatives", True)) and float(schema["score"]) >= float(palm_cfg.get("negative_candidate_threshold", 0.15)):
-                    schema["valid"] = False
-                    schema["palm_det_id"] = make_palm_det_id(image_path.name, len(negatives), "neg")
-                    negatives.append(schema)
-            detections = sorted(detections, key=lambda d: float(d["score"]), reverse=True)[: int(palm_cfg.get("max_detections", 2))]
+            tile_sizes = [int(v) for v in palm_cfg.get("mediapipe_official_tile_sizes", [512]) or []]
+            full_image_first = bool(palm_cfg.get("mediapipe_official_full_image_first", not tile_sizes))
+            if full_image_first:
+                rgb = gray_to_rgb(img)
+                landmarks, handedness = detector.detect(rgb)
+                for idx, lms in enumerate(landmarks):
+                    cats = handedness[idx] if idx < len(handedness) else []
+                    schema = _schema_from_landmarks(image_path.name, idx, lms, cats, cfg, width, height, "full_image")
+                    if float(schema["score"]) >= float(palm_cfg["score_threshold"]):
+                        candidates.append(schema)
+                    elif bool(palm_cfg.get("keep_low_score_candidates_for_negatives", True)) and float(schema["score"]) >= float(palm_cfg.get("negative_candidate_threshold", 0.15)):
+                        schema["valid"] = False
+                        schema["palm_det_id"] = make_palm_det_id(image_path.name, len(negatives), "neg")
+                        negatives.append(schema)
+
+            if not candidates and tile_sizes:
+                tiled_mode = "fallback" if full_image_first else "primary"
+                tile_overlap = float(palm_cfg.get("mediapipe_official_tile_overlap", 0.5))
+                image_h, image_w = img.shape[:2]
+                for tile_size in tile_sizes:
+                    for x0, y0, tile_w, tile_h in _tile_windows(image_w, image_h, tile_size, tile_overlap):
+                        tile = img[y0 : y0 + tile_h, x0 : x0 + tile_w]
+                        tile_landmarks, tile_handedness = detector.detect(gray_to_rgb(tile))
+                        for idx, lms in enumerate(tile_landmarks):
+                            cats = tile_handedness[idx] if idx < len(tile_handedness) else []
+                            mapped = _landmarks_from_tile_to_image(lms, x0, y0, tile_w, tile_h, image_w, image_h)
+                            schema = _schema_from_landmarks(image_path.name, len(candidates), mapped, cats, cfg, width, height, f"tiled_{tile_size}")
+                            if float(schema["score"]) >= float(palm_cfg["score_threshold"]):
+                                candidates.append(schema)
+                            elif bool(palm_cfg.get("keep_low_score_candidates_for_negatives", True)) and float(schema["score"]) >= float(palm_cfg.get("negative_candidate_threshold", 0.15)):
+                                schema["valid"] = False
+                                schema["palm_det_id"] = make_palm_det_id(image_path.name, len(negatives), "neg")
+                                negatives.append(schema)
+
+            detections = _select_palm_candidates(candidates, image_path.name, cfg)
             rows.append({"image": image_path.name, "width": width, "height": height, "detections": detections, "negative_candidates": negatives})
     finally:
         detector.close()
+    if tiled_mode == "primary":
+        return rows, f"{mode}_tiled"
+    if tiled_mode == "fallback":
+        return rows, f"{mode}_tiled_fallback"
     return rows, mode
