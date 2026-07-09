@@ -15,9 +15,8 @@ def _landmarks_to_rows(landmarks: Sequence, crop_width: int, crop_height: int) -
     for idx, lm in enumerate(landmarks):
         x = float(getattr(lm, "x"))
         y = float(getattr(lm, "y"))
-        z = float(getattr(lm, "z", 0.0))
-        norm_rows.append({"id": idx, "x": x, "y": y, "z": z, "visible": 1})
-        px_rows.append({"id": idx, "x": x * float(max(1, crop_width - 1)), "y": y * float(max(1, crop_height - 1)), "visible": 1})
+        norm_rows.append({"id": idx, "x": x, "y": y})
+        px_rows.append({"id": idx, "x": x * float(max(1, crop_width - 1)), "y": y * float(max(1, crop_height - 1))})
     return norm_rows, px_rows
 
 

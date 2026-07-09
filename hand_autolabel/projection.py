@@ -31,7 +31,7 @@ def landmark_dicts_from_norm(points: Iterable[Mapping[str, float]], roi_corners_
     pairs = [(float(p["x"]), float(p["y"])) for p in point_list]
     projected = project_norm_points_to_image(pairs, roi_corners_px)
     return [
-        {"id": int(src.get("id", idx)), "x": x, "y": y, "visible": int(src.get("visible", 1))}
+        {"id": int(src.get("id", idx)), "x": x, "y": y}
         for idx, (src, (x, y)) in enumerate(zip(point_list, projected))
     ]
 

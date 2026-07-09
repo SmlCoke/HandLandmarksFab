@@ -217,6 +217,22 @@ def merge_label_with_manifest(label: Mapping[str, Any], manifest: Mapping[str, A
     row.setdefault("landmarks_crop_norm", [])
     row.setdefault("landmarks_crop_px", [])
     row.setdefault("landmarks_image_px", [])
+    normalize_landmark_fields(row)
+    return row
+
+
+def normalize_landmark_fields(row: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
+    for key in ("landmarks_crop_norm", "landmarks_crop_px", "landmarks_image_px"):
+        normalized = []
+        for idx, point in enumerate(row.get(key) or []):
+            normalized.append(
+                {
+                    "id": int(point.get("id", idx)),
+                    "x": float(point["x"]),
+                    "y": float(point["y"]),
+                }
+            )
+        row[key] = normalized
     return row
 
 

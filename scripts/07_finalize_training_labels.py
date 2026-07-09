@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from hand_autolabel.formats import cfg_path, index_by, load_yaml_config, merge_label_with_manifest, read_jsonl, repo_root_from_config, resolve_path, write_json, write_jsonl
+from hand_autolabel.formats import cfg_path, index_by, load_yaml_config, merge_label_with_manifest, normalize_landmark_fields, read_jsonl, repo_root_from_config, resolve_path, write_json, write_jsonl
 from hand_autolabel.quality_checks import label_issues, summarize_label_rows
 
 
@@ -35,6 +35,7 @@ def _training_row(row):
     label = str((out.get("handedness") or {}).get("label", "unknown")).lower()
     out["handedness_loss_weight"] = 1.0 if present and label in {"left", "right"} else 0.0
     out["source"] = out.get("source", "cvat_reviewed")
+    normalize_landmark_fields(out)
     return out
 
 

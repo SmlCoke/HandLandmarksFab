@@ -202,12 +202,12 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 #### (6) `06_visualize_autolabels.py`
 
 - **输入**: 原图、Palm JSONL、ROI manifest、reviewed JSONL
-- **输出**: `data\04_visualization\crop_images`, `data\04_visualization\global_images`, `data\04_visualization\review_index.csv`
+- **输出**: `data/04_visualization/crop_images`, `data/04_visualization/global_images`, `data/04_visualization/review_index.csv`
 - **功能**: 在原图上绘制 Palm bbox、p0/p9、rotated ROI 和反投影后的 21 点骨架。
 
 #### (7) `07_finalize_training_labels.py`
 
-- **输入**: `hand_landmarks_reviewed.jsonl`、ROI manifest
+- **输入**: `data/03_reviewed/hand_landmarks_reviewed.jsonl`、ROI manifest
 - **输出**: `data/05_labels/hand_training_labels.jsonl`、`data/qc/final_training_label_stats.json`
 - **功能**: 严格校验训练样本。正样本必须有 21 个 `landmarks_crop_norm`；负样本 landmarks 为空，并写入 loss weight: `landmark_loss_weight=0`、`handedness_loss_weight=0`。
 

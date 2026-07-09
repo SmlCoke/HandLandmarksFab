@@ -315,17 +315,17 @@ def import_cvat_xml(
         row_errors.extend(skeleton_errors)
         if len(pts) != 21:
             row_errors.append(f"point_count_not_21:{len(pts)}")
-        crop_px = [{"id": idx, "x": float(x), "y": float(y), "visible": 1} for idx, (x, y) in enumerate(pts)]
+        crop_px = [{"id": idx, "x": float(x), "y": float(y)} for idx, (x, y) in enumerate(pts)]
         for p in crop_px:
             if p["x"] < 0.0 or p["y"] < 0.0 or p["x"] > width - 1 or p["y"] > height - 1:
                 row_warnings.append(f"point_out_of_bounds:{p['id']}")
                 break
         crop_norm = [
-            {"id": p["id"], "x": p["x"] / float(max(1, width - 1)), "y": p["y"] / float(max(1, height - 1)), "visible": 1}
+            {"id": p["id"], "x": p["x"] / float(max(1, width - 1)), "y": p["y"] / float(max(1, height - 1))}
             for p in crop_px
         ]
         image_pts = project_px_points_to_image([(p["x"], p["y"]) for p in crop_px], manifest["roi_corners_px"], width, height)
-        image_px = [{"id": idx, "x": x, "y": y, "visible": 1} for idx, (x, y) in enumerate(image_pts)]
+        image_px = [{"id": idx, "x": x, "y": y} for idx, (x, y) in enumerate(image_pts)]
         present = len(pts) == 21
         base.update(
             {
