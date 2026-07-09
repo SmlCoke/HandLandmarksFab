@@ -1,6 +1,13 @@
 # HandLandmarkerFab 半自动标注工具链
 
-本仓库实现用于重新训练 Hand Landmarker 的半自动标注流水线。已参考 `project-8.md`、`docs/HandFab/*` 和 `materials/preminilary/device` 中的板端 ROI 几何；如文档与本任务冲突，以 `prompt.md` 的最终方案和板端 `hand_landmarker.cpp` 为准。
+本仓库实现用于重新训练 Hand Landmarker 的半自动标注流水线。
+
+项目背景及前置参考材料：
+
+- `project-8.md`、`docs/HandFab/*` 
+- `materials/preminilary/device` 中的板端 ROI 几何；
+
+如文档与本任务冲突，以 `prompt.md` 的最终方案和板端 `hand_landmarker.cpp` 为准。
 
 输入图片必须已经是 `1280x720` 正向灰度 `.tiff`。脚本不会旋转原图。
 
