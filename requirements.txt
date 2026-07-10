@@ -4,3 +4,4 @@ Pillow>=9.0
 PyYAML>=6.0
 mediapipe>=0.10.0
 onnxruntime>=1.16
+tqdm>=4.65
