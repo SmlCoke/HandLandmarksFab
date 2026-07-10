@@ -1,5 +1,11 @@
 """Semi-automatic Hand Landmarker annotation helpers."""
 
+import os
+
+
+# Suppress noisy TIFF metadata warnings while preserving OpenCV errors.
+os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
+
 __all__ = [
     "cvat_io",
     "formats",

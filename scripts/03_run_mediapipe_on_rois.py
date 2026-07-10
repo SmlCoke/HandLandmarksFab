@@ -4,6 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -29,7 +31,8 @@ def main() -> None:
     qc_dir = cfg_path(cfg, root, "qc_dir")
     manifest_path = resolve_path(root, args.manifest) if args.manifest else roi_dir / "hand_roi_crops_manifest.jsonl"
     manifest_rows = read_jsonl(manifest_path)
-    rows, mode = label_roi_manifest(manifest_rows, cfg, root)
+    roi_progress = tqdm(manifest_rows, desc="MediaPipe ROI labeling", unit="ROI", dynamic_ncols=True)
+    rows, mode = label_roi_manifest(roi_progress, cfg, root)
     draft_path = roi_dir / "hand_landmarks_autolabel_draft.jsonl"
     write_jsonl(draft_path, rows)
     stats = summarize_label_rows(rows, cfg)

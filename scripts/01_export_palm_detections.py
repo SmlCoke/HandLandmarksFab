@@ -4,6 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -34,12 +36,13 @@ def main() -> None:
     palm_dir = cfg_path(cfg, root, "palm_outputs_dir")
     qc_dir = cfg_path(cfg, root, "qc_dir")
     output_jsonl = resolve_path(root, args.output_jsonl) if args.output_jsonl else palm_dir / "palm_detections.jsonl"
+    image_progress = tqdm(images, desc=f"Palm detection ({backend})", unit="image", dynamic_ncols=True)
 
     backend_mode = None
     if backend == "mediapipe_official":
-        rows, backend_mode = run_mediapipe_palm_detector(images, cfg)
+        rows, backend_mode = run_mediapipe_palm_detector(image_progress, cfg)
     elif backend == "aethersign_onnx":
-        rows = run_onnx_palm_detector(images, cfg, cfg_path(cfg, root, "palm_model_onnx"))
+        rows = run_onnx_palm_detector(image_progress, cfg, cfg_path(cfg, root, "palm_model_onnx"))
     else:
         raise ValueError(f"Unsupported palm.backend: {backend}")
 
