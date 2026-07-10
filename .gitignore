@@ -16,3 +16,6 @@ __pycache__/
 
 # config
 .vscode/
+
+# bak
+docs/bak/
