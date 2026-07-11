@@ -36,11 +36,11 @@
 
 详细处理规则见：
 
-- [训练集处理方案](flow_and_interface/hand_landmarker_train_dataset_processing.md)
-- [验证集处理方案](flow_and_interface/hand_landmarker_val_dataset_processing.md)
-- [测试集处理方案](flow_and_interface/hand_landmarker_test_dataset_processing.md)
-- [处理系统修正计划](flow_and_interface/hand_landmarker_pipeline_revision_plan.md)
-- [数据集制作操作手册](flow_and_interface/dataset_preparation_workflow.md)
+- [训练集处理方案](hand_landmarker_train_dataset_processing.md)
+- [验证集处理方案](hand_landmarker_val_dataset_processing.md)
+- [测试集处理方案](hand_landmarker_test_dataset_processing.md)
+- [处理系统修正计划](hand_landmarker_pipeline_revision_plan.md)
+- [数据集制作操作手册](dataset_preparation_workflow.md)
 
 > 当前实现状态：07A、07B、quality catalog 和 stage-specific 输出已经实现，可直接按本文命令运行。
 
@@ -256,7 +256,7 @@ Train gold：30%～50%
 
 主 Val/Test 中被 `ignore_for_training` 排除的歧义双手 ROI 不计入主指标，可以单独形成挑战集并报告覆盖率与失败案例。
 
-双手 ROI 是否可进入主指标，必须按 [验证集处理方案第 5 节](flow_and_interface/hand_landmarker_val_dataset_processing.md) 执行 `crop_id → palm_det_id → bbox/p0/p9` 的目标手追溯；不能用“最大、最居中或 Google 先标到的手”替代 Palm anchor 证据。
+双手 ROI 是否可进入主指标，必须按 [验证集处理方案第 5 节](hand_landmarker_val_dataset_processing.md) 执行 `crop_id → palm_det_id → bbox/p0/p9` 的目标手追溯；不能用“最大、最居中或 Google 先标到的手”替代 Palm anchor 证据。
 
 ## 8. 模型选择与实验记录
 

@@ -2,7 +2,7 @@
 
 > 适用范围：训练集、共享/独立验证集和共享测试集的自动标注、CVAT 复核、07A/07B 冻结以及训练接口。  
 > 环境：所有命令均在仓库根目录执行，并使用 README 指定的 `anfab` 环境。  
-> namespace：Train 由 07A 自动添加；Val/Test 已在录制文件名中使用 `peak_` / `soar_`，07B 只校验、不重命名。
+> namespace：Train 和 Val/Test 都由 finalizer 按 source 的唯一 `dataset_id` 自动添加；原始文件名允许重复。
 
 ## 1. 最终数据组织
 
@@ -10,7 +10,7 @@
 |---|---|---:|---|---|
 | Train pseudo | Peak 约 2.2 万 ROI + Soar 约 4.6 万 ROI | 否 | 07A `pretrain` | 第一阶段教师—学生伪标签训练 |
 | Train Gold 子集 | 从训练候选中挑选的数百到数千 ROI | 是 | 07A `finetune`，Gold 覆盖 pseudo | 第二阶段精调 |
-| Val shared | `vals_data` | 是 | 与 independent Val 一起交给 07B | 两条训练路线的共同比较基准 |
+| Val shared | Peak `vals_data` + Soar `vals_data` | 是 | 两份 shared 与当前路线 independent Val 一起交给 07B | 两条训练路线的共同比较基准 |
 | Val independent | `vali_data` | 是 | 与 shared Val 一起交给 07B | 保留训练路线独立性 |
 | Test shared | `test_data` | 是 | 07B `test` | 两人 100% 共享的最终冻结评测 |
 
@@ -61,7 +61,7 @@ Get-Location
 
 1. Train、Val、Test 的 ROI 参数、Palm threshold、NMS 必须与板端一致。
 2. Val/Test 不导出低分 `negative_candidates`。
-3. `peak_` / `soar_` 前缀必须在运行 00 之前已经存在于原始文件名中。
+3. 每个 source 的 `dataset_id` 必须全局唯一并包含 owner/数据用途，例如 `peak_vals_shared_v1`；不要依赖原始文件名前缀隔离。
 4. 不得把 Val/Test ROI 加入训练集。
 5. Test 在模型、阈值、量化方案冻结前不得用于调参。
 
@@ -73,7 +73,7 @@ Get-Location
 | `configs/finalize_train.yaml` | 07A 合并多个训练来源、自动 namespace、分型和降采样 |
 | `configs/autolabel_val.yaml` | shared Val，即 `vals_data`，运行 00–06 |
 | `configs/autolabel_vali.yaml` | independent Val，即 `vali_data`，运行 00–06 |
-| `configs/finalize_val.yaml` | 07B 合并 `vals_data + vali_data` 并冻结最终 Val |
+| `configs/finalize_val.yaml` | 07B 合并 Peak shared + Soar shared + 当前路线 independent Val |
 | `configs/autolabel_test.yaml` | shared Test 运行 00–06 |
 | `configs/finalize_test.yaml` | 07B 汇总并冻结最终 Test |
 
@@ -267,6 +267,8 @@ hand_training_labels_finetune.jsonl
 
 ## 6. shared Val：制作 `vals_data`
 
+Peak 和 Soar 各自完成自己的 `vals_data` 自动标注与人工复核。这里的“shared”表示两人的最终模型都使用两份 shared source 合并后的共同部分，不表示两人必须在各自机器上保存相同的绝对路径。
+
 ### 6.1 自动标注
 
 确认 `configs/autolabel_val.yaml` 指向 `../autodl-tmp/vals_data`，然后运行：
@@ -303,6 +305,90 @@ make visualize_vals
 
 不要在这一步运行 07B；必须等 independent Val 也完成后统一合并。
 
+### 6.3 每人需要交付的 shared Val 复核包
+
+Peak 和 Soar 分别交付一个完整 source 包。07B 最少需要：
+
+```text
+02_roi_crops/
+├─ images/                                  # 与 manifest 一一对应的 ROI 图片
+└─ hand_roi_crops_manifest.jsonl
+03_reviewed/
+├─ hand_landmarks_reviewed.jsonl            # import_cvat_vals 的主要结果
+├─ cvat_reviewed.xml                        # 07B 不直接读取，但建议保留审计
+└─ review_context.csv                       # 可选；存在时 ignored 行必须有原因
+qc/
+└─ cvat_import_stats.json                   # import_cvat_vals 的完整性报告，强制
+```
+
+不要只传 `hand_landmarks_reviewed.jsonl`。没有 manifest、ROI 图片和 import report，07B 无法验证覆盖率、坐标投影和 CVAT 冲突。
+
+建议在各自机器上打包整个必要目录，例如：
+
+```bash
+cd /path/to/vals_data
+tar -czf peak_vals_reviewed.tar.gz \
+  02_roi_crops/images \
+  02_roi_crops/hand_roi_crops_manifest.jsonl \
+  03_reviewed/hand_landmarks_reviewed.jsonl \
+  03_reviewed/cvat_reviewed.xml \
+  qc/cvat_import_stats.json
+```
+
+Soar 将文件名改为 `soar_vals_reviewed.tar.gz`。如果使用了 `review_context.csv`，也把它加入压缩包。
+
+### 6.4 在统一服务器上放置两个 shared source
+
+推荐目录：
+
+```text
+../autodl-tmp/eval_sources/
+├─ peak_vals/
+│  ├─ 02_roi_crops/
+│  ├─ 03_reviewed/
+│  └─ qc/
+└─ soar_vals/
+   ├─ 02_roi_crops/
+   ├─ 03_reviewed/
+   └─ qc/
+```
+
+示例：
+
+```bash
+mkdir -p ../autodl-tmp/eval_sources/peak_vals
+mkdir -p ../autodl-tmp/eval_sources/soar_vals
+tar -xzf peak_vals_reviewed.tar.gz -C ../autodl-tmp/eval_sources/peak_vals
+tar -xzf soar_vals_reviewed.tar.gz -C ../autodl-tmp/eval_sources/soar_vals
+```
+
+图片移动后，manifest 中的 `crop_path` 可能仍指向原机器路径，这是允许的。不要手工批量修改 JSONL；在 `finalize_val.yaml` 为每个 source 设置真实的 `crop_images_dir`，07B 会按 basename 重定位，并把旧值保存在 `source_crop_path`。
+
+### 6.5 两份 shared Val 是否需要手工合并
+
+不需要，也不允许手工使用 `copy`、文本拼接或脚本直接合并两份 manifest/reviewed JSONL。正确做法是把它们作为两个独立 source 登记到 `configs/finalize_val.yaml`，由 07B 合并。
+
+存在两种情况：
+
+1. **只是名字相同、实际图片不同**：允许直接作为两个 source。07B 使用不同 `dataset_id` 生成 namespace，不会冲突。
+2. **实际是同一张图片被重复复核/复制**：这不是两份评测样本，不能重复计入。应先比较标注并在 CVAT 中仲裁，形成一份权威 reviewed package；配置中只登记一次。namespace 只能解决名称冲突，不能把同一张物理图片合理地变成两个样本。
+
+具体例子：
+
+```text
+可直接合并（local ID 相同但图片不同）：
+  Peak source dataset_id = peak_vals_shared_v1
+  Peak local crop_id      = frame0001:palm0:crop
+  Soar source dataset_id  = soar_vals_shared_v1
+  Soar local crop_id      = frame0001:palm0:crop
+
+最终 global crop_id：
+  peak_vals_shared_v1:frame0001:palm0:crop
+  soar_vals_shared_v1:frame0001:palm0:crop
+```
+
+如果两行实际指向同一张 ROI 图片，即使 global ID 不同也不能重复计入；应由两人查看该图片并仲裁出一份 21 点、presence 和 handedness 真值。
+
 ## 7. independent Val：制作 `vali_data`
 
 确认 `configs/autolabel_vali.yaml` 指向当前路线自己的 `vali_data`：
@@ -328,35 +414,109 @@ make import_cvat_vali
 make visualize_vali
 ```
 
-Peak 和 Soar 若各自维护不同的 independent Val，应各自使用自己的 `vali_data` 路径和 `finalize_val.yaml`；shared `vals_data` 保持完全相同。
+Peak 和 Soar 各自把自己的 independent Val 也整理为完整 source 包：
+
+```text
+../autodl-tmp/eval_sources/peak_vali/
+../autodl-tmp/eval_sources/soar_vali/
+```
+
+两条训练路线的最终 Val 组成应为：
+
+```text
+Peak 路线：peak_vals + soar_vals + peak_vali
+Soar 路线：peak_vals + soar_vals + soar_vali
+```
+
+因此，Peak 不应把 `soar_vali` 加入自己的 `finalize_val.yaml`；Soar 也不应把 `peak_vali` 加入自己的配置。这样 shared 部分完全相同，而 independent 部分保持路线独立。
 
 ## 8. 合并并冻结最终 Val
+
+### 8.1 人工需要做什么
+
+1. 收集 Peak/Soar 两份 shared Val 完整复核包；
+2. 收集当前路线自己的 independent Val 完整复核包；
+3. 分别解压到独立目录，不要把图片平铺进同一个 `images/`；
+4. 确认每个目录都有 manifest、reviewed JSONL、import report 和 images；
+5. 为三个 source 配置不同 `dataset_id`；local `crop_id` 或文件名可以相同；
+6. 确认没有把同一张实际图片复制到多个 source；
+7. 编辑 `configs/finalize_val.yaml` 登记三个 source；
+8. 运行一次 `make finalize_val`。不需要分别对两个 shared source 运行额外的合并脚本。
+
+### 8.2 Peak 路线配置示例
 
 `configs/finalize_val.yaml` 的关键结构：
 
 ```yaml
 dataset:
-  id: merged_val_v1
+  id: peak_route_merged_val_v1
   split: val
 
 evaluation:
-  allowed_namespace_prefixes: [peak_, soar_]
+  require_palm_valid: true
 
 sources:
-  - source_id: vals_shared
+  - source_id: peak_vals_shared
+    dataset_id: peak_vals_shared_v1
+    owner: Peak
     partition: shared
-    root: ../autodl-tmp/vals_data
+    root: ../autodl-tmp/eval_sources/peak_vals
     autolabel_config: configs/autolabel_val.yaml
+    crop_images_dir: 02_roi_crops/images
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
+    import_report: qc/cvat_import_stats.json
 
-  - source_id: vali_independent
+  - source_id: soar_vals_shared
+    dataset_id: soar_vals_shared_v1
+    owner: Soar
+    partition: shared
+    root: ../autodl-tmp/eval_sources/soar_vals
+    autolabel_config: configs/autolabel_val.yaml
+    crop_images_dir: 02_roi_crops/images
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
+    import_report: qc/cvat_import_stats.json
+
+  - source_id: peak_vali_independent
+    dataset_id: peak_vali_independent_v1
+    owner: Peak
     partition: independent
-    root: ../autodl-tmp/vali_data
+    root: ../autodl-tmp/eval_sources/peak_vali
     autolabel_config: configs/autolabel_vali.yaml
+    crop_images_dir: 02_roi_crops/images
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
+    import_report: qc/cvat_import_stats.json
 
 outputs:
   labels_dir: ../autodl-tmp/val_merged/05_labels
   qc_dir: ../autodl-tmp/val_merged/qc
 ```
+
+Soar 路线复制该配置，只把：
+
+```yaml
+dataset:
+  id: soar_route_merged_val_v1
+```
+
+以及第三个 source 改为：
+
+```yaml
+  - source_id: soar_vali_independent
+    dataset_id: soar_vali_independent_v1
+    owner: Soar
+    partition: independent
+    root: ../autodl-tmp/eval_sources/soar_vali
+    autolabel_config: configs/autolabel_vali.yaml
+    crop_images_dir: 02_roi_crops/images
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
+    import_report: qc/cvat_import_stats.json
+```
+
+### 8.3 运行最终合并
 
 运行：
 
@@ -366,9 +526,9 @@ make finalize_val
 
 07B 会：
 
-1. 分别检查 shared/independent 的 manifest、reviewed、XML import report；
-2. 检查跨来源 `crop_id` 和 crop basename 不重复；
-3. 检查原图和 `crop_id` 已以 `peak_` / `soar_` 开头，但不修改它们；
+1. 分别检查 Peak shared、Soar shared、当前路线 independent 的 manifest、reviewed、图片和 XML import report；
+2. 检查 source 内 local ID/basename 唯一，并检查所有 source 的 `dataset_id` 唯一；
+3. 为 crop、Palm、hand 和原图分组 ID 生成全局 namespace；跨 source local ID/basename 允许相同；
 4. 分离 ignored；
 5. 对 included Gold 执行严格 21 点、handedness、坐标和图片校验；
 6. 合并并原子写入最终 Val；
@@ -382,9 +542,52 @@ make finalize_val
 ../autodl-tmp/val_merged/qc/finalize_val_report.json
 ```
 
-## 9. 制作并冻结 100% 共享 Test
+### 8.4 图片路径变化的完整例子
 
-Test 只运行一份共享流程：
+假设 Peak 在自己机器生成 manifest 时记录：
+
+```json
+{
+  "crop_id": "session01_frame0001:palm0:crop",
+  "crop_path": "/home/peak/vals_data/02_roi_crops/images/session01_frame0001_palm0_crop.png"
+}
+```
+
+上传统一服务器后，图片实际位于：
+
+```text
+/root/autodl-tmp/eval_sources/peak_vals/02_roi_crops/images/session01_frame0001_palm0_crop.png
+```
+
+配置：
+
+```yaml
+root: ../autodl-tmp/eval_sources/peak_vals
+crop_images_dir: 02_roi_crops/images
+```
+
+07B 不修改原 manifest，而是在最终 `hand_validation_labels.jsonl` 中写入：
+
+```json
+{
+  "source_crop_path": "/home/peak/vals_data/02_roi_crops/images/session01_frame0001_palm0_crop.png",
+  "crop_path": "/root/autodl-tmp/eval_sources/peak_vals/02_roi_crops/images/session01_frame0001_palm0_crop.png",
+  "source_crop_id": "session01_frame0001:palm0:crop",
+  "global_crop_id": "peak_vals_shared_v1:session01_frame0001:palm0:crop",
+  "crop_id": "peak_vals_shared_v1:session01_frame0001:palm0:crop",
+  "evaluation_source_id": "peak_vals_shared",
+  "evaluation_owner": "Peak",
+  "evaluation_partition": "shared"
+}
+```
+
+训练或评测 loader 使用 `crop_path`；`source_crop_path` 仅用于追溯原始记录。
+
+## 9. 合并并冻结 Peak/Soar 100% 共享 Test
+
+Peak 和 Soar 各自完成自己的 `test_data` 自动标注、CVAT 完整人工复核和 `import_cvat_test`。两份数据最终共同组成一份、两条路线 100% 相同的 Test。
+
+每人在自己的数据上运行：
 
 ```powershell
 make validate_images_test
@@ -394,7 +597,7 @@ make run_mediapipe_test
 make export_cvat_test
 ```
 
-在 CVAT 完整复核后，将 XML 放到：
+在 CVAT 完整复核后，将 XML 放到各自 `test_data/03_reviewed/cvat_reviewed.xml`，然后运行：
 
 ```text
 ../autodl-tmp/test_data/03_reviewed/cvat_reviewed.xml
@@ -405,10 +608,82 @@ make export_cvat_test
 ```powershell
 make import_cvat_test
 make visualize_test
+```
+
+### 9.1 上传两个 Test source
+
+使用与 Val 完全相同的完整复核包规则，放置为：
+
+```text
+../autodl-tmp/eval_sources/peak_test/
+├─ 02_roi_crops/images/
+├─ 02_roi_crops/hand_roi_crops_manifest.jsonl
+├─ 03_reviewed/hand_landmarks_reviewed.jsonl
+└─ qc/cvat_import_stats.json
+
+../autodl-tmp/eval_sources/soar_test/
+├─ 02_roi_crops/images/
+├─ 02_roi_crops/hand_roi_crops_manifest.jsonl
+├─ 03_reviewed/hand_landmarks_reviewed.jsonl
+└─ qc/cvat_import_stats.json
+```
+
+不手工拼接 JSONL，不把两个 images 目录平铺合并。路径变化通过各 source 的 `crop_images_dir` 解决。
+
+同样需要区分：
+
+- 如果 Peak/Soar Test 是互补录制数据，即使文件名/local ID 相同，也可通过不同 `dataset_id` 安全合并；
+- 如果两人重复复核了完全相同的 Test 图片，先人工仲裁成一份权威结果，只登记一次，绝不能用 namespace 把同一图片计算两次。
+
+例如两个 source 的 local `crop_id` 都是 `test_0001:palm0:crop`，但实际来自不同录制图片，07B 会分别生成 `peak_test_shared_v1:test_0001:palm0:crop` 和 `soar_test_shared_v1:test_0001:palm0:crop`。如果两个包实际复制的是同一张图片，则仍必须先仲裁并只保留一个 source 中的权威行。
+
+### 9.2 Test 聚合配置
+
+```yaml
+dataset:
+  id: peak_soar_shared_test_v1
+  split: test
+
+evaluation:
+  require_palm_valid: true
+
+sources:
+  - source_id: peak_test_shared
+    dataset_id: peak_test_shared_v1
+    owner: Peak
+    partition: shared
+    root: ../autodl-tmp/eval_sources/peak_test
+    autolabel_config: configs/autolabel_test.yaml
+    crop_images_dir: 02_roi_crops/images
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
+    import_report: qc/cvat_import_stats.json
+
+  - source_id: soar_test_shared
+    dataset_id: soar_test_shared_v1
+    owner: Soar
+    partition: shared
+    root: ../autodl-tmp/eval_sources/soar_test
+    autolabel_config: configs/autolabel_test.yaml
+    crop_images_dir: 02_roi_crops/images
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
+    import_report: qc/cvat_import_stats.json
+
+outputs:
+  labels_dir: ../autodl-tmp/test_merged/05_labels
+  qc_dir: ../autodl-tmp/test_merged/qc
+```
+
+### 9.3 运行最终 Test 合并
+
+两份 source 都到位后只运行一次：
+
+```powershell
 make finalize_test
 ```
 
-`configs/finalize_test.yaml` 只包含 `test_shared` source。07B 同样检查 `peak_` / `soar_` 前缀和跨文件唯一性，但不会自动添加 namespace。
+07B 会检查两个 source 的唯一 `dataset_id`、source 内重复、图片路径、人工覆盖和 Gold 结构，然后生成全局 namespace 并原子写出一份共同 Test。它不会根据 owner 做不同筛选。
 
 最终文件：
 
@@ -426,10 +701,11 @@ make finalize_test
 |---|---|---|
 | `manifest_file_missing` | source 路径配置错误或 02 未完成 | 检查 `root` 和 manifest 路径 |
 | `reviewed_file_missing` | 05 尚未完成 | 先运行对应 `import_cvat_*` |
+| `crop_images_dir_missing` | 统一服务器上的真实 images 目录配置错误 | 修正该 source 的 `root` / `crop_images_dir`，不要改 JSONL 规避 |
 | `missing_cvat_import_report` | 缺少 05 的 QC 报告 | 重新运行 05，不要手工伪造 |
-| `cross_source_duplicate_crop_id` | shared/independent ID 冲突 | 检查预置 `peak_` / `soar_` 前缀和数据重复 |
-| `cross_source_duplicate_crop_basename` | 合并后文件名冲突 | 在 00 之前修正原始命名并重新生成 |
-| `crop_id_missing_declared_namespace_prefix` | ID 没有合法前缀 | 不让 07B 自动改名；回到源数据修正 |
+| `duplicate_evaluation_dataset_id` | 两个 source 使用了相同 namespace | 为每个 source 设置唯一 `dataset_id` |
+| `duplicate_crop_basename_within_source` | 同一个 source 内 basename 重复 | 修正该 source 自身的数据；跨 source 同名不受影响 |
+| `cross_source_same_physical_crop_path` | 两个 source 实际指向同一个物理文件 | 检查是否误把同一 source 登记两次；仲裁后只保留一次 |
 | `manifest_without_reviewed` | CVAT/05 覆盖不完整 | 补齐 CVAT XML 后重新导入 |
 | `invalid_reviewed_rows` | 非 ignored Gold 有结构或语义冲突 | 根据 report 中 crop ID 回 CVAT 修正 |
 | `evaluation_requires_palm_valid` | Eval 混入低分 negative candidate | 检查 Val/Test 配置是否错误开启候选导出 |
@@ -449,15 +725,17 @@ Train：
 
 Val：
 
-- [ ] `vals_data` 完成 00–05 和完整人工复核；
-- [ ] `vali_data` 完成 00–05 和完整人工复核；
-- [ ] 两部分使用预置 `peak_` / `soar_` 前缀；
+- [ ] Peak/Soar 两份 `vals_data` 均完成 00–05 和完整人工复核；
+- [ ] 当前路线自己的 `vali_data` 完成 00–05 和完整人工复核；
+- [ ] 三个 source 分目录上传，均包含 images、manifest、reviewed 和 import report；
+- [ ] 三个 source 的 `dataset_id` 唯一；不依赖原始文件名前缀；
 - [ ] `make finalize_val` 成功；
 - [ ] 查看 shared/independent 实际数量、ignored 比例和 SHA-256。
 
 Test：
 
-- [ ] 共享 `test_data` 完成 00–05 和完整人工复核；
+- [ ] Peak/Soar 两份 `test_data` 均完成 00–05 和完整人工复核；
+- [ ] 两个 Test source 分目录上传且没有重复计入同一 ROI；
 - [ ] 最终模型与阈值已冻结；
 - [ ] `make finalize_test` 成功；
 - [ ] Peak/Soar 使用相同 canonical 文件和 SHA-256。

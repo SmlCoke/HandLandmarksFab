@@ -1,7 +1,7 @@
 # Hand Landmarker 验证集处理方案
 
 > 文档定位：定义主验证集的人工复核、Gold 筛选、双手 ROI 和共享规则。  
-> 当前组成：共享 `vals_data` 与独立 `vali_data`；最终由 07B 合并为一个 Val Gold。  
+> 当前组成：Peak shared `vals_data` + Soar shared `vals_data` + 当前路线 independent `vali_data`；最终由 07B 合并为一个 Val Gold。
 > 更新时间：2026-07-10。
 
 ## 1. 验证集的角色
@@ -23,7 +23,7 @@
 - 冻结 presence 阈值；handedness 默认使用 0.5，若实验确需校准也只能在 Val 上完成并在 Test 前冻结；
 - 比较 FP32、量化仿真和板端输出。
 
-不得把 Val ROI 加入 Train gold，也不得根据 Val 样本重新生成训练伪标签。整体流程见 [两阶段训练流程总览](../hand_landmarker_training_workflow.md)。
+不得把 Val ROI 加入 Train gold，也不得根据 Val 样本重新生成训练伪标签。整体流程见 [两阶段训练流程总览](hand_landmarker_training_workflow.md)。
 
 ## 2. 人工复核前的流程
 
@@ -457,7 +457,7 @@ eligible_negative
 - `vali_data`：每条独立训练路线使用的独立 Val 部分；
 - 两部分分别完成 CVAT 复核和 05 导入，再由 `configs/finalize_val.yaml` 一次性合并；
 - 配置中不写死“80%/40%”，以实际 included ROI 数量为准并在报告中统计；
-- 原图、`crop_id` 和 crop 文件已经带 `peak_` / `soar_` 前缀，07B 只检查唯一性和前缀，不自动改名；
+- 每个 source 配置唯一 `dataset_id`，07B 自动为 crop/Palm/hand/原图分组 ID 添加 namespace；不依赖原文件名中的 `peak_` / `soar_`；
 - 两人先共同复核一批校准样本；
 - 正式标注可以各负责一部分；
 - 所有双手、ignore 和困难样本交叉复核；
@@ -490,7 +490,7 @@ CVAT reviewed XML
 
 ### 8.2 Val 的 07B 规则
 
-07B 同时读取 `vals_data`、`vali_data` 的 reviewed JSONL、行级 CVAT diagnostics 和 `cvat_import_stats.json`，然后：
+07B 同时读取 Peak shared、Soar shared、当前路线 independent 三个 source 的 reviewed JSONL、真实 images 目录、行级 CVAT diagnostics 和 `cvat_import_stats.json`，然后：
 
 1. manifest、CVAT image 和 reviewed row 一一覆盖且唯一；
 2. 先把 `ignore_for_training=true` 移入 ignored 输出；

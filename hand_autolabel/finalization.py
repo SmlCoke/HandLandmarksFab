@@ -578,9 +578,8 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
     configured_split = str(cfg.get("dataset", {}).get("split", split))
     if split not in {"val", "test"} or configured_split != split:
         raise FinalizationError(f"split mismatch: CLI={split}, config={configured_split}")
-    dataset_id = str(cfg.get("dataset", {}).get("id", f"{split}_unversioned"))
+    evaluation_dataset_id = str(cfg.get("dataset", {}).get("id", f"{split}_unversioned"))
     evaluation_cfg = cfg.get("evaluation", {})
-    allowed_prefixes = tuple(str(value) for value in evaluation_cfg.get("allowed_namespace_prefixes", []))
     outputs_cfg = cfg.get("outputs", {})
     labels_dir = resolve_path(root, outputs_cfg["labels_dir"])
     qc_dir = resolve_path(root, outputs_cfg["qc_dir"])
@@ -592,17 +591,23 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
     combined: List[Dict[str, Any]] = []
     source_reports: Dict[str, Any] = {}
     input_records: List[Dict[str, Any]] = []
-    global_crop_ids: Dict[str, str] = {}
-    global_basenames: Dict[str, str] = {}
+    physical_crop_paths: Dict[str, str] = {}
     seen_source_ids: set[str] = set()
+    seen_dataset_ids: set[str] = set()
 
     for source in sources:
         source_id = str(source["source_id"])
         if source_id in seen_source_ids:
             fatal.append({"source_id": source_id, "error": "duplicate_evaluation_source_id"})
         seen_source_ids.add(source_id)
+        source_dataset_id = str(source["dataset_id"])
+        if source_dataset_id in seen_dataset_ids:
+            fatal.append({"source_id": source_id, "dataset_id": source_dataset_id, "error": "duplicate_evaluation_dataset_id"})
+        seen_dataset_ids.add(source_dataset_id)
         partition = str(source.get("partition", source_id))
+        owner = str(source.get("owner", "unknown"))
         source_root = resolve_path(root, source["root"])
+        crop_images_dir = resolve_path(source_root, source.get("crop_images_dir", "02_roi_crops/images"))
         auto_cfg_path = resolve_path(root, source["autolabel_config"])
         auto_cfg = load_yaml_config(auto_cfg_path)
         source_split = str(auto_cfg.get("dataset", {}).get("split", split))
@@ -616,10 +621,14 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
             fatal.append({"source_id": source_id, "error": "manifest_file_missing", "path": str(manifest_path)})
         if not reviewed_path.is_file():
             fatal.append({"source_id": source_id, "error": "reviewed_file_missing", "path": str(reviewed_path)})
+        if not crop_images_dir.is_dir():
+            fatal.append({"source_id": source_id, "error": "crop_images_dir_missing", "path": str(crop_images_dir)})
         manifests, reviewed = read_jsonl(manifest_path), read_jsonl(reviewed_path)
         manifest_idx, manifest_dups = unique_index(manifests, "crop_id", f"{source_id}:manifest")
         reviewed_idx, reviewed_dups = unique_index(reviewed, "crop_id", f"{source_id}:reviewed")
         fatal.extend(manifest_dups + reviewed_dups)
+        basename_counts = Counter(Path(str(row.get("crop_path", ""))).name for row in manifests)
+        fatal.extend({"source_id": source_id, "error": "duplicate_crop_basename_within_source", "basename": name, "count": count} for name, count in basename_counts.items() if name and count > 1)
         missing = sorted(set(manifest_idx) - set(reviewed_idx))
         orphans = sorted(set(reviewed_idx) - set(manifest_idx))
         if missing:
@@ -627,23 +636,13 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
         if orphans:
             fatal.append({"source_id": source_id, "error": "reviewed_orphan", "crop_ids": orphans})
         for crop_id, manifest in manifest_idx.items():
-            previous = global_crop_ids.get(crop_id)
-            if previous is not None:
-                fatal.append({"error": "cross_source_duplicate_crop_id", "crop_id": crop_id, "sources": [previous, source_id]})
-            else:
-                global_crop_ids[crop_id] = source_id
             basename = Path(str(manifest.get("crop_path", ""))).name
-            previous_basename = global_basenames.get(basename)
-            if basename and previous_basename is not None:
-                fatal.append({"error": "cross_source_duplicate_crop_basename", "basename": basename, "sources": [previous_basename, source_id]})
-            elif basename:
-                global_basenames[basename] = source_id
-            if allowed_prefixes:
-                image_name = Path(str(manifest.get("image", ""))).name
-                if not any(str(crop_id).startswith(prefix) for prefix in allowed_prefixes):
-                    fatal.append({"source_id": source_id, "crop_id": crop_id, "error": "crop_id_missing_declared_namespace_prefix"})
-                if not any(image_name.startswith(prefix) for prefix in allowed_prefixes):
-                    fatal.append({"source_id": source_id, "crop_id": crop_id, "error": "image_missing_declared_namespace_prefix", "image": image_name})
+            physical_path = str((crop_images_dir / basename).resolve())
+            previous_source = physical_crop_paths.get(physical_path)
+            if previous_source is not None and previous_source != source_id:
+                fatal.append({"error": "cross_source_same_physical_crop_path", "path": physical_path, "sources": [previous_source, source_id]})
+            else:
+                physical_crop_paths[physical_path] = source_id
 
         if not import_report_path.is_file():
             fatal.append({"source_id": source_id, "error": "missing_cvat_import_report", "path": str(import_report_path)})
@@ -672,7 +671,10 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
                 fatal.append({"source_id": source_id, "error": "review_context_palm_det_id_mismatch", "crop_id": crop_id})
         combined.extend({
             "source_id": source_id,
+            "dataset_id": source_dataset_id,
             "partition": partition,
+            "owner": owner,
+            "crop_images_dir": crop_images_dir,
             "auto_cfg": auto_cfg,
             "manifest": manifest_idx[crop_id],
             "reviewed": reviewed_idx[crop_id],
@@ -680,7 +682,7 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
             "context_required": context_path.exists(),
         } for crop_id in sorted(set(manifest_idx) & set(reviewed_idx)))
         source_reports[source_id] = {
-            "partition": partition,
+            "dataset_id": source_dataset_id, "partition": partition, "owner": owner, "crop_images_dir": str(crop_images_dir),
             "manifest": len(manifests),
             "reviewed": len(reviewed),
             "missing": len(missing),
@@ -688,8 +690,11 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
         }
         input_records.append({
             "source_id": source_id,
+            "dataset_id": source_dataset_id,
             "partition": partition,
+            "owner": owner,
             "root": str(source_root),
+            "crop_images_dir": str(crop_images_dir),
             "autolabel_config": str(auto_cfg_path),
             "manifest": str(manifest_path),
             "reviewed": str(reviewed_path),
@@ -702,19 +707,34 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
     invalid_rows: List[Dict[str, Any]] = []
     check_images = bool(evaluation_cfg.get("check_crop_images", True))
     require_palm = bool(evaluation_cfg.get("require_palm_valid", True))
-    for item in sorted(combined, key=lambda value: str(value["manifest"].get("crop_id"))):
+    for item in sorted(combined, key=lambda value: (value["dataset_id"], str(value["manifest"].get("crop_id")))):
         manifest, raw = item["manifest"], item["reviewed"]
         auto_cfg = item["auto_cfg"]
-        crop_id = str(manifest.get("crop_id"))
+        source_crop_id = str(manifest.get("crop_id"))
+        global_crop_id = f"{item['dataset_id']}:{source_crop_id}"
+        source_palm_det_id = str(manifest.get("palm_det_id"))
+        global_palm_det_id = f"{item['dataset_id']}:{source_palm_det_id}"
+        source_image = str(manifest.get("image"))
         row_errors = validate_manifest_row(manifest) + manifest_conflicts(raw, manifest)
         seen = raw.get("cvat_image_seen")
         status = raw.get("cvat_review_status")
         if seen is not True or status == "missing_from_xml" or raw.get("source") == "cvat_reviewed_missing_image":
             row_errors.append("not_reviewed_in_cvat_xml")
         row = merge_label_with_manifest(raw, manifest, auto_cfg)
+        row["source_crop_path"] = manifest.get("crop_path")
+        row["crop_path"] = str(item["crop_images_dir"] / Path(str(manifest.get("crop_path", ""))).name)
+        source_hand_id = row.get("hand_id")
+        present = bool((row.get("hand_presence") or {}).get("present", False))
         row.update({
-            "schema_version": "evaluation_gold_v1", "dataset_id": dataset_id, "split": split,
+            "schema_version": "evaluation_gold_v1", "dataset_id": item["dataset_id"],
+            "evaluation_dataset_id": evaluation_dataset_id, "split": split,
+            "source_crop_id": source_crop_id, "global_crop_id": global_crop_id, "crop_id": global_crop_id,
+            "source_palm_det_id": source_palm_det_id, "global_palm_det_id": global_palm_det_id, "palm_det_id": global_palm_det_id,
+            "source_hand_id": source_hand_id, "hand_id": f"{global_crop_id}:hand" if present else None,
+            "source_image": source_image, "global_image_id": f"{item['dataset_id']}:{source_image}",
+            "source_group_id": f"{item['dataset_id']}:{source_image}",
             "evaluation_source_id": item["source_id"], "evaluation_partition": item["partition"],
+            "evaluation_owner": item["owner"],
             "annotation_provenance": "human_gold", "supervision_tier": "gold",
             "ground_truth_valid": not bool(row.get("ignore_for_training")),
         })
@@ -735,13 +755,12 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
                 row_errors.append("evaluation_requires_palm_valid")
             _, schema_errors = validate_label_schema(row, auto_cfg, gold=True, check_image=check_images, source_root=root)
             row_errors.extend(schema_errors)
-            present = bool((row.get("hand_presence") or {}).get("present", False))
             row["hand_presence_loss_weight"] = 1.0
             row["landmark_loss_weight"] = 1.0 if present else 0.0
             row["handedness_loss_weight"] = 1.0 if present else 0.0
             included.append(row)
         if row_errors:
-            invalid_rows.append({"source_id": item["source_id"], "crop_id": crop_id, "errors": sorted(set(row_errors))})
+            invalid_rows.append({"source_id": item["source_id"], "source_crop_id": source_crop_id, "global_crop_id": global_crop_id, "errors": sorted(set(row_errors))})
     if invalid_rows:
         fatal.append({"error": "invalid_reviewed_rows", "rows": invalid_rows})
     for source_id, source_report in source_reports.items():
@@ -755,7 +774,7 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
     ignored_path = labels_dir / f"hand_{split}_ignored.jsonl"
     report_path = qc_dir / f"finalize_{split}_report.json"
     report: Dict[str, Any] = {
-        "schema_version": "evaluation_gold_v1", "dataset_id": dataset_id, "split": split,
+        "schema_version": "evaluation_gold_v1", "evaluation_dataset_id": evaluation_dataset_id, "split": split,
         "status": "failed" if fatal else "ok", "fatal_errors": fatal,
         "coverage": {"manifest": sum(v["manifest"] for v in source_reports.values()), "reviewed": sum(v["reviewed"] for v in source_reports.values()), "included": len(included), "ignored": len(ignored), "missing": sum(v["missing"] for v in source_reports.values()), "orphans": sum(v["orphans"] for v in source_reports.values())},
         "sources": source_reports,
@@ -768,6 +787,8 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
             "ignored_reasons": dict(Counter(str((r.get("review_context") or {}).get("reason") or (r.get("review_context") or {}).get("context") or "unspecified") for r in ignored)),
             "partitions_included": dict(Counter(r.get("evaluation_partition") for r in included)),
             "sources_included": dict(Counter(r.get("evaluation_source_id") for r in included)),
+            "datasets_included": dict(Counter(r.get("dataset_id") for r in included)),
+            "owners_included": dict(Counter(r.get("evaluation_owner") for r in included)),
             "partition_included_ratio": {
                 key: count / max(1, len(included))
                 for key, count in Counter(r.get("evaluation_partition") for r in included).items()

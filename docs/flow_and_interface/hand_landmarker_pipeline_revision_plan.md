@@ -514,7 +514,7 @@ dataset:
   split: val
 ```
 
-Val 聚合配置列出 `vals_shared` 与 `vali_independent` 两个 source；Test 聚合配置列出一个 `test_shared` source。每个 source 都有独立 manifest、reviewed JSONL、import report 和可选 review context。
+每条 Val 路线的聚合配置列出 Peak shared、Soar shared 和当前路线 independent 三个 source；Test 聚合配置列出 Peak Test、Soar Test 两个 source。每个 source 都有独立 images、manifest、reviewed JSONL、import report 和可选 review context。
 
 ### 8.2 输入
 
@@ -524,7 +524,7 @@ Val 聚合配置列出 `vals_shared` 与 `vali_independent` 两个 source；Test
 - 可选但在双手/ignore 分组报告中必需的 `review_context.csv` sidecar；它保存 review reason/context，不改变 CVAT labels；
 - split、config 和版本元数据。
 
-07B 不允许直接用 draft 代替 reviewed Gold。Val/Test 原始文件已预置 `peak_` / `soar_` namespace，07B 只检查跨 source ID/basename 唯一性和前缀合法性，不自动改名。
+07B 不允许直接用 draft 代替 reviewed Gold。每个 Eval source 必须配置唯一 `dataset_id`；07B 与 07A 一样生成 `dataset_id:source_crop_id` 全局 namespace。跨 source local ID/basename 允许相同，不保留任何依赖原始文件名前缀的旧机制。
 
 ### 8.3 输出
 
@@ -548,7 +548,7 @@ included 行等权。可以保留三个 head mask 供 Val loss/指标计算，�
 
 ### 8.4 07B 执行顺序
 
-1. 分 source 验证 manifest、CVAT image、reviewed row 一一覆盖且唯一，再检查跨 source `crop_id` 和 basename 唯一；
+1. 分 source 验证 manifest、CVAT image、reviewed row 一一覆盖且唯一，检查 source 内 local ID/basename 唯一以及跨 source `dataset_id` 唯一；
 2. 拒绝 duplicate、orphan、missing XML image 和 `cvat_reviewed_missing_image`；
 3. 先识别 `ignore_for_training=true`，写入 ignored 输出；
 4. ignored 行不要求修正 skeleton，避免在歧义双手上浪费人工时间；

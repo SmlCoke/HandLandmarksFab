@@ -109,7 +109,7 @@ python -m pip install -r requirements.txt
 | `configs/finalize_train.yaml` | 07A 合并多个训练来源、自动 namespace、分型和降采样 |
 | `configs/autolabel_val.yaml` | shared Val，即 `vals_data`，运行 00–06 |
 | `configs/autolabel_vali.yaml` | independent Val，即 `vali_data`，运行 00–06 |
-| `configs/finalize_val.yaml` | 07B 合并 `vals_data + vali_data` 并冻结最终 Val |
+| `configs/finalize_val.yaml` | 07B 合并 Peak shared + Soar shared + 当前路线 independent Val |
 | `configs/autolabel_test.yaml` | shared Test 运行 00–06 |
 | `configs/finalize_test.yaml` | 07B 汇总并冻结最终 Test |
 
@@ -240,11 +240,11 @@ Val/Test 的来源和 namespace 规则：
 
 | 最终数据集 | 07B 输入 | namespace 处理 | 最终输出目录 |
 |---|---|---|---|
-| Val | 共享 `vals_data` + 独立 `vali_data` | 原始文件已使用 `peak_` / `soar_` 前缀；07B 只校验，不改名 | `../autodl-tmp/val_merged/` |
-| Test | 100% 共享 `test_data` | 同上 | `../autodl-tmp/test_merged/` |
+| Val | Peak `vals_data` + Soar `vals_data` + 当前路线自己的 `vali_data` | 07B 按每个 source 的 `dataset_id` 强制生成 namespace | `../autodl-tmp/val_merged/` |
+| Test | Peak `test_data` + Soar `test_data`，最终 100% 共享 | 同上；原始文件名允许重复 | `../autodl-tmp/test_merged/` |
 | Train | `configs/finalize_train.yaml` 中的多个来源 | 07A 按 `dataset_id` 自动生成全局 namespace | 配置中的 Train labels 目录 |
 
-共享 Val 使用 `configs/autolabel_val.yaml` 单独运行 00–06，独立 Val 使用 `configs/autolabel_vali.yaml` 单独运行 00–06；两部分都完成 05 导入后再运行一次 `make finalize_val`。07B 不写死 80%/40% 比例，而是在报告中按实际有效 ROI 数量统计 shared/independent 构成。
+两人的 shared Val 分别完成 05 导入，当前路线的 independent Val 也完成 05 导入后，再将三个 source 登记到 `configs/finalize_val.yaml` 并运行一次 `make finalize_val`。两人的 Test source 同理登记到 `configs/finalize_test.yaml` 后运行一次 `make finalize_test`。07B 不写死比例，而是在报告中按实际有效 ROI 数量统计 owner/source/partition 构成。
 
 完整的数据制作命令、配置示例和人工复核步骤见：[数据集制作操作手册](docs/flow_and_interface/dataset_preparation_workflow.md)。
 
