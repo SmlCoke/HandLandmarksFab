@@ -272,6 +272,7 @@ sources:
     autolabel_config: path/to/peak/autolabel_train.yaml
     manifest: path/to/peak/hand_roi_crops_manifest.jsonl
     pseudo_labels: path/to/peak/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: path/to/peak/02_roi_crops/images
     gold_manifest: path/to/peak/review_subset_manifest.jsonl
     gold_labels: path/to/peak/hand_landmarks_reviewed_subset.jsonl
     gold_import_report: path/to/peak/cvat_import_stats.json
@@ -283,6 +284,7 @@ sources:
     autolabel_config: path/to/soar/autolabel_train.yaml
     manifest: path/to/soar/hand_roi_crops_manifest.jsonl
     pseudo_labels: path/to/soar/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: path/to/soar/02_roi_crops/images
     gold_manifest: null
     gold_labels: null
     gold_import_report: null

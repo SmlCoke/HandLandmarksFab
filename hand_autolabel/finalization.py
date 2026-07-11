@@ -356,6 +356,9 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
     for source in cfg.get("sources", []):
         dataset_id = str(source["dataset_id"])
         source_root = resolve_path(root, source.get("root", "."))
+        crop_images_dir = resolve_path(source_root, source["crop_images_dir"]) if source.get("crop_images_dir") else None
+        if crop_images_dir is not None and not crop_images_dir.is_dir():
+            fatal.append({"scope": dataset_id, "error": "crop_images_dir_missing", "path": str(crop_images_dir)})
         auto_cfg_path = resolve_path(source_root, source["autolabel_config"])
         auto_cfg = load_yaml_config(auto_cfg_path)
         manifest_path = resolve_path(source_root, source["manifest"])
@@ -425,6 +428,9 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
             if conflicts:
                 fatal.append({"scope": dataset_id, "crop_id": local_id, "errors": conflicts, "source": provenance})
             row = merge_label_with_manifest(effective, manifest, auto_cfg)
+            if crop_images_dir is not None:
+                row["source_crop_path"] = manifest.get("crop_path")
+                row["crop_path"] = str(crop_images_dir / Path(str(manifest.get("crop_path", ""))).name)
             row.update({
                 "schema_version": str(cfg.get("schema_version", "train_finalize_v1")),
                 "dataset_id": dataset_id,
@@ -463,7 +469,10 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
             _training_weights(row, stage_cfg)
             source_rows.append(row)
         catalog.extend(source_rows)
-        source_stats[dataset_id] = {"manifest": len(manifests), "pseudo": len(pseudo_rows), "gold": len(gold_idx)}
+        source_stats[dataset_id] = {
+            "manifest": len(manifests), "pseudo": len(pseudo_rows), "gold": len(gold_idx),
+            "crop_images_dir": str(crop_images_dir) if crop_images_dir is not None else None,
+        }
     if not cfg.get("sources"):
         fatal.append({"error": "no_sources_configured"})
     if stage == "finetune" and not any(row.get("annotation_provenance") == "human_gold" for row in catalog):

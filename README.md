@@ -82,7 +82,6 @@ python -m pip install -r requirements.txt
 
 **关键字段及其含义**
 
-
 - `palm` 字段:
     - `backend`: Palm detection 来源。可取值: 
         - `mediapipe_official` **默认**。表示使用官方 MediaPipe 的公开手部关键点/handedness 结果，派生 palm-compatible detection。它不是官方内部 Palm ROI。
@@ -101,6 +100,18 @@ python -m pip install -r requirements.txt
     - `min_hand_detection_confidence`: **Palm detection 被认为成功的最低置信度阈值**。
     - `min_hand_presence_confidence`: **Hand landmark 模型内部 hand presence score 的最低阈值**。官方文档说明，在视频/直播模式中，**如果 hand presence 低于该阈值，会重新触发 palm detection**。
     - `min_tracking_confidence`: 视频/直播模式下的跟踪成功阈值，**本质上是当前帧与上一帧手框的 IoU 阈值**。当前半自动标注主要使用 IMAGE 模式，这个参数通常影响不大，但保留在配置里保持接口完整。
+
+**不同配置文件职责**
+
+| 配置 | 作用 |
+|---|---|
+| `configs/autolabel_train.yaml` | 单个 Train 来源运行 00–06 |
+| `configs/finalize_train.yaml` | 07A 合并多个训练来源、自动 namespace、分型和降采样 |
+| `configs/autolabel_val.yaml` | shared Val，即 `vals_data`，运行 00–06 |
+| `configs/autolabel_vali.yaml` | independent Val，即 `vali_data`，运行 00–06 |
+| `configs/finalize_val.yaml` | 07B 合并 `vals_data + vali_data` 并冻结最终 Val |
+| `configs/autolabel_test.yaml` | shared Test 运行 00–06 |
+| `configs/finalize_test.yaml` | 07B 汇总并冻结最终 Test |
 
 ### 3.3 运行顺序
 

@@ -135,6 +135,7 @@ sources:
     autolabel_config: configs/autolabel_train.yaml
     manifest: ../autodl-tmp/train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: ../autodl-tmp/train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: ../autodl-tmp/train_data/02_roi_crops/images
 
   - dataset_id: soar_train_v1
     contributor: Soar
@@ -142,14 +143,17 @@ sources:
     autolabel_config: configs/autolabel_train_soar.yaml
     manifest: ../autodl-tmp/soar_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: ../autodl-tmp/soar_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: ../autodl-tmp/soar_train_data/02_roi_crops/images
 ```
 
 要求：
 
 - 每个 `dataset_id` 全局唯一且版本固定；
+- 两个 `- dataset_id` 必须在 YAML 中保持同一级缩进；其余 source 字段比 `-` 多缩进两个空格；
 - Train 原文件可以同名，07A 会生成 `dataset_id:source_crop_id` 形式的 `global_crop_id`；
 - 不要手工把 `peak_` / `soar_` 再加到 Train JSONL，避免双重 namespace；
 - `autolabel_config` 必须与该来源实际运行 00–03 时使用的配置一致。
+- 如果数据搬迁后 manifest 内的 `crop_path` 已过期，必须设置 `crop_images_dir`；07A 会按 basename 定位真实图片，并把旧值保存在 `source_crop_path` 中。
 
 ### 4.3 生成 pretrain 清单
 
