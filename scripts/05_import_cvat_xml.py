@@ -37,11 +37,24 @@ def main() -> None:
     output_path = resolve_path(root, args.output_jsonl) if args.output_jsonl else reviewed_dir / "hand_landmarks_reviewed.jsonl"
     rows, import_stats = import_cvat_xml(xml_path, read_jsonl(manifest_path), read_jsonl(draft_path), cfg)
     write_jsonl(output_path, rows)
-    stats = summarize_label_rows(rows, cfg)
-    stats.update(import_stats)
-    stats["output_jsonl"] = str(output_path)
+    label_stats = summarize_label_rows(rows, cfg)
+    stats = {
+        "import_integrity": {
+            "warnings": import_stats.get("warnings", []),
+            "errors": import_stats.get("errors", []),
+            "coverage": import_stats.get("coverage", {}),
+            "reviewed_xml": import_stats.get("reviewed_xml"),
+        },
+        "label_heuristics": {
+            "warnings": label_stats.get("warnings", []),
+            "errors": label_stats.get("errors", []),
+            "needs_review_count": label_stats.get("needs_review", 0),
+        },
+        "counts": {key: label_stats[key] for key in ("total", "positive", "negative", "left", "right", "unknown_handedness")},
+        "output_jsonl": str(output_path),
+    }
     write_json(qc_dir / "cvat_import_stats.json", stats)
-    print(f"reviewed={len(rows)} positive={stats['positive']} negative={stats['negative']} output={output_path}")
+    print(f"reviewed={len(rows)} positive={label_stats['positive']} negative={label_stats['negative']} output={output_path}")
 
 
 if __name__ == "__main__":

@@ -1,17 +1,17 @@
 dataset:
-  id: shared_test_v1
-  split: test
-  partition: shared
+  id: vali_independent_v1
+  split: val
+  partition: independent
 
 paths:
-  images_dir: ../autodl-tmp/test_data/images
+  images_dir: ../autodl-tmp/vali_data/images
   palm_model_onnx: materials/preminilary/palm/model_opt.onnx
-  palm_outputs_dir: ../autodl-tmp/test_data/01_palm
-  roi_crops_dir: ../autodl-tmp/test_data/02_roi_crops
-  reviewed_dir: ../autodl-tmp/test_data/03_reviewed
-  visualization_dir: ../autodl-tmp/test_data/04_visualization
-  labels_dir: ../autodl-tmp/test_data/05_labels
-  qc_dir: ../autodl-tmp/test_data/qc
+  palm_outputs_dir: ../autodl-tmp/vali_data/01_palm
+  roi_crops_dir: ../autodl-tmp/vali_data/02_roi_crops
+  reviewed_dir: ../autodl-tmp/vali_data/03_reviewed
+  visualization_dir: ../autodl-tmp/vali_data/04_visualization
+  labels_dir: ../autodl-tmp/vali_data/05_labels
+  qc_dir: ../autodl-tmp/vali_data/qc
 
 image:
   width: 1280
@@ -22,22 +22,12 @@ image:
 palm:
   backend: aethersign_onnx
   input_size: 224
-
-  # 必须与最终板端使用的 Palm threshold 一致。
-  # 当前板端若使用 0.50，主 Val/Test 就保持 0.50。
   score_threshold: 0.50
-
-  # 保持与板端后处理一致，不为减少数据量而单独修改。
   nms_iou_threshold: 0.30
   cross_head_suppress_iou: 0.35
   max_detections: 2
-
-  # 主 Val/Test 的关键修改：关闭低分负候选导出。
   keep_low_score_candidates_for_negatives: false
-
-  # 关闭低分候选后不再实际生效，保留字段即可。
   negative_candidate_threshold: 0.15
-
   compatible_bbox_expand: 0.25
   mediapipe_official_full_image_first: false
   mediapipe_official_tile_sizes: [512]
@@ -46,8 +36,6 @@ palm:
 hand_roi:
   output_width: 256
   output_height: 256
-
-  # 必须与训练集和板端完全一致。
   scale_x: 1.8
   scale_y: 1.8
   shift_x: 0.0
@@ -56,9 +44,6 @@ hand_roi:
 mediapipe:
   model_asset_path: models/mediapipe/hand_landmarker.task
   num_hands: 1
-
-  # 用于生成初始自动标注，不建议在主评测集上为了“纯化”而提高。
-  # 最终标签应由人工复核确认。
   min_hand_detection_confidence: 0.5
   min_hand_presence_confidence: 0.5
   min_tracking_confidence: 0.5

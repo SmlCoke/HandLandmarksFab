@@ -1,6 +1,7 @@
 # Hand Landmarker 测试集处理方案
 
 > 文档定位：定义锁定测试集的人工复核、Gold 筛选、双手 ROI、共享与冻结规则。  
+> 共享方式：Peak 与 Soar 100% 使用同一份 Test；文件已带 `peak_` / `soar_` namespace。  
 > 当前数据：1247 张原始 TIFF，生成 856 个 ROI；自动结果为 452 positive、404 negative。  
 > 更新时间：2026-07-10。
 
@@ -256,11 +257,11 @@ Test 必须按原始录制 session 隔离：
 CVAT reviewed XML
   → 05_import_cvat_xml.py
   → hand_landmarks_reviewed.jsonl + cvat_import_stats.json
-  → 计划中的 07B_finalize_evaluation_labels.py --split test
+  → 07B_finalize_evaluation_labels.py --config configs/finalize_test.yaml --split test
   → hand_test_labels.jsonl
 ```
 
-当前 `05` 会记录 CVAT 冲突，但部分冲突仍能形成 reviewed row；当前通用 `07` 也不会拒绝所有 `needs_review=true`。因此未来 07B 必须执行 Gold 完整性门禁。
+`05` 会把 CVAT 覆盖状态和冲突写入行内及 import report；07B 对非 ignored 行执行严格 Gold 完整性门禁。
 
 ### 7.1 07B Test 规则
 
@@ -284,9 +285,9 @@ Test 需要“结构严格、人工语义权威”，不需要训练集式启发
 建议输出：
 
 ```text
-05_labels/hand_test_labels.jsonl
-05_labels/hand_test_ignored.jsonl
-qc/finalize_test_report.json
+../autodl-tmp/test_merged/05_labels/hand_test_labels.jsonl
+../autodl-tmp/test_merged/05_labels/hand_test_ignored.jsonl
+../autodl-tmp/test_merged/qc/finalize_test_report.json
 ```
 
 冻结包记录：

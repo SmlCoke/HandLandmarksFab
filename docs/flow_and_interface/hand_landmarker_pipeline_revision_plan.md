@@ -26,13 +26,7 @@ Train/Val/Test 继续只通过各自配置文件区分路径和 Palm candidate �
 06_visualize_autolabels.py
 ```
 
-将当前通用的：
-
-```text
-07_finalize_training_labels.py
-```
-
-拆为：
+最终处理使用两个独立入口：
 
 ```text
 07A_finalize_training_labels.py
@@ -345,13 +339,7 @@ qc/finalize_train_{stage}_report.json
 - stage-specific `excluded`：ID、action 和 reasons，避免第二阶段覆盖第一阶段排除记录；
 - report：数量、配置、hash 和错误。
 
-为兼容现有 loader，可以提供显式：
-
-```text
---compat-output data/05_labels/hand_training_labels.jsonl
-```
-
-但 stage-specific 文件应是 canonical，不应靠哪个文件最后写入来猜当前阶段。
+stage-specific 文件是唯一 canonical 输出，训练 loader 必须显式选择 pretrain 或 finetune 文件。
 
 ### 7.5 新增字段
 
@@ -508,57 +496,57 @@ review_candidates.csv
 
 ```powershell
 python scripts/07B_finalize_evaluation_labels.py `
-  --config configs/autolabel_val.yaml `
+  --config configs/finalize_val.yaml `
   --split val
 
 python scripts/07B_finalize_evaluation_labels.py `
-  --config configs/autolabel_test.yaml `
+  --config configs/finalize_test.yaml `
   --split test
 ```
 
-`--split` 必须显式为 `val|test`，并与配置中的 `dataset.split` 一致。建议给 Val/Test config 增加只读元数据：
+`--split` 必须显式为 `val|test`，并与聚合配置中的 `dataset.split` 一致：
 
 ```yaml
 dataset:
-  id: shared_val_v1
+  id: merged_val_v1
   split: val
 ```
 
-该字段不会影响 00-03。
+Val 聚合配置列出 `vals_shared` 与 `vali_independent` 两个 source；Test 聚合配置列出一个 `test_shared` source。每个 source 都有独立 manifest、reviewed JSONL、import report 和可选 review context。
 
 ### 8.2 输入
 
-- manifest；
-- `hand_landmarks_reviewed.jsonl`；
+- 一个或多个 source 的 manifest；
+- 每个 source 的 `hand_landmarks_reviewed.jsonl`；
 - CVAT import report（强制），并优先同时使用 05 写到行内的 import diagnostics；report 必须包含 XML hash、extra/duplicate XML images、missing manifest images 和按 crop ID 的冲突；
 - 可选但在双手/ignore 分组报告中必需的 `review_context.csv` sidecar；它保存 review reason/context，不改变 CVAT labels；
 - split、config 和版本元数据。
 
-07B 不允许直接用 draft 代替 reviewed Gold。
+07B 不允许直接用 draft 代替 reviewed Gold。Val/Test 原始文件已预置 `peak_` / `soar_` namespace，07B 只检查跨 source ID/basename 唯一性和前缀合法性，不自动改名。
 
 ### 8.3 输出
 
 Val：
 
 ```text
-05_labels/hand_validation_labels.jsonl
-05_labels/hand_val_ignored.jsonl
-qc/finalize_val_report.json
+../autodl-tmp/val_merged/05_labels/hand_validation_labels.jsonl
+../autodl-tmp/val_merged/05_labels/hand_val_ignored.jsonl
+../autodl-tmp/val_merged/qc/finalize_val_report.json
 ```
 
 Test：
 
 ```text
-05_labels/hand_test_labels.jsonl
-05_labels/hand_test_ignored.jsonl
-qc/finalize_test_report.json
+../autodl-tmp/test_merged/05_labels/hand_test_labels.jsonl
+../autodl-tmp/test_merged/05_labels/hand_test_ignored.jsonl
+../autodl-tmp/test_merged/qc/finalize_test_report.json
 ```
 
 included 行等权。可以保留三个 head mask 供 Val loss/指标计算，但不得写训练集式 pseudo quality 或降采样权重。
 
 ### 8.4 07B 执行顺序
 
-1. 验证 manifest、CVAT image、reviewed row 一一覆盖且唯一；
+1. 分 source 验证 manifest、CVAT image、reviewed row 一一覆盖且唯一，再检查跨 source `crop_id` 和 basename 唯一；
 2. 拒绝 duplicate、orphan、missing XML image 和 `cvat_reviewed_missing_image`；
 3. 先识别 `ignore_for_training=true`，写入 ignored 输出；
 4. ignored 行不要求修正 skeleton，避免在歧义双手上浪费人工时间；
@@ -676,80 +664,18 @@ finalize_train_pretrain
 finalize_train_finetune
 finalize_val
 finalize_test
-finalize_train_smoke
-finalize_eval_smoke
-test_finalize
 ```
 
 映射：
 
 - `finalize_train_pretrain/finetune` → 07A；
 - `finalize_val/test` → 07B；
-- `test_finalize` → 标准库 unittest；
 - help 同步说明 canonical 输出。
 
-当前 smoke reviewed 数据包含既有 warning，不应直接作为严格 07B 的唯一成功 fixture。需要建立最小 synthetic clean fixture。
-
-迁移期明确现有 targets：
-
 - 新增 `FINALIZE_TRAIN_CONFIG ?= configs/finalize_train.yaml`；
-- `finalize_train` 暂作为 deprecated alias 指向 `finalize_train_pretrain`，help 明确提示；
-- `finalize_smoke` 保留 legacy 一个版本，同时新增两个新 smoke target；
-- `finalize_val`/`finalize_test` 改指 07B，属于输出契约变化，help 和 README 必须列出新 canonical 文件名；
-- 一个迁移周期后再删除 legacy alias，不能让同名 target 在不同机器静默执行不同脚本。
 
-## 11. 测试计划
-
-当前仓库没有自动 tests。新增：
-
-```text
-tests/test_finalize_training.py
-tests/test_finalize_evaluation.py
-```
-
-优先使用标准库 `unittest`，避免额外测试依赖。
-
-### 11.1 07A 测试
-
-- 四种 `palm_valid × presence` 分类；
-- Gold 覆盖 pseudo；
-- explicit ignore；
-- malformed positive/negative；
-- duplicate global ID/basename；
-- manifest/label mismatch；
-- dataset namespace；
-- deterministic duplicate clustering；
-- negative 与同图 positive 重叠；
-- source balance 与 sampling weight；
-- pretrain/finetune profile；
-- fatal 时不覆盖旧输出。
-
-### 11.2 07B 测试
-
-- clean positive/negative 成功；
-- 高 Palm score 人工 negative 必须成功；
-- ignored 双手不阻塞；
-- multiple skeleton；
-- missing CVAT image；
-- `no_hand+skeleton`；
-- missing/dual handedness；
-- point id 不完整或重复；
-- NaN/Inf；
-- norm/px/image 投影不一致；
-- `palm_valid=false` 在正式 split 失败；
-- fatal 时不覆盖冻结输出；
-- report 与输出 hash 稳定。
-
-multiple skeleton、`no_hand+skeleton` 和 missing XML 等场景至少要有一组 `05 → 07B` integration fixture，不能只手工构造 reviewed row，否则无法证明 05 的行内 diagnostics/report 契约真的被 07B消费。
-
-### 11.3 Smoke
-
-使用 README 指定 `anfab` 环境和 Makefile：
-
-- 07A smoke：小型 pseudo + Gold override + duplicate fixture；
-- 07B smoke：至少一个 Gold positive、一个 Gold hard negative、一个 ignored 双手；
-- 验证 canonical、ignored、excluded、report 均生成；
-- 验证旧的 00-06 smoke 不受影响。
+- `finalize_val`/`finalize_test` 直接指向 07B；
+- 不提供含义模糊的 `finalize_train` 别名，必须显式选择 pretrain 或 finetune。
 
 另外新增轻量 `audit_split_leakage` 纯函数或 target：输出 Train/Val/Test 的 `dataset_id + source_image_uid` inventory，并在原图 hash 可用时检测“改名但内容相同”的泄漏。同一原图及其所有 ROI 必须只属于一个 split；缺少原图文件时明确报告 hash coverage，不能把“未发现”写成“确认无泄漏”。
 
@@ -777,18 +703,15 @@ multiple skeleton、`no_hand+skeleton` 和 missing XML 等场景至少要有一�
 - config、Gold、eligible、ignored 和输出 hash；
 - split 和评测 schema 版本。
 
-canonical JSONL 和一个排除生成时间、绝对路径、dirty git 状态等 volatile metadata 的 `data_fingerprint` 必须跨相同输入重复运行保持稳定。完整 report 可以包含时间与运行环境，因此不要求整份 report 文件 SHA256 跨机器一致；测试应校验 report schema、内部输入/输出 hash 和 `data_fingerprint`，而不是校验整个 report 的字节 hash。
+canonical JSONL 和一个排除生成时间、绝对路径、dirty git 状态等 volatile metadata 的 `data_fingerprint` 必须跨相同输入重复运行保持稳定。完整 report 可以包含时间与运行环境，因此不要求整份 report 文件 SHA256 跨机器一致；发布前应核对 report schema、内部输入/输出 hash 和 `data_fingerprint`，而不是比较整个 report 的字节 hash。
 
-## 13. 迁移与兼容
+## 13. 稳定接口约束
 
-1. 先新增 07A/07B 和 additive 字段，不删除旧 07；
-2. 旧 `07_finalize_training_labels.py` 保留一个迁移周期，运行时打印 deprecation；
-3. 正式 Makefile targets 切换到新脚本；
-4. 可显式生成兼容的 `hand_training_labels.jsonl`，但不能让它覆盖 stage canonical 的含义；
-5. `06_visualize_autolabels.py --labels-jsonl` 对原始 per-source local-ID 数据继续不变；canonical merged 07A 输出使用 global `crop_id`，现有 06 无法直接与 local manifest join。实现时二选一：07A 额外输出 per-source/local-ID view，或后续让 06 支持 source registry 与 `source_crop_id`；不得声称无需修改即可可视化 merged catalog；
-6. 不自动删除、移动或重写现有大规模数据；
-7. 合并两位成员数据前先生成 namespace catalog 和冲突报告；
-8. 完成一轮 smoke 与人工抽样对比后，再考虑删除 legacy 07。
+1. 07A/07B 是唯一正式 finalizer 入口；
+2. stage-specific JSONL 是唯一 canonical 训练输出；
+3. `06_visualize_autolabels.py --labels-jsonl` 对原始 per-source local-ID 数据继续不变；canonical merged 07A 输出使用 global `crop_id`，现有 06 无法直接与 local manifest join；
+4. 不自动删除、移动或重写现有大规模数据；
+5. 合并两位成员数据前先生成 namespace catalog 和冲突报告。
 
 ## 14. 实施顺序
 
@@ -798,8 +721,7 @@ canonical JSONL 和一个排除生成时间、绝对路径、dirty git 状态等
 2. 实现公共唯一性、coverage 和 landmark schema 校验；
 3. 实现 per-crop Palm anchor reference 与 review sidecar 校验；
 4. 实现严格 07B；
-5. 建立 synthetic Gold tests；
-6. 先冻结可信 Val/Test。
+5. 先冻结可信 Val/Test。
 
 理由：没有可信 Val/Test，无法判断 07A 的任何筛选或权重是否有效。
 

@@ -1,0 +1,36 @@
+schema_version: train_finalize_v1
+
+# 每份数据使用独立 dataset_id。队友的数据请复制下面条目并修改路径，不能复用 dataset_id。
+sources:
+  - dataset_id: peak_train_v1
+    contributor: Peak
+    root: .
+    autolabel_config: configs/autolabel_train.yaml
+    manifest: ../autodl-tmp/train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: ../autodl-tmp/train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    # 有人工精标子集后再启用；同 crop_id 的 Gold 会先覆盖 pseudo。
+    # gold_labels: ../autodl-tmp/train_data/03_reviewed/hand_landmarks_reviewed.jsonl
+
+validation:
+  check_crop_images: true
+
+dedup:
+  positive_normalized_distance: 0.18
+  max_positive_representatives_per_cluster: 1
+  negative_roi_iou: 0.85
+  negative_positive_overlap_iou: 0.70
+  max_negatives_per_type_per_image: 1
+
+stages:
+  pretrain:
+    supervision_loss_weights: {pseudo: 0.7, gold: 1.0}
+    quality_loss_weights: {HIGH: 1.0, MEDIUM: 0.7, PRESENCE_ONLY: 0.4, AMBIGUOUS: 0.0, INVALID: 0.0}
+    sampling_weights: {POS_RUNTIME: 0.70, POS_LOW_PALM: 0.70, NEG_RUNTIME_CANDIDATE: 0.25, NEG_LOW_PALM_CANDIDATE: 0.05}
+  finetune:
+    supervision_loss_weights: {pseudo: 0.5, gold: 1.0}
+    quality_loss_weights: {HIGH: 1.0, MEDIUM: 0.6, PRESENCE_ONLY: 0.3, AMBIGUOUS: 0.0, INVALID: 0.0}
+    sampling_weights: {POS_RUNTIME: 0.70, POS_LOW_PALM: 0.70, NEG_RUNTIME_CANDIDATE: 0.25, NEG_LOW_PALM_CANDIDATE: 0.05}
+
+outputs:
+  labels_dir: ../autodl-tmp/train_data/05_labels
+  qc_dir: ../autodl-tmp/train_data/qc

@@ -223,6 +223,7 @@ def export_cvat_xml(
 
     width = int(cfg["hand_roi"]["output_width"])
     height = int(cfg["hand_roi"]["output_height"])
+
     positives = 0
     negatives = 0
     handedness_tags = {"Left": 0, "Right": 0, "unknown": 0}
@@ -333,6 +334,26 @@ def import_cvat_xml(
     width = int(cfg["hand_roi"]["output_width"])
     height = int(cfg["hand_roi"]["output_height"])
 
+    def append_reviewed_row(base: Dict[str, Any], row_warnings: List[str], row_errors: List[str]) -> None:
+        present = bool((base.get("hand_presence") or {}).get("present", False))
+        if row_errors:
+            status = "import_conflict"
+        elif bool(base.get("ignore_for_training", False)):
+            status = "reviewed_ignored"
+        elif present:
+            status = "reviewed_positive"
+        else:
+            status = "reviewed_negative"
+        base["cvat_image_seen"] = True
+        base["cvat_review_status"] = status
+        base["cvat_import_warnings"] = sorted(set(row_warnings))
+        base["cvat_import_errors"] = sorted(set(row_errors))
+        rows.append(base)
+        if row_warnings:
+            warnings.append({"crop_id": base.get("crop_id"), "warnings": sorted(set(row_warnings))})
+        if row_errors:
+            errors.append({"crop_id": base.get("crop_id"), "errors": sorted(set(row_errors))})
+
     for image_el in root_el.findall("image"):
         image_name = Path(str(image_el.attrib.get("name", ""))).name
         seen_names.add(image_name)
@@ -378,11 +399,7 @@ def import_cvat_xml(
                     "ignore_for_training": bool(ignore_for_training),
                 }
             )
-            rows.append(base)
-            if row_warnings:
-                warnings.append({"crop_id": base.get("crop_id"), "warnings": row_warnings})
-            if row_errors:
-                errors.append({"crop_id": base.get("crop_id"), "errors": row_errors})
+            append_reviewed_row(base, row_warnings, row_errors)
             continue
 
         pts, skeleton_warnings, skeleton_errors = _parse_cvat_skeleton(skeleton_shapes[0], point_labels)
@@ -417,11 +434,7 @@ def import_cvat_xml(
                 "ignore_for_training": bool(ignore_for_training),
             }
         )
-        rows.append(base)
-        if row_warnings:
-            warnings.append({"crop_id": base.get("crop_id"), "warnings": row_warnings})
-        if row_errors:
-            errors.append({"crop_id": base.get("crop_id"), "errors": row_errors})
+        append_reviewed_row(base, row_warnings, row_errors)
 
     for manifest in manifest_rows:
         crop_name = Path(str(manifest["crop_path"])).name
@@ -431,8 +444,24 @@ def import_cvat_xml(
         base = merge_label_with_manifest(dict(draft), manifest, cfg)
         base["needs_review"] = True
         base["source"] = "cvat_reviewed_missing_image"
+        base["cvat_image_seen"] = False
+        base["cvat_review_status"] = "missing_from_xml"
+        base["cvat_import_warnings"] = ["missing_from_cvat_xml"]
+        base["cvat_import_errors"] = []
         rows.append(base)
         warnings.append({"crop_id": base.get("crop_id"), "warnings": ["missing_from_cvat_xml"]})
 
-    stats = {"rows": len(rows), "warnings": warnings, "errors": errors, "reviewed_xml": str(xml_path)}
+    stats = {
+        "rows": len(rows),
+        "warnings": warnings,
+        "errors": errors,
+        "reviewed_xml": str(xml_path),
+        "coverage": {
+            "manifest_images": len(manifest_rows),
+            "xml_images": len(seen_names),
+            "reviewed_rows": len(rows),
+            "seen_manifest_images": sum(bool(row.get("cvat_image_seen")) for row in rows),
+            "missing_from_xml": sum(row.get("cvat_review_status") == "missing_from_xml" for row in rows),
+        },
+    }
     return rows, stats

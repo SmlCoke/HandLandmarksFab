@@ -173,13 +173,13 @@ paths:
   - `data/04_visualization/crop_images/*.png`
   - `data/04_visualization/review_index.csv`
 
-`07_finalize_training_labels.py`
+`07A_finalize_training_labels.py`
 
 - 输入：
   - `data/03_reviewed/hand_landmarks_reviewed.jsonl`
   - `data/02_roi_crops/hand_roi_crops_manifest.jsonl`
 - 输出：
-  - `data/05_labels/hand_training_labels.jsonl`
+  - `data/05_labels/hand_training_labels_{stage}.jsonl`
 
 ### Step 3：删除 CVAT 图片复制逻辑
 
@@ -235,7 +235,7 @@ def make_hand_id(crop_id):
 - `02_build_hand_roi_crops.py`
 - `mediapipe_roi_labeler.py`
 - `cvat_io.py`
-- `07_finalize_training_labels.py` 中所有 fallback hand_id。
+- `07A_finalize_training_labels.py` 中所有 fallback hand_id。
 
 验证：
 
@@ -393,7 +393,8 @@ python scripts/04_export_cvat_xml.py --config configs/autolabel.yaml
 Copy-Item data/02_roi_crops/cvat_autolabel.xml data/03_reviewed/cvat_reviewed.xml -Force
 python scripts/05_import_cvat_xml.py --config configs/autolabel.yaml
 python scripts/06_visualize_autolabels.py --config configs/autolabel.yaml
-python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
+# 正式 Train 使用 configs/finalize_train.yaml，并显式选择 pretrain 或 finetune
+python scripts/07A_finalize_training_labels.py --config configs/finalize_train.yaml --stage pretrain
 ```
 
 ### 验证项
@@ -407,7 +408,7 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 - `data/03_reviewed/hand_landmarks_reviewed.jsonl` 存在。
 - `data/04_visualization/global_images/*.png` 存在。
 - `data/04_visualization/crop_images/*.png` 存在。
-- `data/05_labels/hand_training_labels.jsonl` 存在。
+- `data/05_labels/hand_training_labels_pretrain.jsonl` 存在。
 - `data/qc/*.json` 仍按原结构输出。
 - JSONL 中不再出现 `:crop0` 和 `:hand0`。
 - `hand_presence` 中不出现 `score` 字段。

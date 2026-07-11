@@ -1,0 +1,32 @@
+dataset:
+  id: merged_val_v1
+  split: val
+
+evaluation:
+  require_palm_valid: true
+  check_crop_images: true
+  minimum_included: 1
+  allowed_namespace_prefixes: [peak_, soar_]
+
+sources:
+  - source_id: vals_shared
+    partition: shared
+    root: ../autodl-tmp/vals_data
+    autolabel_config: configs/autolabel_val.yaml
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
+    import_report: qc/cvat_import_stats.json
+    review_context: 03_reviewed/review_context.csv
+
+  - source_id: vali_independent
+    partition: independent
+    root: ../autodl-tmp/vali_data
+    autolabel_config: configs/autolabel_vali.yaml
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
+    import_report: qc/cvat_import_stats.json
+    review_context: 03_reviewed/review_context.csv
+
+outputs:
+  labels_dir: ../autodl-tmp/val_merged/05_labels
+  qc_dir: ../autodl-tmp/val_merged/qc

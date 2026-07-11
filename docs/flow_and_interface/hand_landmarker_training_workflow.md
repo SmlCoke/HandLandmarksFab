@@ -36,12 +36,13 @@
 
 详细处理规则见：
 
-- [训练集处理方案](hand_landmarker_train_dataset_processing.md)
-- [验证集处理方案](hand_landmarker_val_dataset_processing.md)
-- [测试集处理方案](hand_landmarker_test_dataset_processing.md)
-- [处理系统修正计划](hand_landmarker_pipeline_revision_plan.md)
+- [训练集处理方案](flow_and_interface/hand_landmarker_train_dataset_processing.md)
+- [验证集处理方案](flow_and_interface/hand_landmarker_val_dataset_processing.md)
+- [测试集处理方案](flow_and_interface/hand_landmarker_test_dataset_processing.md)
+- [处理系统修正计划](flow_and_interface/hand_landmarker_pipeline_revision_plan.md)
+- [数据集制作操作手册](flow_and_interface/dataset_preparation_workflow.md)
 
-> 当前实现状态：仓库目前仍只有通用 `07_finalize_training_labels.py`。本文提到的 07A、07B、quality catalog 和 stage-specific 输出都是下一步实施计划，当前不能直接按这些命令运行。
+> 当前实现状态：07A、07B、quality catalog 和 stage-specific 输出已经实现，可直接按本文命令运行。
 
 ## 3. 总体流程
 
@@ -58,17 +59,23 @@ flowchart TD
     I --> J["FP32、量化仿真、A1 板端检查"]
     J --> K["锁定 Test，只进行最终评测"]
 
-    V["独立 Val 原始 TIFF"] --> V1["00-04 → CVAT 全量人工复核 → 05 → 可选 06 → 计划中的 07B"]
-    T["独立 Test 原始 TIFF"] --> T1["00-04 → CVAT 全量人工复核 → 05 → 可选 06 → 计划中的 07B"]
-    V1 --> E
-    V1 --> I
+    VS["共享 vals_data"] --> V1["00-04 → CVAT 全量复核 → 05"]
+    VI["独立 vali_data"] --> V2["00-04 → CVAT 全量复核 → 05"]
+    V1 --> VM["07B 合并并冻结 Val"]
+    V2 --> VM
+    T["100% 共享 Test"] --> T1["00-04 → CVAT 全量复核 → 05 → 07B 冻结"]
+    VM --> E
+    VM --> I
     T1 --> K
 ```
 
 人工复核之前，Train/Val/Test 都继续使用相同的 `00`、`01`、`02`、`03` 流程，只通过不同配置文件指定路径和是否保留低分 Palm 候选：
 
 - Train：`configs/autolabel_train.yaml`
-- Val：`configs/autolabel_val.yaml`
+- 共享 Val：`configs/autolabel_val.yaml`，对应 `vals_data`
+- 独立 Val：`configs/autolabel_vali.yaml`，对应 `vali_data`
+- Val 最终合并：`configs/finalize_val.yaml`
+- Test 最终合并：`configs/finalize_test.yaml`
 - Test：`configs/autolabel_test.yaml`
 
 Val/Test 已关闭 `negative_candidates` 导出，只评估板端 Palm 阈值实际会送入 Hand Landmarker 的 detections。该设计应保持不变。
@@ -249,7 +256,7 @@ Train gold：30%～50%
 
 主 Val/Test 中被 `ignore_for_training` 排除的歧义双手 ROI 不计入主指标，可以单独形成挑战集并报告覆盖率与失败案例。
 
-双手 ROI 是否可进入主指标，必须按 [验证集处理方案第 5 节](hand_landmarker_val_dataset_processing.md) 执行 `crop_id → palm_det_id → bbox/p0/p9` 的目标手追溯；不能用“最大、最居中或 Google 先标到的手”替代 Palm anchor 证据。
+双手 ROI 是否可进入主指标，必须按 [验证集处理方案第 5 节](flow_and_interface/hand_landmarker_val_dataset_processing.md) 执行 `crop_id → palm_det_id → bbox/p0/p9` 的目标手追溯；不能用“最大、最居中或 Google 先标到的手”替代 Palm anchor 证据。
 
 ## 8. 模型选择与实验记录
 

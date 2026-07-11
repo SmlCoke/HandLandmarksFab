@@ -1,7 +1,7 @@
 # Hand Landmarker 验证集处理方案
 
 > 文档定位：定义主验证集的人工复核、Gold 筛选、双手 ROI 和共享规则。  
-> 当前数据：1386 张原始 TIFF，生成 1028 个 ROI；自动结果为 734 positive、294 negative。  
+> 当前组成：共享 `vals_data` 与独立 `vali_data`；最终由 07B 合并为一个 Val Gold。  
 > 更新时间：2026-07-10。
 
 ## 1. 验证集的角色
@@ -23,14 +23,15 @@
 - 冻结 presence 阈值；handedness 默认使用 0.5，若实验确需校准也只能在 Val 上完成并在 Test 前冻结；
 - 比较 FP32、量化仿真和板端输出。
 
-不得把 Val ROI 加入 Train gold，也不得根据 Val 样本重新生成训练伪标签。整体流程见 [两阶段训练流程总览](hand_landmarker_training_workflow.md)。
+不得把 Val ROI 加入 Train gold，也不得根据 Val 样本重新生成训练伪标签。整体流程见 [两阶段训练流程总览](../hand_landmarker_training_workflow.md)。
 
 ## 2. 人工复核前的流程
 
-继续使用：
+共享和独立部分分别运行相同的 00–04：
 
 ```text
-configs/autolabel_val.yaml
+共享 vals_data：configs/autolabel_val.yaml
+独立 vali_data：configs/autolabel_vali.yaml
 00_validate_images.py
 01_export_palm_detections.py
 02_build_hand_roi_crops.py
@@ -58,7 +59,8 @@ Val 不导出低分 `negative_candidates`。所有正常生成的 ROI 都应来�
 CVAT 复核双手或目标不明确样本前，建议额外用 draft 运行：
 
 ```powershell
-python scripts/06_visualize_autolabels.py --config configs/autolabel_val.yaml --labels-jsonl <hand_landmarks_autolabel_draft.jsonl>
+python scripts/06_visualize_autolabels.py --config configs/autolabel_val.yaml --labels-jsonl <vals_draft.jsonl>
+python scripts/06_visualize_autolabels.py --config configs/autolabel_vali.yaml --labels-jsonl <vali_draft.jsonl>
 ```
 
 它生成原图 Palm bbox、p0/p9 和 rotated ROI overlay，只用于帮助确认当前 ROI 的 Palm anchor，不改变 `00-03` 输出或任何标签。
@@ -449,10 +451,13 @@ eligible_negative
 
 如果两人使用完全不同的 Val，就无法判断结果差异来自模型还是数据难度。共同 Val 才能公平比较。
 
-推荐组织：
+当前组织固定为：
 
-- 70%～100% 主 Val 共享；
-- 两人可以各自再保留数百 ROI 的 private dev/challenge，但不是必需；
+- `vals_data`：两人共享的主 Val 部分；
+- `vali_data`：每条独立训练路线使用的独立 Val 部分；
+- 两部分分别完成 CVAT 复核和 05 导入，再由 `configs/finalize_val.yaml` 一次性合并；
+- 配置中不写死“80%/40%”，以实际 included ROI 数量为准并在报告中统计；
+- 原图、`crop_id` 和 crop 文件已经带 `peak_` / `soar_` 前缀，07B 只检查唯一性和前缀，不自动改名；
 - 两人先共同复核一批校准样本；
 - 正式标注可以各负责一部分；
 - 所有双手、ignore 和困难样本交叉复核；
@@ -469,7 +474,7 @@ eligible_negative
 CVAT reviewed XML
   → 05_import_cvat_xml.py
   → hand_landmarks_reviewed.jsonl + cvat_import_stats.json
-  → 计划中的 07B_finalize_evaluation_labels.py
+  → 07B_finalize_evaluation_labels.py --config configs/finalize_val.yaml --split val
   → hand_validation_labels.jsonl
 ```
 
@@ -485,7 +490,7 @@ CVAT reviewed XML
 
 ### 8.2 Val 的 07B 规则
 
-计划中的 07B 必须读取 reviewed JSONL 和 CVAT import diagnostics（当前为 `cvat_import_stats.json`，未来可由 05 同时写到行内），然后：
+07B 同时读取 `vals_data`、`vali_data` 的 reviewed JSONL、行级 CVAT diagnostics 和 `cvat_import_stats.json`，然后：
 
 1. manifest、CVAT image 和 reviewed row 一一覆盖且唯一；
 2. 先把 `ignore_for_training=true` 移入 ignored 输出；
@@ -503,9 +508,9 @@ Val 需要的是“结构严格、语义由人工决定”，不是训练集式�
 建议输出：
 
 ```text
-05_labels/hand_validation_labels.jsonl
-05_labels/hand_val_ignored.jsonl
-qc/finalize_val_report.json
+../autodl-tmp/val_merged/05_labels/hand_validation_labels.jsonl
+../autodl-tmp/val_merged/05_labels/hand_val_ignored.jsonl
+../autodl-tmp/val_merged/qc/finalize_val_report.json
 ```
 
 报告必须包含：

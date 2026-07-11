@@ -330,23 +330,26 @@ data/05_labels/hand_training_labels.jsonl
 
 ### training
 
-`hand_training_labels.jsonl` 是 `07_finalize_training_labels.py` 生成的最终训练标注文件。它在 reviewed 基础上做严格清洗，并补充 loss weight 字段。
+`hand_training_labels_pretrain.jsonl` 和 `hand_training_labels_finetune.jsonl` 是 07A 生成的阶段化训练标注文件。
 
-## 8. `07_finalize_training_labels.py` 做了什么
+## 8. 07A / 07B 做了什么
 
-`07_finalize_training_labels.py` 的目标是把人工复核后的 crop 级标注变成训练可以直接读取的干净主文件：
+07A 负责有噪声训练集，07B 负责完整人工复核的 Val/Test：
 
 ```text
 输入:
-  data/03_reviewed/hand_landmarks_reviewed.jsonl
+  一个或多个训练来源的 manifest、pseudo labels
+  可选 human Gold labels
   data/02_roi_crops/hand_roi_crops_manifest.jsonl
 
 输出:
-  data/05_labels/hand_training_labels.jsonl
-  data/qc/final_training_label_stats.json
+  hand_train_catalog_{stage}.jsonl
+  hand_training_labels_{stage}.jsonl
+  hand_training_excluded_{stage}.jsonl
+  qc/finalize_train_{stage}_report.json
 ```
 
-它做的事情可以分成五类。
+07A 会执行 manifest 权威校验、四象限样本分型、Gold 覆盖、pseudo 质量分层、重复 ROI 降采样，并写入采样与 loss 权重。07B 则要求 manifest、CVAT 和 reviewed JSONL 一一覆盖，对非 ignored Gold 执行严格结构校验，不按 Palm/teacher 分数过滤，也不降采样。
 
 ### 8.1 合并 manifest 元数据
 
@@ -443,7 +446,7 @@ landmarks_image_px
 
 ### 8.7 `needs_review` 如何影响训练
 
-`07_finalize_training_labels.py` 不会因为 `needs_review=true` 自动把样本丢掉，也不会自动降低 loss weight。它只负责把这个标记保留到最终训练文件。
+07A 会把 `needs_review=true` 转化为具体 `quality_flags`，按质量策略将样本保留、hold 或排除，并输出独立的 sampling/supervision/quality 权重。
 
 后续训练脚本可以根据策略选择：
 
@@ -451,7 +454,7 @@ landmarks_image_px
 - 只过滤严重错误，保留轻微越界或低置信样本。
 - 使用更低的采样权重或 loss 权重。
 
-当前推荐做法是：正式训练前先查看 `data/qc/final_training_label_stats.json` 和 `data/04_visualization/review_index.csv`，确认 `needs_review=true` 的样本是否已经人工处理。
+正式训练前应查看 `qc/finalize_train_{stage}_report.json`、全量 catalog 和 `data/04_visualization/review_index.csv`，确认各类排除原因和采样分布。
 
 ## 9. 可视化如何使用
 

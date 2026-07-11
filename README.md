@@ -36,7 +36,8 @@ HandLandmarkerFab/
 │  ├─ 04_export_cvat_xml.py
 │  ├─ 05_import_cvat_xml.py
 │  ├─ 06_visualize_autolabels.py
-│  └─ 07_finalize_training_labels.py
+│  ├─ 07A_finalize_training_labels.py
+│  └─ 07B_finalize_evaluation_labels.py
 │
 ├─ hand_autolabel/
 │  ├─ __init__.py
@@ -118,7 +119,8 @@ python scripts/04_export_cvat_xml.py --config configs/autolabel.yaml
 
 python scripts/05_import_cvat_xml.py --config configs/autolabel.yaml
 python scripts/06_visualize_autolabels.py --config configs/autolabel.yaml
-python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
+
+# Train 使用 07A，Val/Test 使用 07B；完整命令见下文第 (7) 节
 ```
 
 ### 3.4 脚本输入输出
@@ -214,13 +216,56 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 - **输出**: `data/04_visualization/crop_images`, `data/04_visualization/global_images`, `data/04_visualization/review_index.csv`
 - **功能**: 在原图上绘制 Palm bbox、p0/p9、rotated ROI 和反投影后的 21 点骨架。
 
-#### (7) `07_finalize_training_labels.py`
+#### (7) `07A_finalize_training_labels.py` / `07B_finalize_evaluation_labels.py`
 
-- **输入**: `data/03_reviewed/hand_landmarks_reviewed.jsonl`、ROI manifest
-- **输出**: `data/05_labels/hand_training_labels.jsonl`、`data/qc/final_training_label_stats.json`
-- **功能**: 严格校验训练样本。正样本必须有 21 个 `landmarks_crop_norm`；负样本 landmarks 为空，并写入 loss weight: `landmark_loss_weight=0`、`handedness_loss_weight=0`。更多关于脚本 `07_finalize_training_labels.py` 的信息可以参考：
-    - [常见问题解答文档](docs/question_answers.md)
-    - [数据标注-训练接口文档](docs/hand_training_interface.md)
+正式数据集按用途分为两条流程：
+
+| 流程 | 数据集 | 主要处理 | 命令 |
+|---|---|---|---|
+| 07A | Train | 合并多个来源并为 ID 加 namespace；Gold 覆盖 pseudo；结构校验、样本分型、伪标签 QC、同原图重复 ROI 降采样；输出阶段化采样/监督权重 | `python scripts/07A_finalize_training_labels.py --config configs/finalize_train.yaml --stage pretrain` 或 `--stage finetune` |
+| 07B | Val/Test | 汇总一个或多个已人工复核的来源；要求 manifest、CVAT XML、reviewed JSONL 一一覆盖；严格校验 Gold；分离 `ignore_for_training`；不按 teacher/Palm 分数筛样本、不降采样 | `python scripts/07B_finalize_evaluation_labels.py --config configs/finalize_val.yaml --split val` 或使用 `configs/finalize_test.yaml --split test` |
+
+Val/Test 的来源和 namespace 规则：
+
+| 最终数据集 | 07B 输入 | namespace 处理 | 最终输出目录 |
+|---|---|---|---|
+| Val | 共享 `vals_data` + 独立 `vali_data` | 原始文件已使用 `peak_` / `soar_` 前缀；07B 只校验，不改名 | `../autodl-tmp/val_merged/` |
+| Test | 100% 共享 `test_data` | 同上 | `../autodl-tmp/test_merged/` |
+| Train | `configs/finalize_train.yaml` 中的多个来源 | 07A 按 `dataset_id` 自动生成全局 namespace | 配置中的 Train labels 目录 |
+
+共享 Val 使用 `configs/autolabel_val.yaml` 单独运行 00–06，独立 Val 使用 `configs/autolabel_vali.yaml` 单独运行 00–06；两部分都完成 05 导入后再运行一次 `make finalize_val`。07B 不写死 80%/40% 比例，而是在报告中按实际有效 ROI 数量统计 shared/independent 构成。
+
+完整的数据制作命令、配置示例和人工复核步骤见：[数据集制作操作手册](docs/flow_and_interface/dataset_preparation_workflow.md)。
+
+07A 按 `palm_valid × hand_presence` 划分四种训练样本：
+
+| `sample_type` | `palm_valid` | presence | 用途 |
+|---|---:|---:|---|
+| `POS_RUNTIME` | true | true | 部署路径正样本 |
+| `POS_LOW_PALM` | false | true | Palm 漏检但 teacher/Gold 找到手 |
+| `NEG_RUNTIME_CANDIDATE` | true | false | Palm 误检形成的 hard negative |
+| `NEG_LOW_PALM_CANDIDATE` | false | false | 低分背景负样本 |
+
+| 输出 | 说明 |
+|---|---|
+| `hand_train_catalog_{stage}.jsonl` | 07A 全量审计目录，包含保留、hold、ignore、无效和重复样本 |
+| `hand_training_labels_{stage}.jsonl` | 07A 可直接交给训练 loader 的 canonical 清单 |
+| `hand_training_excluded_{stage}.jsonl` | 07A 未进入本阶段训练的样本及原因 |
+| `hand_validation_labels.jsonl` / `hand_test_labels.jsonl` | 07B 严格 Gold 主评测集 |
+| `hand_val_ignored.jsonl` / `hand_test_ignored.jsonl` | 07B 排除的歧义/不可可靠标注样本 |
+| `qc/finalize_*_report.json` | 覆盖率、样本分布、排除原因和输出 SHA-256；fatal 时不覆盖已有 canonical 文件 |
+
+07A JSONL 新增的主要训练接口字段如下：
+
+| 字段组 | 字段 | 训练端用法 |
+|---|---|---|
+| 来源与追踪 | `dataset_id`、`source_crop_id`、`global_crop_id`、`source_group_id`、`annotation_provenance`、`supervision_tier` | 防止多人数据 ID 冲突，区分 pseudo 与 human Gold |
+| 分类与质量 | `sample_type`、`quality_tier`、`quality_flags`、`selection_action` | 只读取 `selection_action=include` 的 canonical 文件；QC/抽检使用 catalog |
+| 去重 | `duplicate_cluster_id`、`duplicate_cluster_size`、`duplicate_rank` | 追溯同一原图的重复 ROI 代表样本 |
+| 采样 | `sampling_bucket`、`sampling_weight` | loader 先按 Gold/pseudo，再按四种 sample type 做两级采样；该权重不乘入 loss |
+| loss | `supervision_loss_weight`、三个 `*_quality_weight`、三个 `*_loss_weight` | `*_loss_weight` 仅为 0/1 head mask；有效 head 权重 = mask × supervision × 对应 quality weight |
+
+`pretrain` 可直接使用 MediaPipe pseudo；`finetune` 在 `configs/finalize_train.yaml` 中配置人工 Gold JSONL 后重新运行，Gold 会先覆盖同 `crop_id` 的 pseudo。Val 用于调参和选 checkpoint，Test 只用于最终冻结评测。
 
 ### 3.5 CVAT 复核
 
@@ -235,7 +280,7 @@ python scripts/07_finalize_training_labels.py --config configs/autolabel.yaml
 4. 每张 crop 最多保留一个 `hand_landmarks` points shape，点数必须为 21，点顺序必须是 MediaPipe 21 点顺序。
 5. 无手 crop 删除 points，并保留或添加 `no_hand` tag。
 6. 导出 `CVAT for images 1.1` XML，保存为 `data/03_reviewed/cvat_reviewed.xml`。
-7. 运行 `05_import_cvat_xml.py` 和 `07_finalize_training_labels.py`。
+7. 运行 `05_import_cvat_xml.py`，然后根据数据集用途运行 `07A_finalize_training_labels.py` 或 `07B_finalize_evaluation_labels.py`。
 
 ### 3.6 小样例
 

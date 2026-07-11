@@ -32,7 +32,7 @@
 7. 生成第一阶段和第二阶段各自的训练清单；
 8. 保留全部排除原因和有效样本量统计。
 
-整体训练流程见 [两阶段训练流程总览](hand_landmarker_training_workflow.md)，后续脚本实现见 [处理系统修正计划](hand_landmarker_pipeline_revision_plan.md)。
+整体训练流程见 [两阶段训练流程总览](../hand_landmarker_training_workflow.md)，后续脚本实现见 [处理系统修正计划](hand_landmarker_pipeline_revision_plan.md)。
 
 > 当前仓库尚未实现本文所述 07A、global namespace、quality catalog 和 stage-specific sampler。这些是下一步代码需求，不是现在可以直接运行的既有功能。
 
