@@ -259,9 +259,10 @@ Val/Test 的来源和 namespace 规则：
 
 | 输出 | 说明 |
 |---|---|
-| `hand_train_catalog_{stage}.jsonl` | 07A 全量审计目录，包含保留、hold、ignore、无效和重复样本 |
-| `hand_training_labels_{stage}.jsonl` | 07A 可直接交给训练 loader 的 canonical 清单 |
-| `hand_training_excluded_{stage}.jsonl` | 07A 未进入本阶段训练的样本及原因 |
+| `train_pretrain_merged/05_labels/hand_train_catalog_pretrain.jsonl` | 07A pretrain 全量审计目录 |
+| `train_pretrain_merged/05_labels/hand_training_labels_pretrain.jsonl` | pretrain loader 使用的 canonical 清单 |
+| `train_pretrain_merged/05_labels/hand_training_excluded_pretrain.jsonl` | pretrain 未入选样本及原因 |
+| `train_finetune_merged/05_labels/*_finetune.jsonl` | finetune 独立输出，不覆盖 pretrain |
 | `hand_validation_labels.jsonl` / `hand_test_labels.jsonl` | 07B 严格 Gold 主评测集 |
 | `hand_val_ignored.jsonl` / `hand_test_ignored.jsonl` | 07B 排除的歧义/不可可靠标注样本 |
 | `qc/finalize_*_report.json` | 覆盖率、样本分布、排除原因和输出 SHA-256；fatal 时不覆盖已有 canonical 文件 |

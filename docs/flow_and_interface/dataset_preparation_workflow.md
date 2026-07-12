@@ -20,8 +20,10 @@
 
 ```text
 ../autodl-tmp/
-├─ train_data/
-├─ soar_train_data/          # 示例：Soar 的训练数据，可自行修改
+├─ peak_train_data/          # Peak 的原始训练来源及 00-06 中间产物
+├─ soar_train_data/          # Soar 的原始训练来源及 00-06 中间产物
+├─ train_pretrain_merged/    # 07A pretrain 最终合并输出
+├─ train_finetune_merged/    # 07A finetune 最终合并输出
 ├─ vals_data/                # 共享 Val
 ├─ vali_data/                # 当前路线独立 Val
 ├─ val_merged/               # 07B 生成的最终 Val
@@ -133,9 +135,9 @@ sources:
     contributor: Peak
     root: .
     autolabel_config: configs/autolabel_train.yaml
-    manifest: ../autodl-tmp/train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
-    pseudo_labels: ../autodl-tmp/train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
-    crop_images_dir: ../autodl-tmp/train_data/02_roi_crops/images
+    manifest: ../autodl-tmp/peak_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: ../autodl-tmp/peak_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: ../autodl-tmp/peak_train_data/02_roi_crops/images
 
   - dataset_id: soar_train_v1
     contributor: Soar
@@ -164,10 +166,10 @@ make finalize_train_pretrain
 主要输出：
 
 ```text
-hand_train_catalog_pretrain.jsonl
-hand_training_labels_pretrain.jsonl
-hand_training_excluded_pretrain.jsonl
-qc/finalize_train_pretrain_report.json
+../autodl-tmp/train_pretrain_merged/05_labels/hand_train_catalog_pretrain.jsonl
+../autodl-tmp/train_pretrain_merged/05_labels/hand_training_labels_pretrain.jsonl
+../autodl-tmp/train_pretrain_merged/05_labels/hand_training_excluded_pretrain.jsonl
+../autodl-tmp/train_pretrain_merged/qc/finalize_train_pretrain_report.json
 ```
 
 训练 loader 读取 `hand_training_labels_pretrain.jsonl`。07A 已完成：
@@ -262,7 +264,7 @@ make finalize_train_finetune
 07A 会先按原始 `crop_id` 用 Gold 覆盖 pseudo，再做分类和去重。训练 loader 改读：
 
 ```text
-hand_training_labels_finetune.jsonl
+../autodl-tmp/train_finetune_merged/05_labels/hand_training_labels_finetune.jsonl
 ```
 
 ## 6. shared Val：制作 `vals_data`

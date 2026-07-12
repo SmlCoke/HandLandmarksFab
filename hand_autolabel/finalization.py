@@ -348,6 +348,12 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
     if stage not in {"pretrain", "finetune"}:
         raise ValueError("stage must be pretrain or finetune")
     stage_cfg = cfg.get("stages", {}).get(stage, {})
+    try:
+        output_cfg = cfg["outputs"][stage]
+        labels_dir = resolve_path(root, output_cfg["labels_dir"])
+        qc_dir = resolve_path(root, output_cfg["qc_dir"])
+    except KeyError as exc:
+        raise FinalizationError(f"Missing required outputs.{stage}.{exc.args[0]} in {config_path}") from exc
     check_images = bool(cfg.get("validation", {}).get("check_crop_images", True))
     fatal: List[Dict[str, Any]] = []
     catalog: List[Dict[str, Any]] = []
@@ -525,9 +531,6 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
             "excluded": sum(r.get("selection_action") != "include" for r in source_rows),
             "sample_types": dict(Counter(r.get("sample_type") for r in source_rows)),
         })
-    outputs = cfg.get("outputs", {})
-    labels_dir = resolve_path(root, outputs.get("labels_dir", "data/05_labels"))
-    qc_dir = resolve_path(root, outputs.get("qc_dir", "data/qc"))
     paths = {
         "catalog": labels_dir / f"hand_train_catalog_{stage}.jsonl",
         "included": labels_dir / f"hand_training_labels_{stage}.jsonl",

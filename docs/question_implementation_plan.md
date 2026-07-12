@@ -408,7 +408,7 @@ python scripts/07A_finalize_training_labels.py --config configs/finalize_train.y
 - `data/03_reviewed/hand_landmarks_reviewed.jsonl` 存在。
 - `data/04_visualization/global_images/*.png` 存在。
 - `data/04_visualization/crop_images/*.png` 存在。
-- `data/05_labels/hand_training_labels_pretrain.jsonl` 存在。
+- `../autodl-tmp/train_pretrain_merged/05_labels/hand_training_labels_pretrain.jsonl` 存在。
 - `data/qc/*.json` 仍按原结构输出。
 - JSONL 中不再出现 `:crop0` 和 `:hand0`。
 - `hand_presence` 中不出现 `score` 字段。

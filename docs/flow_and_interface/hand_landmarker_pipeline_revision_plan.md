@@ -328,10 +328,17 @@ profiles:
 ### 7.4 输出
 
 ```text
-05_labels/hand_train_catalog_{stage}.jsonl
-05_labels/hand_training_labels_{stage}.jsonl
-05_labels/hand_training_excluded_{stage}.jsonl
-qc/finalize_train_{stage}_report.json
+pretrain:
+  ../autodl-tmp/train_pretrain_merged/05_labels/hand_train_catalog_pretrain.jsonl
+  ../autodl-tmp/train_pretrain_merged/05_labels/hand_training_labels_pretrain.jsonl
+  ../autodl-tmp/train_pretrain_merged/05_labels/hand_training_excluded_pretrain.jsonl
+  ../autodl-tmp/train_pretrain_merged/qc/finalize_train_pretrain_report.json
+
+finetune:
+  ../autodl-tmp/train_finetune_merged/05_labels/hand_train_catalog_finetune.jsonl
+  ../autodl-tmp/train_finetune_merged/05_labels/hand_training_labels_finetune.jsonl
+  ../autodl-tmp/train_finetune_merged/05_labels/hand_training_excluded_finetune.jsonl
+  ../autodl-tmp/train_finetune_merged/qc/finalize_train_finetune_report.json
 ```
 
 含义：
@@ -341,7 +348,7 @@ qc/finalize_train_{stage}_report.json
 - stage-specific `excluded`：ID、action 和 reasons，避免第二阶段覆盖第一阶段排除记录；
 - report：数量、配置、hash 和错误。
 
-stage-specific 文件是唯一 canonical 输出，训练 loader 必须显式选择 pretrain 或 finetune 文件。
+`outputs.pretrain` 和 `outputs.finetune` 是两个强制配置块；两个阶段写入不同根目录。stage-specific 文件是唯一 canonical 输出，训练 loader 必须显式选择 pretrain 或 finetune 文件。
 
 ### 7.5 新增字段
 
