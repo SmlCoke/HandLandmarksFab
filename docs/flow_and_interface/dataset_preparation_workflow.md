@@ -718,26 +718,26 @@ make finalize_test
 
 Train：
 
-- [ ] 每个来源 00–03 完成；
-- [ ] `finalize_train.yaml` 中每个 `dataset_id` 唯一；
-- [ ] `make finalize_train_pretrain` 成功；
-- [ ] 人工 Gold subset 完成 CVAT 和 05；
-- [ ] Gold 三个路径写入对应 source；
-- [ ] `make finalize_train_finetune` 成功。
+- [x] 每个来源 00–03 完成；
+- [x] `finalize_train.yaml` 中每个 `dataset_id` 唯一；
+- [x] `make finalize_train_pretrain` 成功；
+- [x] 人工 Gold subset 完成 CVAT 和 05；
+- [x] Gold 三个路径写入对应 source；
+- [x] `make finalize_train_finetune` 成功。
 
 Val：
 
-- [ ] Peak/Soar 两份 `vals_data` 均完成 00–05 和完整人工复核；
-- [ ] 当前路线自己的 `vali_data` 完成 00–05 和完整人工复核；
-- [ ] 三个 source 分目录上传，均包含 images、manifest、reviewed 和 import report；
-- [ ] 三个 source 的 `dataset_id` 唯一；不依赖原始文件名前缀；
-- [ ] `make finalize_val` 成功；
-- [ ] 查看 shared/independent 实际数量、ignored 比例和 SHA-256。
+- [x] Peak/Soar 两份 `vals_data` 均完成 00–05 和完整人工复核；
+- [x] 当前路线自己的 `vali_data` 完成 00–05 和完整人工复核；
+- [x] 三个 source 分目录上传，均包含 images、manifest、reviewed 和 import report；
+- [x] 三个 source 的 `dataset_id` 唯一；不依赖原始文件名前缀；
+- [x] `make finalize_val` 成功；
+- [x] 查看 shared/independent 实际数量、ignored 比例和 SHA-256。
 
 Test：
 
-- [ ] Peak/Soar 两份 `test_data` 均完成 00–05 和完整人工复核；
-- [ ] 两个 Test source 分目录上传且没有重复计入同一 ROI；
-- [ ] 最终模型与阈值已冻结；
-- [ ] `make finalize_test` 成功；
-- [ ] Peak/Soar 使用相同 canonical 文件和 SHA-256。
+- [x] Peak/Soar 两份 `test_data` 均完成 00–05 和完整人工复核；
+- [x] 两个 Test source 分目录上传且没有重复计入同一 ROI；
+- [x] 最终模型与阈值已冻结；
+- [x] `make finalize_test` 成功；
+- [x] Peak/Soar 使用相同 canonical 文件和 SHA-256。
