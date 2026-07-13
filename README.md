@@ -78,7 +78,22 @@ python -m pip install -r requirements.txt
 
 ### 3.2 配置
 
-主配置文件是 `configs/autolabel.yaml`。所有路径均相对仓库根目录解析。
+主配置文件是 `configs/autolabel.yaml`。配置中的相对路径均以仓库根目录解析；绝对路径保持不变。
+
+Val/Test 的三份 00–06 配置使用 `${HAND_DATA_ROOT:../autodl-tmp}` 作为数据根目录；该根目录下应包含 `vals_data/`、`vali_data/` 和 `test_data/`。未设置 `HAND_DATA_ROOT` 时仍回退到原来的 `../autodl-tmp`。可按使用场景选择以下方式设置：
+
+```powershell
+# 当前 PowerShell 会话；直接运行 Python 和 make 都会读取
+$env:HAND_DATA_ROOT = "D:/datasets/hand"
+
+# 仅覆盖这一次 make 调用
+make validate_images_vals HAND_DATA_ROOT=D:/datasets/hand
+
+# 每台机器持久设置：复制模板后编辑 Makefile.local（该文件已被 Git 忽略）
+Copy-Item Makefile.local.example Makefile.local
+```
+
+在 Linux/macOS shell 中可使用 `export HAND_DATA_ROOT=/data/hand`。Windows 路径建议使用正斜杠；若路径含空格，优先写入 `Makefile.local`。
 
 **关键字段及其含义**
 

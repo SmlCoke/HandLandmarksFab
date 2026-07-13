@@ -1,0 +1,3 @@
+# Copy this file to Makefile.local and set the root that contains
+# vals_data, vali_data, and test_data. Use forward slashes on Windows.
+HAND_DATA_ROOT := ../autodl-tmp

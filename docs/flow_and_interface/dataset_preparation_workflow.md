@@ -90,15 +90,15 @@ dataset:
   partition: shared
 
 paths:
-  images_dir: ../autodl-tmp/vals_data/images
-  palm_outputs_dir: ../autodl-tmp/vals_data/01_palm
-  roi_crops_dir: ../autodl-tmp/vals_data/02_roi_crops
-  reviewed_dir: ../autodl-tmp/vals_data/03_reviewed
-  labels_dir: ../autodl-tmp/vals_data/05_labels
-  qc_dir: ../autodl-tmp/vals_data/qc
+  images_dir: ${HAND_DATA_ROOT:../autodl-tmp}/vals_data/images
+  palm_outputs_dir: ${HAND_DATA_ROOT:../autodl-tmp}/vals_data/01_palm
+  roi_crops_dir: ${HAND_DATA_ROOT:../autodl-tmp}/vals_data/02_roi_crops
+  reviewed_dir: ${HAND_DATA_ROOT:../autodl-tmp}/vals_data/03_reviewed
+  labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/vals_data/05_labels
+  qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/vals_data/qc
 ```
 
-如果服务器目录不同，只修改 `paths`；不要为了减少标注量修改 Palm、NMS 或 ROI 参数。
+`HAND_DATA_ROOT` 未设置时回退到 `../autodl-tmp`。服务器目录不同时，通过外部环境变量、`make ... HAND_DATA_ROOT=/path/to/root`，或本机 `Makefile.local` 设置一次即可；不要逐项修改 `paths`，也不要为了减少标注量修改 Palm、NMS 或 ROI 参数。
 
 ## 4. Train 第一阶段：生成 pseudo 训练集
 
@@ -273,7 +273,7 @@ Peak 和 Soar 各自完成自己的 `vals_data` 自动标注与人工复核。�
 
 ### 6.1 自动标注
 
-确认 `configs/autolabel_val.yaml` 指向 `../autodl-tmp/vals_data`，然后运行：
+确认 `HAND_DATA_ROOT` 指向同时容纳 `vals_data`、`vali_data` 和 `test_data` 的根目录，然后运行：
 
 ```powershell
 make validate_images_vals
@@ -288,14 +288,14 @@ make export_cvat_vals
 上传：
 
 ```text
-../autodl-tmp/vals_data/02_roi_crops/images/
-../autodl-tmp/vals_data/02_roi_crops/cvat_autolabel.xml
+${HAND_DATA_ROOT}/vals_data/02_roi_crops/images/
+${HAND_DATA_ROOT}/vals_data/02_roi_crops/cvat_autolabel.xml
 ```
 
 完整人工复核全部 ROI，导出至：
 
 ```text
-../autodl-tmp/vals_data/03_reviewed/cvat_reviewed.xml
+${HAND_DATA_ROOT}/vals_data/03_reviewed/cvat_reviewed.xml
 ```
 
 然后运行：
@@ -393,7 +393,7 @@ tar -xzf soar_vals_reviewed.tar.gz -C ../autodl-tmp/eval_sources/soar_vals
 
 ## 7. independent Val：制作 `vali_data`
 
-确认 `configs/autolabel_vali.yaml` 指向当前路线自己的 `vali_data`：
+确认 `${HAND_DATA_ROOT}/vali_data` 是当前路线自己的 independent Val：
 
 ```powershell
 make validate_images_vali
@@ -406,7 +406,7 @@ make export_cvat_vali
 在 CVAT 完整复核后，将 XML 放到：
 
 ```text
-../autodl-tmp/vali_data/03_reviewed/cvat_reviewed.xml
+${HAND_DATA_ROOT}/vali_data/03_reviewed/cvat_reviewed.xml
 ```
 
 再运行：
@@ -602,7 +602,7 @@ make export_cvat_test
 在 CVAT 完整复核后，将 XML 放到各自 `test_data/03_reviewed/cvat_reviewed.xml`，然后运行：
 
 ```text
-../autodl-tmp/test_data/03_reviewed/cvat_reviewed.xml
+${HAND_DATA_ROOT}/test_data/03_reviewed/cvat_reviewed.xml
 ```
 
 运行：

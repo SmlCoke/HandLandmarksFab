@@ -1,11 +1,40 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, MutableMapping, Optional
 
 
 VALID_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp", ".webp"}
+ENV_PLACEHOLDER_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}")
+
+
+def _interpolate_config_env(value: Any, config_path: Path) -> Any:
+    """Recursively expand ${NAME:default} placeholders in parsed YAML values."""
+    if isinstance(value, str):
+
+        def replace(match: re.Match[str]) -> str:
+            name, default = match.group(1), match.group(2)
+            env_value = os.environ.get(name)
+            if env_value:
+                return env_value
+            if default is not None:
+                return default
+            raise ValueError(
+                f"Environment variable {name} is required by config {config_path}"
+            )
+
+        return ENV_PLACEHOLDER_PATTERN.sub(replace, value)
+    if isinstance(value, list):
+        return [_interpolate_config_env(item, config_path) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _interpolate_config_env(item, config_path)
+            for key, item in value.items()
+        }
+    return value
 
 
 def load_yaml_config(config_path: Path) -> Dict[str, Any]:
@@ -18,7 +47,7 @@ def load_yaml_config(config_path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Config root must be a mapping: {config_path}")
-    return data
+    return _interpolate_config_env(data, Path(config_path))
 
 
 def repo_root_from_config(config_path: Path) -> Path:

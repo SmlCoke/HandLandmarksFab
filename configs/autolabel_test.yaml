@@ -4,14 +4,14 @@ dataset:
   partition: shared
 
 paths:
-  images_dir: ../autodl-tmp/test_data/images
+  images_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_data/images
   palm_model_onnx: materials/preminilary/palm/model_opt.onnx
-  palm_outputs_dir: ../autodl-tmp/test_data/01_palm
-  roi_crops_dir: ../autodl-tmp/test_data/02_roi_crops
-  reviewed_dir: ../autodl-tmp/test_data/03_reviewed
-  visualization_dir: ../autodl-tmp/test_data/04_visualization
-  labels_dir: ../autodl-tmp/test_data/05_labels
-  qc_dir: ../autodl-tmp/test_data/qc
+  palm_outputs_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_data/01_palm
+  roi_crops_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_data/02_roi_crops
+  reviewed_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_data/03_reviewed
+  visualization_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_data/04_visualization
+  labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_data/05_labels
+  qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_data/qc
 
 image:
   width: 1280

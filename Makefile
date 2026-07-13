@@ -1,5 +1,13 @@
 # Makefile for HandLandmarkerFab
 
+# Optional per-machine overrides. Makefile.local is intentionally not committed.
+-include Makefile.local
+
+# Root containing vals_data, vali_data, and test_data. A command-line value or
+# an external environment variable takes precedence over this default.
+HAND_DATA_ROOT ?= ../autodl-tmp
+export HAND_DATA_ROOT
+
 # 默认配置文件路径
 # smoke test use config, running in local machine
 CONFIG ?= configs/autolabel.yaml
@@ -68,6 +76,8 @@ help:
 	@echo ""
 	@echo "Variable overrides:"
 	@echo "  make palm_detection_smoke CONFIG=path/to/config.yaml"
+	@echo "  make validate_images_vals HAND_DATA_ROOT=/path/to/data-root"
+	@echo "  For a persistent local value, copy Makefile.local.example to Makefile.local"
 
 # ----- scripts flow -----
 
