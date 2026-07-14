@@ -5,7 +5,6 @@ sources:
   - dataset_id: peak_train_v1
     contributor: Peak
     root: .
-    autolabel_config: configs/autolabel_train.yaml
     manifest: ../autodl-tmp/peak_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: ../autodl-tmp/peak_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     # 数据目录移动后 manifest 中可能仍是旧 crop_path；显式目录按 basename 重定位真实图片。
@@ -17,13 +16,17 @@ sources:
   - dataset_id: soar_train_v1
     contributor: Soar
     root: .
-    autolabel_config: configs/autolabel_train_soar.yaml
     manifest: ../autodl-tmp/soar_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: ../autodl-tmp/soar_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     crop_images_dir: ../autodl-tmp/soar_train_data/02_roi_crops/images
 
 validation:
   check_crop_images: true
+
+# 07A 的质量分层阈值属于 finalize 策略，不再从 autolabel 配置间接读取。
+quality:
+  handedness_review_threshold: 0.7
+  high_palm_score_review_threshold: 0.8
 
 dedup:
   positive_normalized_distance: 0.18

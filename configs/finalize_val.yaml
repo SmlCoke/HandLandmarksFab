@@ -14,7 +14,6 @@ sources:
     owner: Peak
     partition: shared
     root: ../autodl-tmp/eval_sources/peak_vals
-    autolabel_config: configs/autolabel_val.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -26,7 +25,6 @@ sources:
     owner: Soar
     partition: shared
     root: ../autodl-tmp/eval_sources/soar_vals
-    autolabel_config: configs/autolabel_val.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -39,7 +37,6 @@ sources:
     owner: Peak
     partition: independent
     root: ../autodl-tmp/eval_sources/peak_vali
-    autolabel_config: configs/autolabel_vali.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl

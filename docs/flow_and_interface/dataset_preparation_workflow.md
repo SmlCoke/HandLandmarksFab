@@ -142,7 +142,6 @@ sources:
   - dataset_id: peak_train_v1
     contributor: Peak
     root: .
-    autolabel_config: configs/autolabel_train.yaml
     manifest: ../autodl-tmp/peak_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: ../autodl-tmp/peak_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     crop_images_dir: ../autodl-tmp/peak_train_data/02_roi_crops/images
@@ -150,7 +149,6 @@ sources:
   - dataset_id: soar_train_v1
     contributor: Soar
     root: .
-    autolabel_config: configs/autolabel_train_soar.yaml
     manifest: ../autodl-tmp/soar_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: ../autodl-tmp/soar_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     crop_images_dir: ../autodl-tmp/soar_train_data/02_roi_crops/images
@@ -162,7 +160,7 @@ sources:
 - 两个 `- dataset_id` 必须在 YAML 中保持同一级缩进；其余 source 字段比 `-` 多缩进两个空格；
 - Train 原文件可以同名，07A 会生成 `dataset_id:source_crop_id` 形式的 `global_crop_id`；
 - 不要手工把 `peak_` / `soar_` 再加到 Train JSONL，避免双重 namespace；
-- `autolabel_config` 必须与该来源实际运行 00–03 时使用的配置一致。
+- 07A 直接从 pseudo/gold JSONL 的 `width`、`height`、`source_image_width`、`source_image_height` 读取尺寸，并用 manifest 的 `output_size` 交叉校验；无需保留 00–03 使用的 autolabel 配置。
 - 如果数据搬迁后 manifest 内的 `crop_path` 已过期，必须设置 `crop_images_dir`；07A 会按 basename 定位真实图片，并把旧值保存在 `source_crop_path` 中。
 
 ### 4.3 生成 pretrain 清单
@@ -485,7 +483,6 @@ sources:
     owner: Peak
     partition: shared
     root: ../autodl-tmp/eval_sources/peak_vals
-    autolabel_config: configs/autolabel_val.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -496,7 +493,6 @@ sources:
     owner: Soar
     partition: shared
     root: ../autodl-tmp/eval_sources/soar_vals
-    autolabel_config: configs/autolabel_val.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -507,7 +503,6 @@ sources:
     owner: Peak
     partition: independent
     root: ../autodl-tmp/eval_sources/peak_vali
-    autolabel_config: configs/autolabel_vali.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -533,7 +528,6 @@ dataset:
     owner: Soar
     partition: independent
     root: ../autodl-tmp/eval_sources/soar_vali
-    autolabel_config: configs/autolabel_vali.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -677,7 +671,6 @@ sources:
     owner: Peak
     partition: shared
     root: ../autodl-tmp/eval_sources/peak_test
-    autolabel_config: configs/autolabel_test.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -688,7 +681,6 @@ sources:
     owner: Soar
     partition: shared
     root: ../autodl-tmp/eval_sources/soar_test
-    autolabel_config: configs/autolabel_test.yaml
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl

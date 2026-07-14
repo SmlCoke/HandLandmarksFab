@@ -269,7 +269,6 @@ sources:
   - dataset_id: peak_train_v1
     contributor: Peak
     root: path/to/peak/train_data
-    autolabel_config: path/to/peak/autolabel_train.yaml
     manifest: path/to/peak/hand_roi_crops_manifest.jsonl
     pseudo_labels: path/to/peak/hand_landmarks_autolabel_draft.jsonl
     crop_images_dir: path/to/peak/02_roi_crops/images
@@ -281,7 +280,6 @@ sources:
   - dataset_id: soar_train_v1
     contributor: Soar
     root: path/to/soar/train_data
-    autolabel_config: path/to/soar/autolabel_train.yaml
     manifest: path/to/soar/hand_roi_crops_manifest.jsonl
     pseudo_labels: path/to/soar/hand_landmarks_autolabel_draft.jsonl
     crop_images_dir: path/to/soar/02_roi_crops/images
@@ -315,7 +313,7 @@ profiles:
 每个 source：
 
 - 唯一 `dataset_id`；
-- 数据 `root` 与对应 upstream autolabel config；
+- 数据 `root`；ROI 与原图尺寸直接读取 label JSONL，并用 manifest 的 `output_size` 交叉校验；
 - manifest；
 - pseudo label draft；
 - 可选 human Gold subset、其 subset manifest 与 CVAT import report；

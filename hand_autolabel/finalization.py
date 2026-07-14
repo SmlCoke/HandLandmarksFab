@@ -341,6 +341,118 @@ def _train_quality(row: Mapping[str, Any], provenance: str, cfg: Mapping[str, An
     return "HIGH", flags
 
 
+def _dimension_pair(
+    row: Mapping[str, Any], first: str, second: str, *, scope: str, crop_id: Any
+) -> tuple[int, int] | None:
+    first_value = row.get(first)
+    second_value = row.get(second)
+    if first_value is None and second_value is None:
+        return None
+    if first_value is None or second_value is None:
+        raise FinalizationError(
+            f"{scope}: crop_id={crop_id!r} must provide both {first} and {second}"
+        )
+    try:
+        first_number = float(first_value)
+        second_number = float(second_value)
+        pair = (int(first_number), int(second_number))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise FinalizationError(
+            f"{scope}: crop_id={crop_id!r} has invalid {first}/{second}: "
+            f"{first_value!r}/{second_value!r}"
+        ) from exc
+    if (
+        not math.isfinite(first_number)
+        or not math.isfinite(second_number)
+        or first_number != pair[0]
+        or second_number != pair[1]
+        or pair[0] <= 0
+        or pair[1] <= 0
+    ):
+        raise FinalizationError(
+            f"{scope}: crop_id={crop_id!r} has invalid {first}/{second}: "
+            f"{first_value!r}/{second_value!r}"
+        )
+    return pair
+
+
+def _infer_source_config(
+    scope: str,
+    manifests: Sequence[Mapping[str, Any]],
+    label_groups: Sequence[Sequence[Mapping[str, Any]]],
+    quality: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Build the small config view needed by finalization from published artifacts."""
+    roi_from_labels: set[tuple[int, int]] = set()
+    source_image_sizes: set[tuple[int, int]] = set()
+    for rows in label_groups:
+        for row in rows:
+            crop_id = row.get("crop_id")
+            roi_size = _dimension_pair(row, "width", "height", scope=scope, crop_id=crop_id)
+            if roi_size is not None:
+                roi_from_labels.add(roi_size)
+            image_size = _dimension_pair(
+                row,
+                "source_image_width",
+                "source_image_height",
+                scope=scope,
+                crop_id=crop_id,
+            )
+            if image_size is not None:
+                source_image_sizes.add(image_size)
+
+    roi_from_manifests: set[tuple[int, int]] = set()
+    for row in manifests:
+        output_size = row.get("output_size")
+        if output_size is None:
+            continue
+        if not isinstance(output_size, (list, tuple)) or len(output_size) != 2:
+            raise FinalizationError(
+                f"{scope}: crop_id={row.get('crop_id')!r} has invalid manifest output_size: {output_size!r}"
+            )
+        manifest_size = _dimension_pair(
+            {"width": output_size[0], "height": output_size[1]},
+            "width",
+            "height",
+            scope=scope,
+            crop_id=row.get("crop_id"),
+        )
+        if manifest_size is not None:
+            roi_from_manifests.add(manifest_size)
+
+    if len(roi_from_labels) > 1:
+        raise FinalizationError(f"{scope}: inconsistent label width/height values: {sorted(roi_from_labels)}")
+    if len(roi_from_manifests) > 1:
+        raise FinalizationError(f"{scope}: inconsistent manifest output_size values: {sorted(roi_from_manifests)}")
+    if roi_from_labels and roi_from_manifests and roi_from_labels != roi_from_manifests:
+        raise FinalizationError(
+            f"{scope}: label width/height {sorted(roi_from_labels)} conflicts with "
+            f"manifest output_size {sorted(roi_from_manifests)}"
+        )
+    if len(source_image_sizes) > 1:
+        raise FinalizationError(
+            f"{scope}: inconsistent source_image_width/source_image_height values: {sorted(source_image_sizes)}"
+        )
+    roi_sizes = roi_from_labels or roi_from_manifests
+    if not roi_sizes:
+        raise FinalizationError(
+            f"{scope}: cannot infer ROI dimensions; labels need width/height or manifests need output_size"
+        )
+    if not source_image_sizes:
+        raise FinalizationError(
+            f"{scope}: cannot infer source image dimensions; label JSONL needs "
+            "source_image_width/source_image_height"
+        )
+
+    roi_width, roi_height = next(iter(roi_sizes))
+    image_width, image_height = next(iter(source_image_sizes))
+    return {
+        "hand_roi": {"output_width": roi_width, "output_height": roi_height},
+        "image": {"width": image_width, "height": image_height},
+        "quality": dict(quality or {}),
+    }
+
+
 def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
     config_path = Path(config_path).resolve()
     cfg = load_yaml_config(config_path)
@@ -365,8 +477,6 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
         crop_images_dir = resolve_path(source_root, source["crop_images_dir"]) if source.get("crop_images_dir") else None
         if crop_images_dir is not None and not crop_images_dir.is_dir():
             fatal.append({"scope": dataset_id, "error": "crop_images_dir_missing", "path": str(crop_images_dir)})
-        auto_cfg_path = resolve_path(source_root, source["autolabel_config"])
-        auto_cfg = load_yaml_config(auto_cfg_path)
         manifest_path = resolve_path(source_root, source["manifest"])
         pseudo_path = resolve_path(source_root, source["pseudo_labels"])
         manifests = read_jsonl(manifest_path)
@@ -417,6 +527,12 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
                     blocking = [item for item in report_errors if not (isinstance(item, Mapping) and str(item.get("crop_id")) in ignored_gold)]
                     if blocking:
                         fatal.append({"scope": dataset_id, "error": "gold_import_report_errors", "details": blocking})
+        source_cfg = _infer_source_config(
+            dataset_id,
+            manifests,
+            [pseudo_rows, list(gold_idx.values())],
+            source.get("quality", cfg.get("quality", {})),
+        )
         source_rows: List[Dict[str, Any]] = []
         for local_id, manifest in manifest_idx.items():
             global_id = f"{dataset_id}:{local_id}"
@@ -433,7 +549,7 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
             conflicts = manifest_conflicts(effective, manifest)
             if conflicts:
                 fatal.append({"scope": dataset_id, "crop_id": local_id, "errors": conflicts, "source": provenance})
-            row = merge_label_with_manifest(effective, manifest, auto_cfg)
+            row = merge_label_with_manifest(effective, manifest, source_cfg)
             if crop_images_dir is not None:
                 row["source_crop_path"] = manifest.get("crop_path")
                 row["crop_path"] = str(crop_images_dir / Path(str(manifest.get("crop_path", ""))).name)
@@ -449,8 +565,8 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
                 "training_stage": stage,
             })
             if gold is not None:
-                pseudo_probe = merge_label_with_manifest(pseudo, manifest, auto_cfg)
-                pseudo_warnings, pseudo_errors = validate_label_schema(pseudo_probe, auto_cfg, gold=False, check_image=False, source_root=source_root)
+                pseudo_probe = merge_label_with_manifest(pseudo, manifest, source_cfg)
+                pseudo_warnings, pseudo_errors = validate_label_schema(pseudo_probe, source_cfg, gold=False, check_image=False, source_root=source_root)
                 pseudo_conflicts = manifest_conflicts(pseudo, manifest)
                 if pseudo_warnings or pseudo_errors or pseudo_conflicts:
                     row["overridden_pseudo_issues"] = sorted(set(pseudo_warnings + pseudo_errors + pseudo_conflicts))
@@ -462,8 +578,8 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
                 row.update({"sample_type": _sample_type(row), "quality_tier": "INVALID", "quality_flags": ["ignore_for_training"], "selection_action": "drop_ignore"})
                 source_rows.append(row)
                 continue
-            warnings, errors = validate_label_schema(row, auto_cfg, gold=gold is not None, check_image=check_images, source_root=source_root)
-            quality, flags = _train_quality(row, provenance, auto_cfg)
+            warnings, errors = validate_label_schema(row, source_cfg, gold=gold is not None, check_image=check_images, source_root=source_root)
+            quality, flags = _train_quality(row, provenance, source_cfg)
             row["quality_flags"] = sorted(set(flags + warnings))
             row["sample_type"] = _sample_type(row)
             if errors:
@@ -611,9 +727,7 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
         owner = str(source.get("owner", "unknown"))
         source_root = resolve_path(root, source["root"])
         crop_images_dir = resolve_path(source_root, source.get("crop_images_dir", "02_roi_crops/images"))
-        auto_cfg_path = resolve_path(root, source["autolabel_config"])
-        auto_cfg = load_yaml_config(auto_cfg_path)
-        source_split = str(auto_cfg.get("dataset", {}).get("split", split))
+        source_split = str(source.get("split", split))
         if source_split != split:
             fatal.append({"source_id": source_id, "error": "source_split_mismatch", "configured": source_split, "expected": split})
         manifest_path = resolve_path(source_root, source.get("manifest", "02_roi_crops/hand_roi_crops_manifest.jsonl"))
@@ -627,6 +741,7 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
         if not crop_images_dir.is_dir():
             fatal.append({"source_id": source_id, "error": "crop_images_dir_missing", "path": str(crop_images_dir)})
         manifests, reviewed = read_jsonl(manifest_path), read_jsonl(reviewed_path)
+        source_cfg = _infer_source_config(source_id, manifests, [reviewed])
         manifest_idx, manifest_dups = unique_index(manifests, "crop_id", f"{source_id}:manifest")
         reviewed_idx, reviewed_dups = unique_index(reviewed, "crop_id", f"{source_id}:reviewed")
         fatal.extend(manifest_dups + reviewed_dups)
@@ -678,7 +793,7 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
             "partition": partition,
             "owner": owner,
             "crop_images_dir": crop_images_dir,
-            "auto_cfg": auto_cfg,
+            "source_cfg": source_cfg,
             "manifest": manifest_idx[crop_id],
             "reviewed": reviewed_idx[crop_id],
             "context": context.get(crop_id),
@@ -698,7 +813,11 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
             "owner": owner,
             "root": str(source_root),
             "crop_images_dir": str(crop_images_dir),
-            "autolabel_config": str(auto_cfg_path),
+            "autolabel_config": (
+                str(resolve_path(root, source["autolabel_config"]))
+                if source.get("autolabel_config")
+                else None
+            ),
             "manifest": str(manifest_path),
             "reviewed": str(reviewed_path),
             "cvat_import_report": str(import_report_path),
@@ -712,7 +831,7 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
     require_palm = bool(evaluation_cfg.get("require_palm_valid", True))
     for item in sorted(combined, key=lambda value: (value["dataset_id"], str(value["manifest"].get("crop_id")))):
         manifest, raw = item["manifest"], item["reviewed"]
-        auto_cfg = item["auto_cfg"]
+        source_cfg = item["source_cfg"]
         source_crop_id = str(manifest.get("crop_id"))
         global_crop_id = f"{item['dataset_id']}:{source_crop_id}"
         source_palm_det_id = str(manifest.get("palm_det_id"))
@@ -723,7 +842,7 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
         status = raw.get("cvat_review_status")
         if seen is not True or status == "missing_from_xml" or raw.get("source") == "cvat_reviewed_missing_image":
             row_errors.append("not_reviewed_in_cvat_xml")
-        row = merge_label_with_manifest(raw, manifest, auto_cfg)
+        row = merge_label_with_manifest(raw, manifest, source_cfg)
         row["source_crop_path"] = manifest.get("crop_path")
         row["crop_path"] = str(item["crop_images_dir"] / Path(str(manifest.get("crop_path", ""))).name)
         source_hand_id = row.get("hand_id")
@@ -756,7 +875,7 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
                 row_errors.append(f"invalid_cvat_review_status:{status}")
             if require_palm and not bool(manifest.get("palm_valid")):
                 row_errors.append("evaluation_requires_palm_valid")
-            _, schema_errors = validate_label_schema(row, auto_cfg, gold=True, check_image=check_images, source_root=root)
+            _, schema_errors = validate_label_schema(row, source_cfg, gold=True, check_image=check_images, source_root=root)
             row_errors.extend(schema_errors)
             row["hand_presence_loss_weight"] = 1.0
             row["landmark_loss_weight"] = 1.0 if present else 0.0
