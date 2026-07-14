@@ -4,7 +4,7 @@ schema_version: train_finalize_v1
 sources:
   - dataset_id: peak_train_v1
     contributor: Peak
-    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}
+    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_sources/HandViolence0708
     manifest: peak_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: peak_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     # 数据目录移动后 manifest 中可能仍是旧 crop_path；显式目录按 basename 重定位真实图片。
@@ -15,10 +15,45 @@ sources:
 
   - dataset_id: soar_train_v1
     contributor: Soar
-    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}
+    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_sources/HandViolence0708
     manifest: soar_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: soar_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     crop_images_dir: soar_train_data/02_roi_crops/images
+
+  - dataset_id: peak_train_0714_bright
+    contributor: Peak
+    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_sources/HandViolenceEnhanced0714
+    manifest: peak_bright/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: peak_bright/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: peak_bright/02_roi_crops/images
+
+  - dataset_id: peak_train_0714_dark
+    contributor: Peak
+    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_sources/HandViolenceEnhanced0714
+    manifest: peak_dark/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: peak_dark/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: peak_dark/02_roi_crops/images
+
+  - dataset_id: soar_train_0714_bright
+    contributor: Soar
+    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_sources/HandViolenceEnhanced0714
+    manifest: soar_bright/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: soar_bright/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: soar_bright/02_roi_crops/images
+
+  - dataset_id: soar_train_0714_dark
+    contributor: Soar
+    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_sources/HandViolenceEnhanced0714
+    manifest: soar_dark/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: soar_dark/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: soar_dark/02_roi_crops/images
+
+  - dataset_id: dragon_train_0714
+    contributor: Dragon
+    root: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_sources/HandViolenceEnhanced0714
+    manifest: dragon/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: dragon/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: dragon/02_roi_crops/images
 
 validation:
   check_crop_images: true
