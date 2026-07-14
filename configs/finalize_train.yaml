@@ -4,7 +4,7 @@ schema_version: train_finalize_v1
 sources:
   - dataset_id: peak_train_v1
     contributor: Peak
-    root: ${HAND_DATA_ROOT}
+    root: ${HAND_DATA_ROOT:-/root/autodl-tmp}
     manifest: peak_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: peak_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     # 数据目录移动后 manifest 中可能仍是旧 crop_path；显式目录按 basename 重定位真实图片。
@@ -15,7 +15,7 @@ sources:
 
   - dataset_id: soar_train_v1
     contributor: Soar
-    root: ${HAND_DATA_ROOT}
+    root: ${HAND_DATA_ROOT:-/root/autodl-tmp}
     manifest: soar_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
     pseudo_labels: soar_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     crop_images_dir: soar_train_data/02_roi_crops/images
@@ -47,8 +47,8 @@ stages:
 
 outputs:
   pretrain:
-    labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/train_pretrain_merged/05_labels
-    qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/train_pretrain_merged/qc
+    labels_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/train_pretrain_merged/05_labels
+    qc_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/train_pretrain_merged/qc
   finetune:
-    labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/train_finetune_merged/05_labels
-    qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/train_finetune_merged/qc
+    labels_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/train_finetune_merged/05_labels
+    qc_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/train_finetune_merged/qc

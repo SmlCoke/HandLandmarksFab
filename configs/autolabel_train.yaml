@@ -1,12 +1,12 @@
 paths:
-  images_dir: ${HAND_DATA_ROOT:../autodl-tmp}/images
+  images_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/images
   palm_model_onnx: materials/preminilary/palm/model_opt.onnx
-  palm_outputs_dir: ${HAND_DATA_ROOT:../autodl-tmp}/01_palm
-  roi_crops_dir: ${HAND_DATA_ROOT:../autodl-tmp}/02_roi_crops
-  reviewed_dir: ${HAND_DATA_ROOT:../autodl-tmp}/03_reviewed
-  visualization_dir: ${HAND_DATA_ROOT:../autodl-tmp}/04_visualization
-  labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/05_labels
-  qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/qc
+  palm_outputs_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/01_palm
+  roi_crops_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/02_roi_crops
+  reviewed_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/03_reviewed
+  visualization_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/04_visualization
+  labels_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/05_labels
+  qc_dir: ${HAND_DATA_ROOT:-/root/autodl-tmp}/qc
 
 image:
   width: 1280
