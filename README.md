@@ -95,6 +95,8 @@ Copy-Item Makefile.local.example Makefile.local
 
 在 Linux/macOS shell 中可使用 `export HAND_DATA_ROOT=/data/hand`。Windows 路径建议使用正斜杠；若路径含空格，优先写入 `Makefile.local`。
 
+`finalize_train.yaml`、`finalize_val.yaml`、`finalize_test.yaml` 将 `HAND_DATA_ROOT` 解释为统一的 HLML 数据根目录；其下应包含 `peak_train_data/`、`soar_train_data/`、`eval_sources/` 以及各合并输出目录。Makefile 默认使用 `../autodl-tmp/TrainFab/HLML-2.0`，并将该变量导出给 Python。配置解析同时支持 `${NAME:default}` 与 shell 风格的 `${NAME:-default}`。
+
 **关键字段及其含义**
 
 - `palm` 字段:

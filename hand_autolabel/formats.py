@@ -8,15 +8,17 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, MutableMapping,
 
 
 VALID_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp", ".webp"}
-ENV_PLACEHOLDER_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}")
+ENV_PLACEHOLDER_PATTERN = re.compile(
+    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|:)([^}]*))?\}"
+)
 
 
 def _interpolate_config_env(value: Any, config_path: Path) -> Any:
-    """Recursively expand ${NAME:default} placeholders in parsed YAML values."""
+    """Recursively expand ${NAME:default} and ${NAME:-default} placeholders."""
     if isinstance(value, str):
 
         def replace(match: re.Match[str]) -> str:
-            name, default = match.group(1), match.group(2)
+            name, _, default = match.groups()
             env_value = os.environ.get(name)
             if env_value:
                 return env_value

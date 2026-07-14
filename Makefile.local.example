@@ -1,6 +1,8 @@
-# Copy this file to Makefile.local and set the root that contains
-# vals_data, vali_data, and test_data. Use forward slashes on Windows.
-HAND_DATA_ROOT := ../autodl-tmp
+# Copy this file to Makefile.local and set the data root used by the selected
+# configs. The shipped finalize configs expect the HLML-2.0 directory that
+# contains peak_train_data, soar_train_data, eval_sources, and merged outputs.
+# Use forward slashes on Windows.
+HAND_DATA_ROOT := ../autodl-tmp/TrainFab/HLML-2.0
 
 # Optional: render MediaPipe 21-point overlays after every make run_mediapipe_*.
 # VISUALIZE_MEDIAPIPE_ROIS := 1

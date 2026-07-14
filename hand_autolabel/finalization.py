@@ -479,6 +479,14 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
             fatal.append({"scope": dataset_id, "error": "crop_images_dir_missing", "path": str(crop_images_dir)})
         manifest_path = resolve_path(source_root, source["manifest"])
         pseudo_path = resolve_path(source_root, source["pseudo_labels"])
+        missing_inputs = [
+            (name, path)
+            for name, path in (("manifest", manifest_path), ("pseudo_labels", pseudo_path))
+            if not path.is_file()
+        ]
+        if missing_inputs:
+            details = ", ".join(f"{name}={path}" for name, path in missing_inputs)
+            raise FinalizationError(f"{dataset_id}: required input file missing: {details}")
         manifests = read_jsonl(manifest_path)
         pseudo_rows = read_jsonl(pseudo_path)
         manifest_idx, duplicates = unique_index(manifests, "crop_id", f"{dataset_id}:manifest")
@@ -734,12 +742,17 @@ def finalize_evaluation(config_path: Path, split: str) -> Dict[str, Any]:
         reviewed_path = resolve_path(source_root, source.get("reviewed", "03_reviewed/hand_landmarks_reviewed.jsonl"))
         import_report_path = resolve_path(source_root, source.get("import_report", "qc/cvat_import_stats.json"))
         context_path = resolve_path(source_root, source.get("review_context", "03_reviewed/review_context.csv"))
+        required_files_missing = False
         if not manifest_path.is_file():
             fatal.append({"source_id": source_id, "error": "manifest_file_missing", "path": str(manifest_path)})
+            required_files_missing = True
         if not reviewed_path.is_file():
             fatal.append({"source_id": source_id, "error": "reviewed_file_missing", "path": str(reviewed_path)})
+            required_files_missing = True
         if not crop_images_dir.is_dir():
             fatal.append({"source_id": source_id, "error": "crop_images_dir_missing", "path": str(crop_images_dir)})
+        if required_files_missing:
+            continue
         manifests, reviewed = read_jsonl(manifest_path), read_jsonl(reviewed_path)
         source_cfg = _infer_source_config(source_id, manifests, [reviewed])
         manifest_idx, manifest_dups = unique_index(manifests, "crop_id", f"{source_id}:manifest")
