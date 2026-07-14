@@ -8,6 +8,12 @@
 HAND_DATA_ROOT ?= ../autodl-tmp
 export HAND_DATA_ROOT
 
+# Set to 1/true/yes/on to render landmarks on 02_roi_crops/images after stage 03.
+VISUALIZE_MEDIAPIPE_ROIS ?= 0
+
+# Set to 1/true/yes/on to render every canonical ROI after 07A train finalization.
+VISUALIZE_FINALIZED_TRAIN_ROIS ?= 0
+
 # 默认配置文件路径
 # smoke test use config, running in local machine
 CONFIG ?= configs/autolabel.yaml
@@ -77,6 +83,8 @@ help:
 	@echo "Variable overrides:"
 	@echo "  make palm_detection_smoke CONFIG=path/to/config.yaml"
 	@echo "  make validate_images_vals HAND_DATA_ROOT=/path/to/data-root"
+	@echo "  make run_mediapipe_train VISUALIZE_MEDIAPIPE_ROIS=1"
+	@echo "  make finalize_train_pretrain VISUALIZE_FINALIZED_TRAIN_ROIS=1"
 	@echo "  For a persistent local value, copy Makefile.local.example to Makefile.local"
 
 # ----- scripts flow -----
@@ -132,19 +140,19 @@ build_roi_test:
 
 ## 03_run_mediapipe_on_rois.py
 run_mediapipe_smoke:
-	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(CONFIG)
+	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(CONFIG) --visualize-rois $(VISUALIZE_MEDIAPIPE_ROIS)
 
 run_mediapipe_train:
-	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(TRAIN_CONFIG)
+	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(TRAIN_CONFIG) --visualize-rois $(VISUALIZE_MEDIAPIPE_ROIS)
 
 run_mediapipe_vals:
-	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(VAL_SHARED_CONFIG)
+	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(VAL_SHARED_CONFIG) --visualize-rois $(VISUALIZE_MEDIAPIPE_ROIS)
 
 run_mediapipe_vali:
-	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(VAL_INDEPENDENT_CONFIG)
+	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(VAL_INDEPENDENT_CONFIG) --visualize-rois $(VISUALIZE_MEDIAPIPE_ROIS)
 
 run_mediapipe_test:
-	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(TEST_CONFIG)
+	$(PYTHON) $(SCRIPTS_DIR)/03_run_mediapipe_on_rois.py --config $(TEST_CONFIG) --visualize-rois $(VISUALIZE_MEDIAPIPE_ROIS)
 
 ## 04_export_cvat_xml.py
 export_cvat_smoke:
@@ -196,10 +204,10 @@ visualize_test:
 
 ## 07A/07B finalizers
 finalize_train_pretrain:
-	$(PYTHON) $(SCRIPTS_DIR)/07A_finalize_training_labels.py --config $(FINALIZE_TRAIN_CONFIG) --stage pretrain
+	$(PYTHON) $(SCRIPTS_DIR)/07A_finalize_training_labels.py --config $(FINALIZE_TRAIN_CONFIG) --stage pretrain --visualize-rois $(VISUALIZE_FINALIZED_TRAIN_ROIS)
 
 finalize_train_finetune:
-	$(PYTHON) $(SCRIPTS_DIR)/07A_finalize_training_labels.py --config $(FINALIZE_TRAIN_CONFIG) --stage finetune
+	$(PYTHON) $(SCRIPTS_DIR)/07A_finalize_training_labels.py --config $(FINALIZE_TRAIN_CONFIG) --stage finetune --visualize-rois $(VISUALIZE_FINALIZED_TRAIN_ROIS)
 
 finalize_val:
 	$(PYTHON) $(SCRIPTS_DIR)/07B_finalize_evaluation_labels.py --config $(FINALIZE_VAL_CONFIG) --split val

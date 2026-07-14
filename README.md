@@ -204,6 +204,14 @@ python scripts/06_visualize_autolabels.py --config configs/autolabel.yaml
 - **输出**: `data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl`、`data/qc/mediapipe_roi_stats.json`
 - **功能**: 每个 crop 独立运行 MediaPipe，最多一只手；有手则保存 21 点 crop 坐标和原图反投影坐标，无手则保留负样本。
 
+通过 Makefile 变量可以在 03 完成后立即生成 ROI 关键点可视化，默认关闭：
+
+```powershell
+make run_mediapipe_train VISUALIZE_MEDIAPIPE_ROIS=1
+```
+
+`1/true/yes/on` 均表示开启。可视化只读取 `02_roi_crops/hand_landmarks_autolabel_draft.jsonl` 和 `02_roi_crops/images/`，并按 draft 中 `crop_path` 的文件名在当前 `images/` 下重定位图片；它不读取原始图或 `01_palm/`。结果写入 `02_roi_crops/hand_landmarks_visualization/*.png`，其中包含 21 点编号、骨架、handedness、点数和越界点数；`present=false` 的 ROI 也会输出并标红。该功能只增加 PNG，不修改或增加任何 JSONL/XML 字段。
+
 `hand_landmarks_autolabel_draft.jsonl` 每行代表一个 crop 小图的标注信息，具体含义: 
 
 - 前序 image 级信息: 
@@ -281,6 +289,15 @@ Val/Test 的来源和 namespace 规则：
 | `hand_validation_labels.jsonl` / `hand_test_labels.jsonl` | 07B 严格 Gold 主评测集 |
 | `hand_val_ignored.jsonl` / `hand_test_ignored.jsonl` | 07B 排除的歧义/不可可靠标注样本 |
 | `qc/finalize_*_report.json` | 覆盖率、样本分布、排除原因和输出 SHA-256；fatal 时不覆盖已有 canonical 文件 |
+
+07A Train 合并完成后可选择绘制 canonical 清单中全部 `selection_action=include` 的 ROI，默认关闭：
+
+```powershell
+make finalize_train_pretrain VISUALIZE_FINALIZED_TRAIN_ROIS=1
+make finalize_train_finetune VISUALIZE_FINALIZED_TRAIN_ROIS=1
+```
+
+可视化是 07A 的最后一步，不新增流程脚本；07B Val/Test 不执行该功能。输出位于与对应 `05_labels/`、`qc/` 同级的 `hand_landmarks_visualization/<dataset_id>/*.png`，按所有配置来源分别保存。绘制前会检查每个 source 的 `crop_images_dir` 以及每条入选记录对应的 ROI 图片；任一来源或图片缺失都会输出 `ERROR` 并使命令失败。该步骤只读取 canonical JSONL 并写 PNG，不修改任何 JSONL/XML。
 
 07A JSONL 新增的主要训练接口字段如下：
 

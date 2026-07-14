@@ -113,6 +113,14 @@ make build_roi_train
 make run_mediapipe_train
 ```
 
+如需在 03 完成后直接检查 256×256 ROI 上的 MediaPipe 21 点，可开启只读可视化：
+
+```powershell
+make run_mediapipe_train VISUALIZE_MEDIAPIPE_ROIS=1
+```
+
+输出位于 `02_roi_crops/hand_landmarks_visualization/`。该步骤只读取 draft JSONL 与 `02_roi_crops/images/`，不依赖原始图或 `01_palm/`，也不会修改任何 JSONL/XML。
+
 Soar 数据必须使用指向 Soar 目录的独立自动标注配置运行相同四个脚本。可以复制 `configs/autolabel_train.yaml` 为个人配置，只修改 `paths`，不要修改模型和 ROI 参数。
 
 第一阶段需要的核心输入是：
@@ -171,6 +179,14 @@ make finalize_train_pretrain
 ../autodl-tmp/train_pretrain_merged/05_labels/hand_training_excluded_pretrain.jsonl
 ../autodl-tmp/train_pretrain_merged/qc/finalize_train_pretrain_report.json
 ```
+
+若需要检查最终真正进入 pretrain canonical 清单的每一张 ROI，可运行：
+
+```powershell
+make finalize_train_pretrain VISUALIZE_FINALIZED_TRAIN_ROIS=1
+```
+
+结果按来源写入 `../autodl-tmp/train_pretrain_merged/hand_landmarks_visualization/<dataset_id>/`。07A 会在绘图前检查所有配置来源和全部入选 ROI 图片；缺失任一来源或图片时命令以 `ERROR` 退出，不生成不完整的可视化。该步骤不修改 07A JSONL 或报告。
 
 训练 loader 读取 `hand_training_labels_pretrain.jsonl`。07A 已完成：
 
@@ -259,6 +275,12 @@ gold_import_report: ../path/to/cvat_import_stats.json
 
 ```powershell
 make finalize_train_finetune
+```
+
+finetune 的最终入选 ROI 可用同一开关输出到 `train_finetune_merged/hand_landmarks_visualization/<dataset_id>/`：
+
+```powershell
+make finalize_train_finetune VISUALIZE_FINALIZED_TRAIN_ROIS=1
 ```
 
 07A 会先按原始 `crop_id` 用 Gold 覆盖 pseudo，再做分类和去重。训练 loader 改读：

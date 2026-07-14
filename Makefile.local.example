@@ -1,3 +1,9 @@
 # Copy this file to Makefile.local and set the root that contains
 # vals_data, vali_data, and test_data. Use forward slashes on Windows.
 HAND_DATA_ROOT := ../autodl-tmp
+
+# Optional: render MediaPipe 21-point overlays after every make run_mediapipe_*.
+# VISUALIZE_MEDIAPIPE_ROIS := 1
+
+# Optional: render canonical included ROIs after finalize_train_pretrain/finetune.
+# VISUALIZE_FINALIZED_TRAIN_ROIS := 1
