@@ -4,21 +4,21 @@ schema_version: train_finalize_v1
 sources:
   - dataset_id: peak_train_v1
     contributor: Peak
-    root: .
-    manifest: ../autodl-tmp/peak_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
-    pseudo_labels: ../autodl-tmp/peak_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    root: ${HAND_DATA_ROOT}
+    manifest: peak_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: peak_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     # 数据目录移动后 manifest 中可能仍是旧 crop_path；显式目录按 basename 重定位真实图片。
     # 最后输出 json 中的 source_crop_path 是 manifest 中的旧路径，对应数据搬移前。crop_path 才是现在的真实图片路径
-    crop_images_dir: ../autodl-tmp/peak_train_data/02_roi_crops/images
+    crop_images_dir: peak_train_data/02_roi_crops/images
     # 有人工精标子集后再启用；同 crop_id 的 Gold 会先覆盖 pseudo。
-    # gold_labels: ../autodl-tmp/peak_train_data/03_reviewed/hand_landmarks_reviewed.jsonl
+    # gold_labels: peak_train_data/03_reviewed/hand_landmarks_reviewed.jsonl
 
   - dataset_id: soar_train_v1
     contributor: Soar
-    root: .
-    manifest: ../autodl-tmp/soar_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
-    pseudo_labels: ../autodl-tmp/soar_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
-    crop_images_dir: ../autodl-tmp/soar_train_data/02_roi_crops/images
+    root: ${HAND_DATA_ROOT}
+    manifest: soar_train_data/02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: soar_train_data/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: soar_train_data/02_roi_crops/images
 
 validation:
   check_crop_images: true
@@ -47,8 +47,8 @@ stages:
 
 outputs:
   pretrain:
-    labels_dir: ../autodl-tmp/train_pretrain_merged/05_labels
-    qc_dir: ../autodl-tmp/train_pretrain_merged/qc
+    labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/train_pretrain_merged/05_labels
+    qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/train_pretrain_merged/qc
   finetune:
-    labels_dir: ../autodl-tmp/train_finetune_merged/05_labels
-    qc_dir: ../autodl-tmp/train_finetune_merged/qc
+    labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/train_finetune_merged/05_labels
+    qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/train_finetune_merged/qc

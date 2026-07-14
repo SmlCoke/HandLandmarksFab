@@ -13,7 +13,7 @@ sources:
     dataset_id: peak_vals_shared_v1
     owner: Peak
     partition: shared
-    root: ../autodl-tmp/eval_sources/peak_vals
+    root: ${HAND_DATA_ROOT:../autodl-tmp/eval_sources}/peak_vals
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -24,7 +24,7 @@ sources:
     dataset_id: soar_vals_shared_v1
     owner: Soar
     partition: shared
-    root: ../autodl-tmp/eval_sources/soar_vals
+    root: ${HAND_DATA_ROOT:../autodl-tmp/eval_sources}/soar_vals
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -36,7 +36,7 @@ sources:
     dataset_id: peak_vali_independent_v1
     owner: Peak
     partition: independent
-    root: ../autodl-tmp/eval_sources/peak_vali
+    root: ${HAND_DATA_ROOT:../autodl-tmp/eval_sources}/peak_vali
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -44,5 +44,5 @@ sources:
     review_context: 03_reviewed/review_context.csv
 
 outputs:
-  labels_dir: ../autodl-tmp/val_merged/05_labels
-  qc_dir: ../autodl-tmp/val_merged/qc
+  labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/val_merged/05_labels
+  qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/val_merged/qc

@@ -5,8 +5,7 @@
 
 # Root containing vals_data, vali_data, and test_data. A command-line value or
 # an external environment variable takes precedence over this default.
-HAND_DATA_ROOT ?= ../autodl-tmp
-export HAND_DATA_ROOT
+HAND_DATA_ROOT ?= ../autodl-tmp/TrainFab/HLML-2.0
 
 # Set to 1/true/yes/on to render landmarks on 02_roi_crops/images after stage 03.
 VISUALIZE_MEDIAPIPE_ROIS ?= 0

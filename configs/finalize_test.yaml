@@ -12,7 +12,7 @@ sources:
     dataset_id: peak_test_shared_v1
     owner: Peak
     partition: shared
-    root: ../autodl-tmp/eval_sources/peak_test
+    root: ${HAND_DATA_ROOT:../autodl-tmp/eval_sources}/peak_test
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -23,7 +23,7 @@ sources:
     dataset_id: soar_test_shared_v1
     owner: Soar
     partition: shared
-    root: ../autodl-tmp/eval_sources/soar_test
+    root: ${HAND_DATA_ROOT:../autodl-tmp/eval_sources}/soar_test
     crop_images_dir: 02_roi_crops/images
     manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
     reviewed: 03_reviewed/hand_landmarks_reviewed.jsonl
@@ -31,5 +31,5 @@ sources:
     review_context: 03_reviewed/review_context.csv
 
 outputs:
-  labels_dir: ../autodl-tmp/test_merged/05_labels
-  qc_dir: ../autodl-tmp/test_merged/qc
+  labels_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_merged/05_labels
+  qc_dir: ${HAND_DATA_ROOT:../autodl-tmp}/test_merged/qc
