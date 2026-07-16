@@ -18,6 +18,12 @@
     "attributes": []
   },
   {
+    "name": "unknown_handedness",
+    "color": "#17becf",
+    "type": "tag",
+    "attributes": []
+  },
+  {
     "name": "ignore_for_training",
     "color": "#ff355e",
     "type": "tag",

@@ -1,5 +1,7 @@
 # HandLandmarkerFab 处理系统修正计划：07A / 07B
 
+> **历史方案说明**：本文保留用于解释早期 07A 设计。Finetune 的现行实现已改为 source descriptor + strict CVAT + HLMF Gold aggregate；所有实际 finetune 命令以 [README 3.8](../../README.md#38-finetune-gold-制作与人工操作) 为准。
+
 > 文档定位：供后续代码实现使用的工程计划，不是最终用户操作手册。  
 > 更新时间：2026-07-10。  
 > 本轮只写计划，不修改代码。  

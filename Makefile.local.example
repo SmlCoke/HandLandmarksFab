@@ -4,8 +4,12 @@
 # Use forward slashes on Windows.
 HAND_DATA_ROOT := ../autodl-tmp/TrainFab/HLML-2.0
 
+# Finetune Gold 使用独立 ID；PRETRAIN_ID 只记录 b/c/replay 的父实验。
+HAND_FINETUNE_ID := v2-finetune-r1
+HAND_PRETRAIN_ID := v2-pretrain-r3
+
 # Optional: render MediaPipe 21-point overlays after every make run_mediapipe_*.
 # VISUALIZE_MEDIAPIPE_ROIS := 1
 
-# Optional: render canonical included ROIs after finalize_train_pretrain/finetune.
+# Optional: render canonical included ROIs after finalize_train_pretrain.
 # VISUALIZE_FINALIZED_TRAIN_ROIS := 1

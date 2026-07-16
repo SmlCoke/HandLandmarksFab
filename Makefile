@@ -8,6 +8,17 @@
 HAND_DATA_ROOT ?= ../autodl-tmp/TrainFab/HLML-2.0
 export HAND_DATA_ROOT
 
+HAND_FINETUNE_ID ?= v2-finetune-r1
+HAND_PRETRAIN_ID ?= v2-pretrain-r3
+DRAGON_RAW_ROOT ?=
+export HAND_FINETUNE_ID HAND_PRETRAIN_ID DRAGON_RAW_ROOT
+
+# Finetune Gold commands intentionally require an explicit source ID/mode.
+FINETUNE_SOURCE_ID ?=
+FINETUNE_SOURCE_MODE ?=
+FINETUNE_RAW_SOURCE_ROOT ?=
+FINETUNE_SELECTION_REQUEST ?=
+
 # Set to 1/true/yes/on to render landmarks on 02_roi_crops/images after stage 03.
 VISUALIZE_MEDIAPIPE_ROIS ?= 0
 
@@ -23,6 +34,9 @@ VAL_SHARED_CONFIG ?= configs/autolabel_val.yaml
 VAL_INDEPENDENT_CONFIG ?= configs/autolabel_vali.yaml
 TEST_CONFIG ?= configs/autolabel_test.yaml
 FINALIZE_TRAIN_CONFIG ?= configs/finalize_train.yaml
+FINALIZE_FINETUNE_CONFIG ?= configs/finalize_finetune.yaml
+FINETUNE_GOLD_CONFIG ?= configs/finetune_gold.yaml
+DRAGON_GOLD_CONFIG ?= configs/dragon_gold.yaml
 FINALIZE_VAL_CONFIG ?= configs/finalize_val.yaml
 FINALIZE_TEST_CONFIG ?= configs/finalize_test.yaml
 
@@ -76,7 +90,11 @@ help:
 	@echo "  make visualize_vali               visualize independent validation annotations"
 	@echo "  make visualize_test               visualize annotations for test set"
 	@echo "  make finalize_train_pretrain      07A: generate pseudo-label pretraining set"
-	@echo "  make finalize_train_finetune      07A: generate Gold+pseudo fine-tuning set"
+	@echo "  make prepare_dragon_gold          import Dragon as finetune-only external Gold"
+	@echo "  make build_pretrain_source_registry publish manifest/draft/SHA lookup for HLML b/c"
+	@echo "  make export_finetune_gold         materialize b/c/e and export strict CVAT XML"
+	@echo "  make import_finetune_gold         strictly import reviewed.xml and publish Gold"
+	@echo "  make finalize_train_finetune      authenticate and aggregate all HLMF Gold sources"
 	@echo "  make finalize_val                 07B: freeze strict validation Gold labels"
 	@echo "  make finalize_test                07B: freeze strict test Gold labels"
 	@echo ""
@@ -85,6 +103,7 @@ help:
 	@echo "  make validate_images_vals HAND_DATA_ROOT=/path/to/data-root"
 	@echo "  make run_mediapipe_train VISUALIZE_MEDIAPIPE_ROIS=1"
 	@echo "  make finalize_train_pretrain VISUALIZE_FINALIZED_TRAIN_ROIS=1"
+	@echo "  make export_finetune_gold FINETUNE_SOURCE_ID=... FINETUNE_SOURCE_MODE=selection_subset"
 	@echo "  For a persistent local value, copy Makefile.local.example to Makefile.local"
 
 # ----- scripts flow -----
@@ -206,11 +225,28 @@ visualize_test:
 finalize_train_pretrain:
 	$(PYTHON) $(SCRIPTS_DIR)/07A_finalize_training_labels.py --config $(FINALIZE_TRAIN_CONFIG) --stage pretrain --visualize-rois $(VISUALIZE_FINALIZED_TRAIN_ROIS)
 
+prepare_dragon_gold:
+	$(PYTHON) $(SCRIPTS_DIR)/08_finetune_gold.py prepare-dragon --config $(DRAGON_GOLD_CONFIG)
+
+build_pretrain_source_registry:
+	$(PYTHON) $(SCRIPTS_DIR)/08_finetune_gold.py source-registry --config $(FINALIZE_TRAIN_CONFIG)
+
+export_finetune_gold:
+	$(if $(strip $(FINETUNE_SOURCE_ID)),,$(error FINETUNE_SOURCE_ID is required))
+	$(if $(strip $(FINETUNE_SOURCE_MODE)),,$(error FINETUNE_SOURCE_MODE is required))
+	$(PYTHON) $(SCRIPTS_DIR)/08_finetune_gold.py export --config $(FINETUNE_GOLD_CONFIG) --source-id $(FINETUNE_SOURCE_ID) --source-mode $(FINETUNE_SOURCE_MODE) $(if $(strip $(FINETUNE_RAW_SOURCE_ROOT)),--raw-source-root $(FINETUNE_RAW_SOURCE_ROOT),) $(if $(strip $(FINETUNE_SELECTION_REQUEST)),--selection-request $(FINETUNE_SELECTION_REQUEST),)
+
+import_finetune_gold:
+	$(PYTHON) $(SCRIPTS_DIR)/08_finetune_gold.py import --config $(FINETUNE_GOLD_CONFIG) $(if $(strip $(FINETUNE_SOURCE_ID)),--source-id $(FINETUNE_SOURCE_ID),--all)
+
 finalize_train_finetune:
-	$(PYTHON) $(SCRIPTS_DIR)/07A_finalize_training_labels.py --config $(FINALIZE_TRAIN_CONFIG) --stage finetune --visualize-rois $(VISUALIZE_FINALIZED_TRAIN_ROIS)
+	$(PYTHON) $(SCRIPTS_DIR)/08_finetune_gold.py finalize --config $(FINALIZE_FINETUNE_CONFIG)
 
 finalize_val:
 	$(PYTHON) $(SCRIPTS_DIR)/07B_finalize_evaluation_labels.py --config $(FINALIZE_VAL_CONFIG) --split val
 
 finalize_test:
 	$(PYTHON) $(SCRIPTS_DIR)/07B_finalize_evaluation_labels.py --config $(FINALIZE_TEST_CONFIG) --split test
+
+test:
+	$(PYTHON) -m unittest discover -s tests -p "test_*.py"

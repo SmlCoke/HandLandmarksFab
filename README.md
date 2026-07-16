@@ -9,7 +9,7 @@
 
 如文档与本任务冲突，以本文档为准。
 
-输入图片必须已经是 `1280x720` 正向灰度 `.tiff`。脚本不会旋转原图。
+常规 00～06 输入图片必须已经是 `1280x720` 正向灰度 `.tiff`，脚本不会旋转原图。唯一例外是 3.8 节的 Dragon external-Gold adapter：它只读 JPEG EXIF 并生成派生 ROI，不修改原图。
 
 ## I. 目录结构
 
@@ -37,21 +37,25 @@ HandLandmarkerFab/
 │  ├─ 05_import_cvat_xml.py
 │  ├─ 06_visualize_autolabels.py
 │  ├─ 07A_finalize_training_labels.py
-│  └─ 07B_finalize_evaluation_labels.py
+│  ├─ 07B_finalize_evaluation_labels.py
+│  └─ 08_finetune_gold.py       # Dragon、finetune CVAT Gold 与 Gold 聚合
 │
 ├─ hand_autolabel/
 │  ├─ __init__.py
-│  ├─ cvai_io.py
+│  ├─ cvat_io.py
+│  ├─ finalization.py
+│  ├─ finetune_gold.py       # registry、Dragon、strict Gold source 与 aggregate 内核
 │  ├─ formats.py
 │  ├─ image_io.py
-│  ├─ mediapipe_roi_label.py
+│  ├─ mediapipe_roi_labeler.py
+│  ├─ mediapipe_roi_visualization.py
 │  ├─ nms.py
 │  ├─ palm_decode.py
 │  ├─ palm_mediapipe.py
 │  ├─ palm_onnx.py
 │  ├─ projection.py
 │  ├─ quality_checks.py
-│  ├─ roi_gemotry.py
+│  ├─ roi_geometry.py
 │  └─ visualization.py
 │
 ├─ requirements.txt          # Python 依赖
@@ -123,12 +127,15 @@ Copy-Item Makefile.local.example Makefile.local
 | 配置 | 作用 |
 |---|---|
 | `configs/autolabel_train.yaml` | 单个 Train 来源运行 00–06 |
-| `configs/finalize_train.yaml` | 07A 合并多个训练来源、自动 namespace、分型和降采样 |
+| `configs/finalize_train.yaml` | 07A 合并 pretrain 来源、自动 namespace、分型和降采样；不承载 finetune Gold |
 | `configs/autolabel_val.yaml` | shared Val，即 `vals_data`，运行 00–06 |
 | `configs/autolabel_vali.yaml` | independent Val，即 `vali_data`，运行 00–06 |
 | `configs/finalize_val.yaml` | 07B 合并 Peak shared + Soar shared + 当前路线 independent Val |
 | `configs/autolabel_test.yaml` | shared Test 运行 00–06 |
 | `configs/finalize_test.yaml` | 07B 汇总并冻结最终 Test |
+| `configs/dragon_gold.yaml` | 将 Dragon legacy 标注转换为 finetune-only external Gold |
+| `configs/finetune_gold.yaml` | b/c/e Gold subset 的专用 04 与 strict 05 |
+| `configs/finalize_finetune.yaml` | 自动发现并认证 a/b/c/e Gold source，生成 HLMF Gold aggregate |
 
 ### 3.3 运行顺序
 
@@ -254,11 +261,12 @@ make run_mediapipe_train VISUALIZE_MEDIAPIPE_ROIS=1
 
 #### (7) `07A_finalize_training_labels.py` / `07B_finalize_evaluation_labels.py`
 
-正式数据集按用途分为两条流程：
+正式数据集按用途分为三类路由：
 
 | 流程 | 数据集 | 主要处理 | 命令 |
 |---|---|---|---|
-| 07A | Train | 合并多个来源并为 ID 加 namespace；Gold 覆盖 pseudo；结构校验、样本分型、伪标签 QC、同原图重复 ROI 降采样；输出阶段化采样/监督权重 | `python scripts/07A_finalize_training_labels.py --config configs/finalize_train.yaml --stage pretrain` 或 `--stage finetune` |
+| 07A | Pretrain | 合并多个 pseudo 来源并为 ID 加 namespace；结构校验、样本分型、伪标签 QC、同原图重复 ROI 降采样 | `python scripts/07A_finalize_training_labels.py --config configs/finalize_train.yaml --stage pretrain` |
+| 08 finalize | Finetune Gold | 自动发现已发布的 a/b/c/e Gold source；认证 descriptor、逐图 SHA 和全覆盖 Gold；跨 source 冲突检查后输出 HLMF Gold aggregate | `make finalize_train_finetune` |
 | 07B | Val/Test | 汇总一个或多个已人工复核的来源；要求 manifest、CVAT XML、reviewed JSONL 一一覆盖；严格校验 Gold；分离 `ignore_for_training`；不按 teacher/Palm 分数筛样本、不降采样 | `python scripts/07B_finalize_evaluation_labels.py --config configs/finalize_val.yaml --split val` 或使用 `configs/finalize_test.yaml --split test` |
 
 Val/Test 的来源和 namespace 规则：
@@ -267,7 +275,8 @@ Val/Test 的来源和 namespace 规则：
 |---|---|---|---|
 | Val | Peak `vals_data` + Soar `vals_data` + 当前路线自己的 `vali_data` | 07B 按每个 source 的 `dataset_id` 强制生成 namespace | `../autodl-tmp/val_merged/` |
 | Test | Peak `test_data` + Soar `test_data`，最终 100% 共享 | 同上；原始文件名允许重复 | `../autodl-tmp/test_merged/` |
-| Train | `configs/finalize_train.yaml` 中的多个来源 | 07A 按 `dataset_id` 自动生成全局 namespace | 配置中的 Train labels 目录 |
+| Pretrain | `configs/finalize_train.yaml` 中的多个来源 | 07A 按 `dataset_id` 自动生成全局 namespace | `train_pretrain_merged/` |
+| Finetune Gold | `finetune/<ID>/sources/gold/*/finetune_source.json` | 08 按 descriptor 自动发现；跨 source 再做 parent/global/SHA 冲突门禁 | `finetune/<ID>/hmlf_gold_merged/` |
 
 两人的 shared Val 分别完成 05 导入，当前路线的 independent Val 也完成 05 导入后，再将三个 source 登记到 `configs/finalize_val.yaml` 并运行一次 `make finalize_val`。两人的 Test source 同理登记到 `configs/finalize_test.yaml` 后运行一次 `make finalize_test`。07B 不写死比例，而是在报告中按实际有效 ROI 数量统计 owner/source/partition 构成。
 
@@ -287,7 +296,7 @@ Val/Test 的来源和 namespace 规则：
 | `train_pretrain_merged/05_labels/hand_train_catalog_pretrain.jsonl` | 07A pretrain 全量审计目录 |
 | `train_pretrain_merged/05_labels/hand_training_labels_pretrain.jsonl` | pretrain loader 使用的 canonical 清单 |
 | `train_pretrain_merged/05_labels/hand_training_excluded_pretrain.jsonl` | pretrain 未入选样本及原因 |
-| `train_finetune_merged/05_labels/*_finetune.jsonl` | finetune 独立输出，不覆盖 pretrain |
+| `finetune/<ID>/hmlf_gold_merged/05_labels/*_finetune.jsonl` | HLMF 聚合后的 Gold-only 输入；HLML 后续再与 replay 合并 |
 | `hand_validation_labels.jsonl` / `hand_test_labels.jsonl` | 07B 严格 Gold 主评测集 |
 | `hand_val_ignored.jsonl` / `hand_test_ignored.jsonl` | 07B 排除的歧义/不可可靠标注样本 |
 | `qc/finalize_*_report.json` | 覆盖率、样本分布、排除原因和输出 SHA-256；fatal 时不覆盖已有 canonical 文件 |
@@ -296,7 +305,6 @@ Val/Test 的来源和 namespace 规则：
 
 ```powershell
 make finalize_train_pretrain VISUALIZE_FINALIZED_TRAIN_ROIS=1
-make finalize_train_finetune VISUALIZE_FINALIZED_TRAIN_ROIS=1
 ```
 
 可视化是 07A 的最后一步，不新增流程脚本；07B Val/Test 不执行该功能。输出位于与对应 `05_labels/`、`qc/` 同级的 `hand_landmarks_visualization/<dataset_id>/*.png`，按所有配置来源分别保存。绘制前会检查每个 source 的 `crop_images_dir` 以及每条入选记录对应的 ROI 图片；任一来源或图片缺失都会输出 `ERROR` 并使命令失败。该步骤只读取 canonical JSONL 并写 PNG，不修改任何 JSONL/XML。
@@ -311,7 +319,7 @@ make finalize_train_finetune VISUALIZE_FINALIZED_TRAIN_ROIS=1
 | 采样 | `sampling_bucket`、`sampling_weight` | loader 先按 Gold/pseudo，再按四种 sample type 做两级采样；该权重不乘入 loss |
 | loss | `supervision_loss_weight`、三个 `*_quality_weight`、三个 `*_loss_weight` | `*_loss_weight` 仅为 0/1 head mask；有效 head 权重 = mask × supervision × 对应 quality weight |
 
-`pretrain` 可直接使用 MediaPipe pseudo；`finetune` 在 `configs/finalize_train.yaml` 中配置人工 Gold JSONL 后重新运行，Gold 会先覆盖同 `crop_id` 的 pseudo。Val 用于调参和选 checkpoint，Test 只用于最终冻结评测。
+`pretrain` 继续使用原来的 MediaPipe pseudo 流程。Finetune 不再把 Gold 手工追加到 `configs/finalize_train.yaml`：HLMF 只发布经过认证的 Gold aggregate，HLML 再把该 aggregate 与 pretrain replay 合并。Val 用于调参和选 checkpoint，Test 只用于最终冻结评测。
 
 ### 3.5 CVAT 复核
 
@@ -352,3 +360,162 @@ python scripts/01_export_palm_detections.py --config configs/autolabel.yaml --ba
 
 - MediaPipe 自动 21 点只是草稿，遮挡、交叉手、边缘手、强暗光/反光样本必须人工复核（即 CVAT 自行复核）。
 - handedness 低置信度、`present=false` 但 Palm score 很高、点越界、同一 crop 多手等情况会写入 QC 报告并标记 `needs_review`。最终标注文件 `data\05_labels\hand_training_labels.jsonl` 亦会为每个样本的信息中标明这个字段，**在训练阶段，建议直接忽略所有 `needs_review:true` 的样本，即不让它们参与训练**。
+
+### 3.8 Finetune Gold 制作与人工操作
+
+这一节只用于 HLMF→HLML v1.0 finetune。原有 Train/Val/Test 的 00～07 流程保持不变。所有新命令都使用独立的 `HAND_FINETUNE_ID`，不会覆盖 pretrain 产物。
+
+先设置中央数据根和 finetune ID：
+
+```powershell
+$env:HAND_DATA_ROOT = "D:/datasets/HLML-2.0"
+$env:HAND_FINETUNE_ID = "v2-finetune-r1"
+$env:HAND_PRETRAIN_ID = "v2-pretrain-r3"
+```
+
+Linux 服务器使用同名 `export`。下文所有目录均位于 `${HAND_DATA_ROOT}/finetune/${HAND_FINETUNE_ID}/`。
+
+#### 3.8.1 导入 Dragon external Gold
+
+Dragon 原始目录应直接包含 `images/`、`annotations_hand.txt`、`annotations_palm.txt` 和 `README.md`。不需要建立另一个 HLMF 仓库，也不要旋转或修改原 JPEG。
+
+```powershell
+$env:DRAGON_RAW_ROOT = "D:/CICIEC/datasets/HandViolenceEnhanced0716/dragon"
+make prepare_dragon_gold
+```
+
+程序自动验证三份输入 SHA、读取 JPEG EXIF Orientation=6、转成逻辑 1280×720、严格建立 Hand–Palm 唯一对应、按 1.8/1.8 和 `shift_y=-0.1` 裁剪 ROI、投影 21 点并生成 source descriptor。Dragon 不提供 handedness，因此所有行写 `unknown`，训练时 handedness mask 为 0。缺失的 Palm score 以 `0.5` 兼容哨兵保存，同时明确写入 `palm_score_observed=false`，不能把它理解为真实置信度。
+
+查看：
+
+```text
+finetune/<ID>/sources/gold/dragon_gold_0716_v1/
+├─ finetune_source.json
+├─ 02_roi_crops/images/
+├─ source_images/             # 3565 张参与匹配的原 JPEG 审计副本/硬链接
+├─ 03_reviewed/hand_landmarks_reviewed.jsonl
+├─ 03_reviewed/ignored.jsonl
+└─ qc/
+   ├─ gold_source_report.json
+   ├─ crop_images_sha256.jsonl
+   ├─ source_images_sha256.jsonl
+   └─ overlays/                 # 固定 64 张抽检图
+```
+
+当前 Dragon 版本的硬验收值为：5191 条匹配 Gold、5189 条可训练、2 条关键点越出 ROI 并进入 ignored；任一数字或输入 SHA 不符都会停止发布。参与匹配的 3565 张原 JPEG 会以不重编码的 hardlink/copy 放进 source package 的 `source_images/`，descriptor 使用相对只读根，HLML 会逐张复核 SHA；因此整个 Gold source 可以跨机器搬运，不依赖原始绝对路径。
+
+#### 3.8.2 导出 b/c 人工 Gold 子集
+
+先发布一次只读的 pretrain source lookup。这个动作不会改写已经冻结的 pretrain labels：
+
+```powershell
+make build_pretrain_source_registry
+```
+
+结果是 `train_pretrain_merged/qc/pretrain_source_registry.jsonl` 及其 report。每行认证一个 `global_crop_id` 对应的原 manifest、MediaPipe draft、物理 ROI 和 SHA；HLML 用它恢复 b/c 的父数据，而不猜测目录。registry 中路径是生成机器上的绝对路径；中央数据根迁移后应重新运行本命令，不要手改 JSONL。
+
+随后 HLML 自动选择 b（从人工删除的困难样本中回看）或 c（teacher–student 分歧样本），并生成：
+
+```text
+finetune/<ID>/mining/<source_id>/selection_request.jsonl
+```
+
+每行包含父数据集/ROI/global ID、父 manifest/draft/crop 的绝对路径，以及 manifest SHA、draft SHA 和图片 SHA。不要手写候选 ID，也不要把裸图片目录交给 HLMF。
+
+```powershell
+# b 示例
+make export_finetune_gold `
+  FINETUNE_SOURCE_ID=negative_removed_gold `
+  FINETUNE_SOURCE_MODE=selection_subset
+
+# c 示例
+make export_finetune_gold `
+  FINETUNE_SOURCE_ID=disagreement_gold `
+  FINETUNE_SOURCE_MODE=selection_subset
+```
+
+程序不会重跑 MediaPipe 03；它从已认证的 parent manifest/draft 恢复 ROI，逐图核对 SHA，保留 `parent_*` 身份，并剥离 teacher 自动给出的 Left/Right。
+
+#### 3.8.3 导出新录制 e source
+
+新录制数据先在一个独立 HLMF raw source root 中正常跑完 00～03，确保存在：
+
+```text
+<raw-root>/02_roi_crops/images/
+<raw-root>/02_roi_crops/hand_roi_crops_manifest.jsonl
+<raw-root>/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+```
+
+然后进入同一套 finetune strict CVAT 流程：
+
+```powershell
+make export_finetune_gold `
+  FINETUNE_SOURCE_ID=new_recorded_gold `
+  FINETUNE_SOURCE_MODE=native_existing `
+  FINETUNE_RAW_SOURCE_ROOT=D:/datasets/new_recorded_raw
+```
+
+`native_existing` 不需要、也不会伪造 HLML selection request。
+
+#### 3.8.4 CVAT 中必须完成的人工内容
+
+导出后，每个 source 的 task 位于：
+
+```text
+finetune/<ID>/cvat/<source_id>/
+├─ 02_roi_crops/images/       # 上传这些图片
+├─ cvat_autolabel.xml         # 导入为初始标注
+├─ task_descriptor.json
+└─ qc/
+   ├─ cvat_export_stats.json
+   └─ crop_images_sha256.jsonl
+```
+
+使用 `configs/cvat_label.json` 创建任务标签。人工逐图复核时，所有未打 `ignore_for_training` 的图片必须满足：
+
+1. 恰好保留一个完整的 21 点 `hand_landmarks` skeleton，或明确添加一个 `no_hand` tag；二者同时存在或都不存在都会失败。
+2. Positive 必须明确选择且只选择一个 `Left`、`Right` 或 `unknown_handedness`。无法可靠判断左右手时选择 `unknown_handedness`，不要猜测。
+3. Negative 只能有 `no_hand`，不能同时带 handedness。
+4. 严重模糊、遮挡或无法可靠标注的图片可以添加 `ignore_for_training`。
+
+从 CVAT 导出 `CVAT for images 1.1`，文件名必须是 `reviewed.xml`，放回 task 根目录：
+
+```text
+finetune/<ID>/cvat/<source_id>/reviewed.xml
+```
+
+然后执行：
+
+```powershell
+# 只导入一个 source
+make import_finetune_gold FINETUNE_SOURCE_ID=negative_removed_gold
+
+# 所有 task 的 reviewed.xml 都放回后，省略 ID 可先全量预检、再批量发布
+make import_finetune_gold
+```
+
+程序负责 strict 05、覆盖率检查、逐图 SHA、全量 Gold/ignored sidecar、QC 和原子发布。批量模式先预检所有待发布 task，任一 `reviewed.xml` 缺失或不合格时不会开始发布；成功后另写 `cvat/batch_import_report.json`。任何图片漏回收、缺 presence/handedness 决策、重复 skeleton 或 artifact 被修改时，`sources/gold/<source_id>` 都不会出现半成品。
+
+#### 3.8.5 聚合全部 HLMF Gold
+
+Dragon 以及计划启用的 b/c/e source 都发布完成后运行：
+
+```powershell
+make finalize_train_finetune
+```
+
+该命令自动发现 `sources/gold/*/finetune_source.json`，不需要手工编辑 source 列表。它会认证 descriptor 和每个 artifact 的 SHA，对 `parent_global_crop_id → global_crop_id → ROI SHA → 归一化像素 SHA` 做跨 source 去重；同一身份标签冲突立即失败，标签一致则按 source role 决定唯一 owner。
+
+最终交给 HLML 的 HLMF Gold-only 结果为：
+
+```text
+finetune/<ID>/hmlf_gold_merged/
+├─ hmlf_gold_aggregate.json
+├─ 05_labels/
+│  ├─ hand_train_catalog_finetune.jsonl
+│  ├─ hand_training_labels_finetune.jsonl
+│  └─ hand_training_excluded_finetune.jsonl
+└─ qc/finalize_train_finetune_report.json
+```
+
+先查看 aggregate 的 `counts`、`duplicate_count`、`conflict_count` 和 `source_descriptors`。HLMF 到此只聚合 Gold；pretrain replay 由 HLML 单独制作并在 HLML 的 finetune curation 阶段合并，不能拷贝进这个目录。

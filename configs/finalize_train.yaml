@@ -75,15 +75,7 @@ stages:
     supervision_loss_weights: {pseudo: 0.7, gold: 1.0}
     quality_loss_weights: {HIGH: 1.0, MEDIUM: 0.7, PRESENCE_ONLY: 0.4, AMBIGUOUS: 0.0, INVALID: 0.0}
     sampling_weights: {POS_RUNTIME: 0.70, POS_LOW_PALM: 0.70, NEG_RUNTIME_CANDIDATE: 0.25, NEG_LOW_PALM_CANDIDATE: 0.05}
-  finetune:
-    supervision_loss_weights: {pseudo: 0.5, gold: 1.0}
-    quality_loss_weights: {HIGH: 1.0, MEDIUM: 0.6, PRESENCE_ONLY: 0.3, AMBIGUOUS: 0.0, INVALID: 0.0}
-    sampling_weights: {POS_RUNTIME: 0.70, POS_LOW_PALM: 0.70, NEG_RUNTIME_CANDIDATE: 0.25, NEG_LOW_PALM_CANDIDATE: 0.05}
-
 outputs:
   pretrain:
     labels_dir: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_pretrain_merged/05_labels
     qc_dir: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_pretrain_merged/qc
-  finetune:
-    labels_dir: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_finetune_merged/05_labels
-    qc_dir: ${HAND_DATA_ROOT:-../autodl-tmp/TrainFab/HLML-2.0}/train_finetune_merged/qc

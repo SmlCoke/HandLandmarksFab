@@ -1,5 +1,7 @@
 # Hand Landmarker 数据集制作操作手册
 
+> **Finetune v1.0 路由更新（2026-07-16）**：本文的 00～07 pretrain/Val/Test 操作仍有效；其中所有旧 `train_finetune_merged`、`07A --stage finetune`、`make finalize_train_finetune VISUALIZE_...` 说明已被 [README 3.8](../../README.md#38-finetune-gold-制作与人工操作) 取代。现在 `make finalize_train_finetune` 只聚合已认证的 HLMF Gold source，输出 `finetune/<HAND_FINETUNE_ID>/hmlf_gold_merged/`；不要按本文旧段落执行 finetune。
+
 > 适用范围：训练集、共享/独立验证集和共享测试集的自动标注、CVAT 复核、07A/07B 冻结以及训练接口。  
 > 环境：所有命令均在仓库根目录执行，并使用 README 指定的 `anfab` 环境。  
 > namespace：Train 和 Val/Test 都由 finalizer 按 source 的唯一 `dataset_id` 自动添加；原始文件名允许重复。

@@ -1,0 +1,22 @@
+schema_version: finetune_gold_v1
+workspace_root: ${HAND_DATA_ROOT}/finetune/${HAND_FINETUNE_ID}
+parent_pretrain_id: ${HAND_PRETRAIN_ID:v2-pretrain-r3}
+
+image: {width: 1280, height: 720, channels: 1, orientation: upright}
+hand_roi: {output_width: 256, output_height: 256, scale_x: 1.8, scale_y: 1.8, shift_x: 0.0, shift_y: -0.1}
+
+cvat:
+  label_name: hand_landmarks
+  no_hand_label_name: no_hand
+  left_label_name: Left
+  right_label_name: Right
+  unknown_handedness_label_name: unknown_handedness
+  ignore_for_training_label_name: ignore_for_training
+  xml_version: "1.1"
+  skeleton_point_labels: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21"]
+
+review:
+  strip_teacher_handedness: true
+  require_explicit_presence_decision: true
+  require_explicit_handedness_decision: true
+  handedness_policy: optional_per_row

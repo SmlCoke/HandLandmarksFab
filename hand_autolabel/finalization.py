@@ -153,7 +153,13 @@ def _point_errors(points: Any, name: str, expected: int) -> List[str]:
 
 
 def validate_label_schema(
-    row: Mapping[str, Any], cfg: Mapping[str, Any], *, gold: bool, check_image: bool = True, source_root: Path | None = None
+    row: Mapping[str, Any],
+    cfg: Mapping[str, Any],
+    *,
+    gold: bool,
+    check_image: bool = True,
+    source_root: Path | None = None,
+    handedness_policy: str = "required",
 ) -> tuple[List[str], List[str]]:
     warnings: List[str] = []
     errors: List[str] = []
@@ -164,8 +170,15 @@ def validate_label_schema(
         for name in LANDMARK_FIELDS:
             errors.extend(_point_errors(row.get(name), name, 21))
         handedness = str((row.get("handedness") or {}).get("label", "unknown")).lower()
-        if gold and handedness not in {"left", "right"}:
-            errors.append("positive_handedness_not_left_or_right")
+        if gold:
+            if handedness_policy == "required" and handedness not in {"left", "right"}:
+                errors.append("positive_handedness_not_left_or_right")
+            elif handedness_policy == "optional_per_row" and handedness not in {"left", "right", "unknown"}:
+                errors.append("positive_handedness_invalid")
+            elif handedness_policy == "unavailable" and handedness != "unknown":
+                errors.append("positive_handedness_must_be_unknown")
+            elif handedness_policy not in {"required", "optional_per_row", "unavailable"}:
+                errors.append(f"invalid_handedness_policy:{handedness_policy}")
         norm = row.get("landmarks_crop_norm") or []
         crop = row.get("landmarks_crop_px") or []
         image = row.get("landmarks_image_px") or []
@@ -473,28 +486,35 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
     source_stats: Dict[str, Any] = {}
     for source in cfg.get("sources", []):
         dataset_id = str(source["dataset_id"])
+        enabled_stages = [str(value) for value in source.get("enabled_stages", ["pretrain", "finetune"])]
+        if stage not in enabled_stages:
+            source_stats[dataset_id] = {"status": "disabled_for_stage", "enabled_stages": enabled_stages}
+            continue
+        source_mode = str(source.get("source_mode", "pseudo_with_optional_gold"))
+        gold_only = source_mode == "gold_only"
+        handedness_policy = str(source.get("handedness_policy", "required"))
         source_root = resolve_path(root, source.get("root", "."))
         crop_images_dir = resolve_path(source_root, source["crop_images_dir"]) if source.get("crop_images_dir") else None
         if crop_images_dir is not None and not crop_images_dir.is_dir():
             fatal.append({"scope": dataset_id, "error": "crop_images_dir_missing", "path": str(crop_images_dir)})
         manifest_path = resolve_path(source_root, source["manifest"])
-        pseudo_path = resolve_path(source_root, source["pseudo_labels"])
-        missing_inputs = [
-            (name, path)
-            for name, path in (("manifest", manifest_path), ("pseudo_labels", pseudo_path))
-            if not path.is_file()
-        ]
+        pseudo_path = resolve_path(source_root, source["pseudo_labels"]) if source.get("pseudo_labels") else None
+        missing_inputs = [("manifest", manifest_path)] if not manifest_path.is_file() else []
+        if not gold_only and (pseudo_path is None or not pseudo_path.is_file()):
+            missing_inputs.append(("pseudo_labels", pseudo_path or source_root / "<missing-config>"))
+        if gold_only and not source.get("gold_labels"):
+            missing_inputs.append(("gold_labels", source_root / "<missing-config>"))
         if missing_inputs:
             details = ", ".join(f"{name}={path}" for name, path in missing_inputs)
             raise FinalizationError(f"{dataset_id}: required input file missing: {details}")
         manifests = read_jsonl(manifest_path)
-        pseudo_rows = read_jsonl(pseudo_path)
+        pseudo_rows = [] if gold_only else read_jsonl(pseudo_path)
         manifest_idx, duplicates = unique_index(manifests, "crop_id", f"{dataset_id}:manifest")
         pseudo_idx, pseudo_dups = unique_index(pseudo_rows, "crop_id", f"{dataset_id}:pseudo")
         fatal.extend(duplicates + pseudo_dups)
         basename_counts = Counter(Path(str(r.get("crop_path", ""))).name for r in manifests)
         fatal.extend({"scope": dataset_id, "error": "duplicate_crop_basename", "value": k, "count": v} for k, v in basename_counts.items() if k and v > 1)
-        missing_pseudo = sorted(set(manifest_idx) - set(pseudo_idx))
+        missing_pseudo = [] if gold_only else sorted(set(manifest_idx) - set(pseudo_idx))
         orphan_pseudo = sorted(set(pseudo_idx) - set(manifest_idx))
         if missing_pseudo:
             fatal.append({"scope": dataset_id, "error": "manifest_without_pseudo", "crop_ids": missing_pseudo})
@@ -535,12 +555,18 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
                     blocking = [item for item in report_errors if not (isinstance(item, Mapping) and str(item.get("crop_id")) in ignored_gold)]
                     if blocking:
                         fatal.append({"scope": dataset_id, "error": "gold_import_report_errors", "details": blocking})
+        if gold_only:
+            missing_gold = sorted(set(manifest_idx) - set(gold_idx))
+            if missing_gold:
+                fatal.append({"scope": dataset_id, "error": "gold_only_manifest_without_gold", "crop_ids": missing_gold})
         source_cfg = _infer_source_config(
             dataset_id,
             manifests,
             [pseudo_rows, list(gold_idx.values())],
             source.get("quality", cfg.get("quality", {})),
         )
+        manifest_sha256 = sha256_file(manifest_path)
+        draft_sha256 = sha256_file(pseudo_path) if pseudo_path is not None else None
         source_rows: List[Dict[str, Any]] = []
         for local_id, manifest in manifest_idx.items():
             global_id = f"{dataset_id}:{local_id}"
@@ -560,7 +586,8 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
             row = merge_label_with_manifest(effective, manifest, source_cfg)
             if crop_images_dir is not None:
                 row["source_crop_path"] = manifest.get("crop_path")
-                row["crop_path"] = str(crop_images_dir / Path(str(manifest.get("crop_path", ""))).name)
+                physical_crop_path = crop_images_dir / Path(str(manifest.get("crop_path", ""))).name
+                row["crop_path"] = str(physical_crop_path)
             row.update({
                 "schema_version": str(cfg.get("schema_version", "train_finalize_v1")),
                 "dataset_id": dataset_id,
@@ -573,11 +600,12 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
                 "training_stage": stage,
             })
             if gold is not None:
-                pseudo_probe = merge_label_with_manifest(pseudo, manifest, source_cfg)
-                pseudo_warnings, pseudo_errors = validate_label_schema(pseudo_probe, source_cfg, gold=False, check_image=False, source_root=source_root)
-                pseudo_conflicts = manifest_conflicts(pseudo, manifest)
-                if pseudo_warnings or pseudo_errors or pseudo_conflicts:
-                    row["overridden_pseudo_issues"] = sorted(set(pseudo_warnings + pseudo_errors + pseudo_conflicts))
+                if pseudo:
+                    pseudo_probe = merge_label_with_manifest(pseudo, manifest, source_cfg)
+                    pseudo_warnings, pseudo_errors = validate_label_schema(pseudo_probe, source_cfg, gold=False, check_image=False, source_root=source_root)
+                    pseudo_conflicts = manifest_conflicts(pseudo, manifest)
+                    if pseudo_warnings or pseudo_errors or pseudo_conflicts:
+                        row["overridden_pseudo_issues"] = sorted(set(pseudo_warnings + pseudo_errors + pseudo_conflicts))
                 if gold.get("cvat_image_seen") is False or gold.get("cvat_review_status") == "missing_from_xml":
                     fatal.append({"scope": dataset_id, "crop_id": local_id, "errors": ["gold_not_seen_in_cvat"]})
                 if gold.get("cvat_import_errors") and not bool(gold.get("ignore_for_training")):
@@ -586,7 +614,14 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
                 row.update({"sample_type": _sample_type(row), "quality_tier": "INVALID", "quality_flags": ["ignore_for_training"], "selection_action": "drop_ignore"})
                 source_rows.append(row)
                 continue
-            warnings, errors = validate_label_schema(row, source_cfg, gold=gold is not None, check_image=check_images, source_root=source_root)
+            warnings, errors = validate_label_schema(
+                row,
+                source_cfg,
+                gold=gold is not None,
+                check_image=check_images,
+                source_root=source_root,
+                handedness_policy=handedness_policy,
+            )
             quality, flags = _train_quality(row, provenance, source_cfg)
             row["quality_flags"] = sorted(set(flags + warnings))
             row["sample_type"] = _sample_type(row)
@@ -601,6 +636,10 @@ def finalize_training(config_path: Path, stage: str) -> Dict[str, Any]:
         catalog.extend(source_rows)
         source_stats[dataset_id] = {
             "manifest": len(manifests), "pseudo": len(pseudo_rows), "gold": len(gold_idx),
+            "source_mode": source_mode, "handedness_policy": handedness_policy,
+            "manifest_path": str(manifest_path.resolve()), "manifest_sha256": manifest_sha256,
+            "draft_path": str(pseudo_path.resolve()) if pseudo_path is not None else None,
+            "draft_sha256": draft_sha256,
             "crop_images_dir": str(crop_images_dir) if crop_images_dir is not None else None,
         }
     if not cfg.get("sources"):
