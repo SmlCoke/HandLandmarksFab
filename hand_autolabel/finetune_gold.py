@@ -171,6 +171,30 @@ def _copy_or_link(source: Path, target: Path) -> None:
         raise GoldPipelineError(f"copy SHA mismatch: {source} -> {target}")
 
 
+def _link_tree(source: Path, target: Path) -> tuple[int, int]:
+    """Clone a trusted directory with hard links and verify every byte identity."""
+
+    source = _assert_directory(source, "seed source")
+    if target.exists():
+        raise GoldPipelineError(f"seed target already exists: {target}")
+    file_count = 0
+    byte_count = 0
+    for path in sorted(source.rglob("*"), key=lambda value: str(value).lower()):
+        if path.is_symlink():
+            raise GoldPipelineError(f"seed source contains a symlink: {path}")
+        relative = path.relative_to(source)
+        destination = target / relative
+        if path.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        if not path.is_file():
+            raise GoldPipelineError(f"seed source contains a non-regular entry: {path}")
+        _copy_or_link(path, destination)
+        file_count += 1
+        byte_count += path.stat().st_size
+    return file_count, byte_count
+
+
 def _artifact(path: Path, root: Path, *, count: int | None = None) -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "path": str(path.resolve().relative_to(root.resolve())).replace("\\", "/"),
@@ -453,8 +477,75 @@ def _materialize_rows_from_selection(
     }
 
 
+def _native_selection_key(row: Mapping[str, Any], source_id: str) -> tuple[str, str, str]:
+    """Stable stratum: session, Palm class and coarse ROI geometry."""
+
+    image = str(row.get("image") or row.get("source_image") or "")
+    session = str(
+        row.get("source_sequence_id")
+        or row.get("session_id")
+        or Path(image).parent.as_posix()
+        or "default"
+    )
+    roi = row.get("roi_rect") or {}
+    rotation = float(roi.get("rotation_rad", 0.0))
+    width = float(roi.get("width", 0.0))
+    geometry = "{}:{}".format(int(round(rotation / 0.35)), int(round(width / 64.0)))
+    stratum = "{}:{}:{}".format(session, bool(row.get("palm_valid")), geometry)
+    crop_id = str(row.get("crop_id") or "")
+    rank = hashlib.sha256(f"{source_id}\0{session}\0{image}\0{crop_id}".encode("utf-8")).hexdigest()
+    return stratum, image, rank
+
+
+def _temporal_spread(values: Sequence[tuple[str, str, str]]) -> List[tuple[str, str, str]]:
+    """Order an image-sorted sequence as endpoints then recursive midpoints."""
+
+    ordered = sorted(values, key=lambda value: (value[0], value[1], value[2]))
+    if len(ordered) <= 2:
+        return ordered
+    indices = [0, len(ordered) - 1]
+    queue = [(1, len(ordered) - 2)]
+    while queue:
+        start, end = queue.pop(0)
+        if start > end:
+            continue
+        middle = (start + end) // 2
+        indices.append(middle)
+        queue.extend([(start, middle - 1), (middle + 1, end)])
+    return [ordered[index] for index in indices]
+
+
+def _select_native_ids(
+    rows: Mapping[str, Mapping[str, Any]], source_id: str, max_items: int
+) -> List[str]:
+    """Round-robin sessions while deterministically spreading adjacent frames."""
+
+    grouped: Dict[str, List[tuple[str, str, str]]] = defaultdict(list)
+    for crop_id, row in rows.items():
+        session, image, rank = _native_selection_key(row, source_id)
+        grouped[session].append((image, rank, crop_id))
+    for group, values in list(grouped.items()):
+        grouped[group] = _temporal_spread(values)
+    sessions = sorted(grouped, key=lambda value: hashlib.sha256(f"{source_id}\0{value}".encode()).hexdigest())
+    selected: List[str] = []
+    offset = 0
+    while len(selected) < max_items:
+        added = False
+        for session in sessions:
+            values = grouped[session]
+            if offset < len(values):
+                selected.append(values[offset][2])
+                added = True
+                if len(selected) == max_items:
+                    break
+        if not added:
+            break
+        offset += 1
+    return selected
+
+
 def _materialize_rows_from_native(
-    raw_root: Path, source_id: str, dataset_id: str, task_root: Path
+    raw_root: Path, source_id: str, dataset_id: str, task_root: Path, max_items: int
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
     raw_root = _assert_directory(Path(raw_root), "native source root")
     manifest_path = _safe_relative_file(
@@ -468,11 +559,14 @@ def _materialize_rows_from_native(
     draft_idx = _unique(read_jsonl(draft_path), "crop_id", "native draft")
     if set(manifest_idx) != set(draft_idx):
         raise GoldPipelineError("native manifest/draft coverage mismatch")
+    if max_items <= 0:
+        raise GoldPipelineError("native_existing max_items must be positive")
+    selected_ids = _select_native_ids(manifest_idx, source_id, min(max_items, len(manifest_idx)))
     manifests: List[Dict[str, Any]] = []
     drafts: List[Dict[str, Any]] = []
     image_dir = task_root / "02_roi_crops" / "images"
     seen_names: set[str] = set()
-    for index, parent_local in enumerate(sorted(manifest_idx)):
+    for index, parent_local in enumerate(selected_ids):
         manifest = copy.deepcopy(manifest_idx[parent_local])
         draft = copy.deepcopy(draft_idx[parent_local])
         original = Path(str(manifest.get("crop_path", "")))
@@ -525,8 +619,44 @@ def _materialize_rows_from_native(
         "raw_source_root": str(raw_root),
         "manifest_sha256": sha256_file(manifest_path),
         "draft_sha256": sha256_file(draft_path),
+        "available_rows": len(manifest_idx),
+        "selection_method": "deterministic_session_palm_roi_temporal_round_robin_v1",
+        "max_items": max_items,
         "rows": len(manifests),
     }
+
+
+def _write_cvat_job_plan(
+    task_root: Path, manifests: Sequence[Mapping[str, Any]], segment_size: int
+) -> Path:
+    if segment_size <= 0:
+        raise GoldPipelineError("cvat.segment_size must be positive")
+    jobs = []
+    for start in range(0, len(manifests), segment_size):
+        rows = list(manifests[start : start + segment_size])
+        identities = [str(row["crop_id"]) for row in rows]
+        jobs.append(
+            {
+                "job_index": len(jobs),
+                "start_image_index": start,
+                "end_image_index": start + len(rows) - 1,
+                "count": len(rows),
+                "first_crop_id": identities[0],
+                "last_crop_id": identities[-1],
+                "crop_ids_sha256": hashlib.sha256("\n".join(identities).encode("utf-8")).hexdigest(),
+            }
+        )
+    path = task_root / "qc" / "cvat_job_plan.json"
+    atomic_write_json(
+        path,
+        {
+            "schema_version": "cvat_job_plan_v1",
+            "total_images": len(manifests),
+            "segment_size": segment_size,
+            "jobs": jobs,
+        },
+    )
+    return path
 
 
 def export_finetune_gold(
@@ -537,6 +667,7 @@ def export_finetune_gold(
     raw_source_root: Path | None = None,
     selection_request: Path | None = None,
     source_kind: str | None = None,
+    max_items: int | None = None,
 ) -> Dict[str, Any]:
     config_path = Path(config_path).resolve()
     cfg = load_yaml_config(config_path)
@@ -546,6 +677,12 @@ def export_finetune_gold(
     if not source_id or source_id in {".", ".."} or Path(source_id).name != source_id:
         raise GoldPipelineError(f"invalid source_id: {source_id!r}")
     dataset_id = str(cfg.get("dataset_id") or source_id)
+    cvat_cfg = cfg.get("cvat") or {}
+    hard_limit = int(cvat_cfg.get("max_task_items", 800))
+    if hard_limit <= 0 or hard_limit > 800:
+        raise GoldPipelineError("cvat.max_task_items must be in [1, 800]")
+    if max_items is not None and (max_items <= 0 or max_items > hard_limit):
+        raise GoldPipelineError(f"max_items must be in [1, {hard_limit}]")
     task_root = workspace / "cvat" / source_id
     published_root = workspace / "sources" / "gold" / source_id
     if task_root.exists() or published_root.exists():
@@ -555,22 +692,64 @@ def export_finetune_gold(
     try:
         if source_mode == "selection_subset":
             request = selection_request or workspace / "mining" / source_id / "selection_request.jsonl"
+            if selection_request is None and not request.is_file():
+                matches = sorted(
+                    path
+                    for path in (workspace / "mining" / "rounds").glob(
+                        f"*/{source_id}/selection_request.jsonl"
+                    )
+                    if path.is_file()
+                )
+                if len(matches) != 1:
+                    raise GoldPipelineError(
+                        f"expected exactly one round request for {source_id}; found {len(matches)}"
+                    )
+                request = matches[0]
             request = _assert_regular_file(request, "selection request")
             manifests, drafts, provenance = _materialize_rows_from_selection(request, source_id, dataset_id, temp_root)
+            if source_id.startswith("disagreement_gold_"):
+                round_report_path = _assert_regular_file(
+                    request.with_name("selection_report.json"), "HLML round selection report"
+                )
+                round_report = json.loads(round_report_path.read_text(encoding="utf-8"))
+                artifact = (round_report.get("artifacts") or {}).get("selection_request") or {}
+                if (
+                    round_report.get("schema_version") != "finetune_round_v1"
+                    or round_report.get("status") != "ok"
+                    or str(round_report.get("source_id")) != source_id
+                    or int(round_report.get("combined_task_count", hard_limit + 1)) > hard_limit
+                    or int(artifact.get("rows", -1)) != len(manifests)
+                    or str(artifact.get("sha256")) != sha256_file(request)
+                ):
+                    raise GoldPipelineError("HLML round report does not authenticate the frozen budget/request")
+                provenance["round_selection_report"] = str(round_report_path)
+                provenance["round_selection_report_sha256"] = sha256_file(round_report_path)
+                provenance["combined_task_count"] = int(round_report["combined_task_count"])
+            if max_items is not None and len(manifests) > max_items:
+                raise GoldPipelineError("selection request exceeds max_items; regenerate it in HLML")
             resolved_kind = source_kind or provenance.get("source_kind")
             if resolved_kind not in {"reviewed_hard_gold", "disagreement_gold"}:
                 raise GoldPipelineError("selection_subset requires source_kind reviewed_hard_gold or disagreement_gold")
         else:
             if raw_source_root is None:
                 raise GoldPipelineError("native_existing requires raw_source_root")
+            if max_items is None:
+                raise GoldPipelineError("native_existing requires max_items")
+            native_limit = int(cvat_cfg.get("native_max_items", 300))
+            if native_limit <= 0 or native_limit > hard_limit or max_items > native_limit:
+                raise GoldPipelineError(
+                    f"native_existing max_items exceeds configured limit {native_limit}: {max_items}"
+                )
             manifests, drafts, provenance = _materialize_rows_from_native(
-                raw_source_root, source_id, dataset_id, temp_root
+                raw_source_root, source_id, dataset_id, temp_root, max_items
             )
             resolved_kind = source_kind or "new_recorded_gold"
             if resolved_kind != "new_recorded_gold":
                 raise GoldPipelineError("native_existing requires source_kind new_recorded_gold")
         if resolved_kind not in ALLOWED_SOURCE_KINDS:
             raise GoldPipelineError(f"unsupported source_kind: {resolved_kind}")
+        if len(manifests) > hard_limit:
+            raise GoldPipelineError(f"CVAT task exceeds hard limit {hard_limit}: {len(manifests)}")
         manifest_path = temp_root / "02_roi_crops" / "hand_roi_crops_manifest.jsonl"
         draft_path = temp_root / "02_roi_crops" / "hand_landmarks_autolabel_draft.jsonl"
         atomic_write_jsonl(manifest_path, manifests)
@@ -586,6 +765,9 @@ def export_finetune_gold(
         export_stats["source_mode"] = source_mode
         export_stats["source_kind"] = resolved_kind
         atomic_write_json(temp_root / "qc" / "cvat_export_stats.json", export_stats)
+        job_plan_path = _write_cvat_job_plan(
+            temp_root, manifests, int(cvat_cfg.get("segment_size", 100))
+        )
         task_descriptor = {
             "schema_version": "finetune_gold_task_v1",
             "status": "awaiting_human_review",
@@ -602,6 +784,7 @@ def export_finetune_gold(
                 "crop_images_sha256": _artifact(crop_hash_path, temp_root, count=len(manifests)),
                 "cvat_xml": _artifact(xml_path, temp_root, count=len(manifests)),
                 "export_report": _artifact(temp_root / "qc" / "cvat_export_stats.json", temp_root),
+                "cvat_job_plan": _artifact(job_plan_path, temp_root, count=len(manifests)),
             },
             "reviewed_xml": "reviewed.xml",
             "provenance": provenance,
@@ -612,6 +795,55 @@ def export_finetune_gold(
         shutil.rmtree(temp_root, ignore_errors=True)
         raise
     return task_descriptor
+
+
+def seed_finetune_gold(
+    config_path: Path, *, base_finetune_id: str, finetune_id: str
+) -> Dict[str, Any]:
+    """Seed a new immutable finetune workspace from authenticated historical Gold."""
+
+    config_path = Path(config_path).resolve()
+    cfg = load_yaml_config(config_path)
+    workspace = _workspace(cfg, config_path)
+    if workspace.name != finetune_id:
+        raise GoldPipelineError(
+            f"workspace/HAND_FINETUNE_ID mismatch: {workspace.name!r} != {finetune_id!r}"
+        )
+    if not base_finetune_id or base_finetune_id == finetune_id:
+        raise GoldPipelineError("base_finetune_id must identify a different workspace")
+    if workspace.exists():
+        raise GoldPipelineError(f"seed target workspace already exists: {workspace}")
+    base_workspace = _assert_directory(workspace.parent / base_finetune_id, "base finetune workspace")
+    base_gold = _assert_directory(base_workspace / "sources" / "gold", "base Gold sources")
+    temp = Path(tempfile.mkdtemp(prefix=f".{_safe_name(finetune_id)}.", dir=workspace.parent))
+    try:
+        files, bytes_total = _link_tree(base_gold, temp / "sources" / "gold")
+        descriptors = sorted((temp / "sources" / "gold").glob("*/finetune_source.json"))
+        if not descriptors:
+            raise GoldPipelineError("base workspace contains no Gold source descriptors")
+        source_ids = []
+        for descriptor_path in descriptors:
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+            _validate_source_descriptor(descriptor_path.parent, descriptor)
+            source_ids.append(str(descriptor["source_id"]))
+        report = {
+            "schema_version": "finetune_gold_seed_v1",
+            "status": "ok",
+            "base_finetune_id": base_finetune_id,
+            "finetune_id": finetune_id,
+            "source_ids": source_ids,
+            "source_count": len(source_ids),
+            "file_count": files,
+            "logical_bytes": bytes_total,
+            "storage_method": "hardlink_with_copy_fallback",
+            "created_at": _utc_now(),
+        }
+        atomic_write_json(temp / "qc" / "seed_finetune_gold_report.json", report)
+        os.replace(temp, workspace)
+    except Exception:
+        shutil.rmtree(temp, ignore_errors=True)
+        raise
+    return report
 
 
 def _validate_task_artifacts(task_root: Path, descriptor: Mapping[str, Any]) -> None:

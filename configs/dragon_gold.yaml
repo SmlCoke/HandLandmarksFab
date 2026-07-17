@@ -1,5 +1,5 @@
 schema_version: finetune_gold_v1
-workspace_root: ${HAND_DATA_ROOT}/finetune/${HAND_FINETUNE_ID}
+workspace_root: ${HAND_WORK_ROOT}/finetune/${HAND_FINETUNE_ID}
 
 hand_roi:
   output_width: 256

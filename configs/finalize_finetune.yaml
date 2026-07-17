@@ -1,8 +1,8 @@
 schema_version: hmlf_gold_finalize_v1
-workspace_root: ${HAND_DATA_ROOT}/finetune/${HAND_FINETUNE_ID}
+workspace_root: ${HAND_WORK_ROOT}/finetune/${HAND_FINETUNE_ID}
 
 source_discovery:
-  root: ${HAND_DATA_ROOT}/finetune/${HAND_FINETUNE_ID}/sources/gold
+  root: ${HAND_WORK_ROOT}/finetune/${HAND_FINETUNE_ID}/sources/gold
   descriptor_name: finetune_source.json
 
 cross_source_identity:
@@ -12,4 +12,4 @@ cross_source_identity:
   role_precedence: [external_gold, reviewed_hard_gold, disagreement_gold, new_recorded_gold]
 
 outputs:
-  root: ${HAND_DATA_ROOT}/finetune/${HAND_FINETUNE_ID}/hmlf_gold_merged
+  root: ${HAND_WORK_ROOT}/finetune/${HAND_FINETUNE_ID}/hmlf_gold_merged

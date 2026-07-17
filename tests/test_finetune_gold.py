@@ -20,6 +20,7 @@ from hand_autolabel.finetune_gold import (
     _assert_regular_file,
     _load_dragon_image,
     _materialize_rows_from_selection,
+    _select_native_ids,
     _safe_relative_file,
     build_pretrain_source_registry,
     export_finetune_gold,
@@ -29,6 +30,7 @@ from hand_autolabel.finetune_gold import (
     match_dragon_hands_to_palms,
     parse_dragon_hand_annotations,
     parse_dragon_palm_annotations,
+    seed_finetune_gold,
 )
 from hand_autolabel.image_io import write_image
 
@@ -67,6 +69,23 @@ class DragonContractTests(unittest.TestCase):
 
 
 class FinetuneGoldIntegrationTests(unittest.TestCase):
+    def test_native_selection_is_deterministic_diverse_and_bounded(self) -> None:
+        rows = {
+            f"crop-{index}": {
+                "crop_id": f"crop-{index}",
+                "session_id": "session-a" if index < 5 else "session-b",
+                "image": f"frame-{index:03d}.tiff",
+            }
+            for index in range(10)
+        }
+        first = _select_native_ids(rows, "new-recorded", 4)
+        second = _select_native_ids(rows, "new-recorded", 4)
+        self.assertEqual(first, second)
+        self.assertEqual(4, len(first))
+        self.assertEqual(
+            {"session-a", "session-b"}, {rows[crop_id]["session_id"] for crop_id in first}
+        )
+
     def test_controlled_paths_reject_traversal_and_ancestor_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -399,6 +418,25 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
             self.assertEqual(descriptor["counts"]["included"], 1)
             self.assertEqual(descriptor["handedness_policy"], "optional_per_row")
 
+            seed_config = config_dir / "seed.yaml"
+            seed_config.write_text(
+                f'workspace_root: "{(root / "finetune" / "ft-new").as_posix()}"\n',
+                encoding="utf-8",
+            )
+            seed_report = seed_finetune_gold(
+                seed_config, base_finetune_id="ft-test", finetune_id="ft-new"
+            )
+            self.assertEqual("ok", seed_report["status"])
+            seeded_descriptor = (
+                root / "finetune" / "ft-new" / "sources" / "gold" / "hard_gold" / "finetune_source.json"
+            )
+            original_descriptor = (
+                workspace / "sources" / "gold" / "hard_gold" / "finetune_source.json"
+            )
+            self.assertEqual(sha256_file(original_descriptor), sha256_file(seeded_descriptor))
+            if os.name != "nt":
+                self.assertEqual(original_descriptor.stat().st_ino, seeded_descriptor.stat().st_ino)
+
             published_root = workspace / "sources" / "gold" / "hard_gold"
             gold_only_config = config_dir / "gold_only.yaml"
             gold_only_output = root / "gold_only_output"
@@ -434,8 +472,16 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
                 source_id="native_gold",
                 source_mode="native_existing",
                 raw_source_root=parent,
+                max_items=1,
             )
             self.assertEqual(native_task["source_mode"], "native_existing")
+            job_plan = json.loads(
+                (workspace / "cvat" / "native_gold" / "qc" / "cvat_job_plan.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(job_plan["total_images"], 1)
+            self.assertEqual(job_plan["segment_size"], 100)
             native_manifest = json.loads(
                 (workspace / "cvat" / "native_gold" / "02_roi_crops" / "hand_roi_crops_manifest.jsonl")
                 .read_text(encoding="utf-8")

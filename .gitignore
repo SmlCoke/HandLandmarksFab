@@ -13,6 +13,18 @@ model/
 
 # temp/cache
 __pycache__/
+.ipynb_checkpoints/
+*.py[cod]
+.pytest_cache/
+tmp/
+artifacts/
+*.log
+*.zip
+*.7z
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # config
 .vscode/
