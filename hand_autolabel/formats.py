@@ -39,6 +39,70 @@ def _interpolate_config_env(value: Any, config_path: Path) -> Any:
     return value
 
 
+def _strict_deep_merge(
+    base: MutableMapping[str, Any], override: Mapping[str, Any], prefix: str = ""
+) -> None:
+    """Merge a runtime overlay while rejecting misspelled or structurally invalid keys."""
+
+    for key, value in override.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if key not in base:
+            raise ValueError(f"Unknown autolabel override key: {path}")
+        current = base[key]
+        if isinstance(current, MutableMapping):
+            if not isinstance(value, Mapping):
+                raise ValueError(f"Autolabel override {path} must be an object")
+            _strict_deep_merge(current, value, path)
+        elif isinstance(value, Mapping):
+            raise ValueError(f"Autolabel override {path} must be a scalar or list")
+        else:
+            base[key] = value
+
+
+def _apply_autolabel_runtime(data: Dict[str, Any], config_path: Path) -> Dict[str, Any]:
+    if str(data.get("task") or "") != "autolabel":
+        return data
+    role = str(
+        os.environ.get("AUTOLABEL_ROLE")
+        or (data.get("dataset") or {}).get("role")
+        or "train"
+    ).strip().lower()
+    if role not in {"train", "val", "test"}:
+        raise ValueError("AUTOLABEL_ROLE must be train, val or test")
+    raw = str(os.environ.get("AUTOLABEL_OVERRIDES") or "{}").strip()
+    try:
+        overrides = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("AUTOLABEL_OVERRIDES must be one JSON object") from exc
+    if not isinstance(overrides, Mapping):
+        raise ValueError("AUTOLABEL_OVERRIDES must be one JSON object")
+    _strict_deep_merge(data, overrides)
+    data.setdefault("dataset", {})["role"] = role
+    palm = data.get("palm") or {}
+    if role in {"val", "test"}:
+        # Evaluation sets contain only reviewed positives; low-score background
+        # mining is a training-only operation and cannot be re-enabled by an overlay.
+        palm["keep_low_score_candidates_for_negatives"] = False
+    negative_threshold = float(palm.get("negative_candidate_threshold", 0.15))
+    score_threshold = float(palm.get("score_threshold", 0.5))
+    if not 0.0 <= negative_threshold < score_threshold <= 1.0:
+        raise ValueError(
+            "Autolabel palm thresholds must satisfy 0 <= negative_candidate_threshold "
+            "< score_threshold <= 1"
+        )
+    data["_autolabel_runtime"] = {
+        "role": role,
+        "overrides": dict(overrides),
+        "negative_candidates_enabled": bool(
+            palm.get("keep_low_score_candidates_for_negatives", True)
+        ),
+        "negative_candidate_threshold": negative_threshold,
+        "score_threshold": score_threshold,
+        "config_path": str(Path(config_path).resolve()),
+    }
+    return data
+
+
 def load_yaml_config(config_path: Path) -> Dict[str, Any]:
     try:
         import yaml
@@ -49,7 +113,8 @@ def load_yaml_config(config_path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Config root must be a mapping: {config_path}")
-    return _interpolate_config_env(data, Path(config_path))
+    resolved = _interpolate_config_env(data, Path(config_path))
+    return _apply_autolabel_runtime(resolved, Path(config_path))
 
 
 def repo_root_from_config(config_path: Path) -> Path:

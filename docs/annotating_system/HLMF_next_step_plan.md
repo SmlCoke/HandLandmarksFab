@@ -5,7 +5,7 @@
 ## 1. 当前目标和已有 Gold
 
 - 当前 finetune 数据快照：`v3-finetune-r1`。
-- 已有 Dragon 批次：`dragon_gold_0716_v1`，已发布 5,191 个 ROI，其中 5,189 个可训练、2 个 ignored；不要重复执行 prepare，也不要删除或覆盖。
+- 已有 Dragon 批次：`dragon_gold_0716_v1`，已发布 5,191 个 ROI，其中 5,189 个标签本身可训练、2 个 ignored；不要重复执行 prepare，也不要删除或覆盖。由于其 H.264/I420 视频抽帧 JPEG 与最终无损 TIFF 评测域不同，HLML 当前通过 source 开关禁用它；HLMF 仍保留原数据和完整认证链。
 - 本轮新增人工 Gold 总预算优先冻结为 800 个 Hand ROI；如果实际人手不足，在导出任何 disagreement 任务前统一降为 600。
 - 800 方案：新录制来源最多 300，disagreement 使用剩余额度；600 方案：新录制来源最多 200，disagreement 使用剩余额度。
 - 本轮不再制作新的 `negative_removed_gold`。其含义是“旧负样本候选经人工发现实际有手后，转为精标正样本”；当前新工作区没有必须补做的同类任务。
@@ -48,11 +48,21 @@ export HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
 export HAND_FINETUNE_ID=v3-finetune-r1
 export HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/finetune_source_e_r01
 
-make validate_images
-make palm_detection
-make build_roi
-make run_mediapipe
+make autolabel \
+  HLMF_SOURCE_ROOT=$HLMF_SOURCE_ROOT \
+  AUTOLABEL_ROLE=train
 ```
+
+如果本批次已经根据 Palm 分数分布确定了不同的低分候选阈值，则改为：
+
+```bash
+make autolabel \
+  HLMF_SOURCE_ROOT=$HLMF_SOURCE_ROOT \
+  AUTOLABEL_ROLE=train \
+  AUTOLABEL_OVERRIDES='{"palm":{"negative_candidate_threshold":<source-e-threshold>}}'
+```
+
+不要凭感觉反复改变阈值。先查看少量 Palm 检测及 `palm_detection_stats.json`，冻结本批阈值后再生成最终 ROI；四份 QC 中的 `autolabel_runtime` 必须一致。
 
 人工只需要检查：
 

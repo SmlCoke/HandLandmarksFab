@@ -36,6 +36,7 @@ def main() -> None:
         "ok": sum(1 for r in rows if r["ok"]),
         "failed": sum(1 for r in rows if not r["ok"]),
         "records": rows,
+        "autolabel_runtime": cfg.get("_autolabel_runtime"),
         "note": "Images are validated as-is; this script never rotates source images.",
     }
     write_json(report_path, report)

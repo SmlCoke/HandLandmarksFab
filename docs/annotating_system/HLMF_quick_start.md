@@ -17,12 +17,17 @@ make test
 ## 2. 普通来源 00～03
 
 ```bash
-export HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id>
-make paths
-make validate_images
-make palm_detection
-make build_roi
-make run_mediapipe
+# 训练来源，使用默认阈值
+make autolabel HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id> AUTOLABEL_ROLE=train
+
+# 训练来源，覆盖本批低分负样本阈值
+make autolabel HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id> \
+  AUTOLABEL_ROLE=train \
+  AUTOLABEL_OVERRIDES='{"palm":{"negative_candidate_threshold":<threshold>}}'
+
+# Val/Test：负样本候选会被强制关闭
+make autolabel HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<val-source> AUTOLABEL_ROLE=val
+make autolabel HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<test-source> AUTOLABEL_ROLE=test
 ```
 
 需要普通全量 CVAT 时：

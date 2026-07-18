@@ -14,6 +14,9 @@ export HAND_WORK_ROOT HAND_DATASET_ROOT HLMF_SOURCE_ROOT
 export HAND_FINETUNE_ID HAND_PRETRAIN_ID
 
 AUTOLABEL_CONFIG ?= configs/autolabel.yaml
+AUTOLABEL_ROLE ?= train
+AUTOLABEL_OVERRIDES ?= {}
+export AUTOLABEL_ROLE AUTOLABEL_OVERRIDES
 FINALIZE_TRAIN_CONFIG ?= configs/finalize_train.yaml
 FINALIZE_VAL_CONFIG ?= configs/finalize_val.yaml
 FINALIZE_TEST_CONFIG ?= configs/finalize_test.yaml
@@ -31,7 +34,7 @@ VISUALIZE_MEDIAPIPE_ROIS ?= 0
 VISUALIZE_FINALIZED_TRAIN_ROIS ?= 0
 
 .DEFAULT_GOAL := help
-.PHONY: help paths validate_images palm_detection build_roi run_mediapipe \
+.PHONY: help paths autolabel validate_images palm_detection build_roi run_mediapipe \
 	export_cvat import_cvat visualize finalize_train_pretrain finalize_val finalize_test \
 	prepare_dragon_gold build_pretrain_source_registry seed_finetune_gold \
 	export_finetune_gold import_finetune_gold finalize_train_finetune compile test
@@ -39,6 +42,7 @@ VISUALIZE_FINALIZED_TRAIN_ROIS ?= 0
 help:
 	@echo HLMF 2.0 - one configurable source pipeline
 	@echo   make paths HLMF_SOURCE_ROOT=/path/to/source
+	@echo   make autolabel HLMF_SOURCE_ROOT=... AUTOLABEL_ROLE=train/val/test AUTOLABEL_OVERRIDES='{"palm":{"negative_candidate_threshold":0.2}}'
 	@echo   make validate_images palm_detection build_roi run_mediapipe
 	@echo   make export_cvat import_cvat visualize
 	@echo   make finalize_train_pretrain build_pretrain_source_registry
@@ -55,6 +59,10 @@ paths:
 	@echo HLMF_SOURCE_ROOT=$(HLMF_SOURCE_ROOT)
 	@echo HAND_PRETRAIN_ID=$(HAND_PRETRAIN_ID)
 	@echo HAND_FINETUNE_ID=$(HAND_FINETUNE_ID)
+	@echo AUTOLABEL_ROLE=$(AUTOLABEL_ROLE)
+	@echo AUTOLABEL_OVERRIDES=$(AUTOLABEL_OVERRIDES)
+
+autolabel: validate_images palm_detection build_roi run_mediapipe
 
 validate_images:
 	$(PYTHON) scripts/00_validate_images.py --config $(AUTOLABEL_CONFIG)

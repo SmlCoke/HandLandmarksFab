@@ -97,7 +97,14 @@ def main() -> None:
             warnings.append({"crop_id": row.get("crop_id"), "warnings": w})
         if e:
             errors.append({"crop_id": row.get("crop_id"), "errors": e})
-    stats = {"crops": len(rows), "failures": failures, "warnings": warnings, "errors": errors, "manifest": str(manifest_path)}
+    stats = {
+        "crops": len(rows),
+        "failures": failures,
+        "warnings": warnings,
+        "errors": errors,
+        "manifest": str(manifest_path),
+        "autolabel_runtime": cfg.get("_autolabel_runtime"),
+    }
     write_json(qc_dir / "roi_crop_stats.json", stats)
     print(f"crops={len(rows)} failures={len(failures)} manifest={manifest_path}")
 

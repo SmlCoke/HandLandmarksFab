@@ -42,7 +42,41 @@ export HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id>
 make paths
 ```
 
-### 3.2 程序检查、Palm、ROI 和伪标签
+### 3.2 选择数据角色和覆盖参数
+
+同一份 `configs/autolabel.yaml` 提供默认值，运行时通过 Make 顶层参数区分数据性质：
+
+- `AUTOLABEL_ROLE=train`：允许按配置保留低分 Palm 负样本候选；
+- `AUTOLABEL_ROLE=val` 或 `test`：程序强制关闭低分负样本候选，只处理正常检测到的 ROI；
+- `AUTOLABEL_OVERRIDES`：JSON 对象，严格覆盖配置中已经存在的任意局部字段。未知键、非法 JSON 或不合理阈值会直接失败。
+
+训练批次使用默认值：
+
+```bash
+make autolabel \
+  HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id> \
+  AUTOLABEL_ROLE=train
+```
+
+单独覆盖本批次的低分负样本阈值：
+
+```bash
+make autolabel \
+  HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id> \
+  AUTOLABEL_ROLE=train \
+  AUTOLABEL_OVERRIDES='{"palm":{"negative_candidate_threshold":<threshold>}}'
+```
+
+Val/Test：
+
+```bash
+make autolabel HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<val-source> AUTOLABEL_ROLE=val
+make autolabel HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<test-source> AUTOLABEL_ROLE=test
+```
+
+`negative_candidate_threshold` 必须小于 `score_threshold`。推荐使用单个 `make autolabel` 命令，确保 00～03 全程使用同一 role/override；若逐步运行，则每条命令必须重复完全相同的顶层参数。
+
+### 3.3 程序检查、Palm、ROI 和伪标签
 
 ```bash
 make validate_images
@@ -64,7 +98,9 @@ $HLMF_SOURCE_ROOT/qc/mediapipe_roi_stats.json
 
 `build_roi` 生成与训练/板端一致的 `256×256` 灰度 Hand ROI。`run_mediapipe` 只是生成可供复核或 pretrain 使用的教师伪标签，不会把它自动提升为人工 Gold。
 
-### 3.3 可选的普通全量 CVAT 复核
+四个 QC 报告均保存 `autolabel_runtime`，其中记录 role、显式 overrides、最终负样本开关和实际阈值。检查报告时不要只看数量，也要确认运行参数与本批计划一致。
+
+### 3.4 可选的普通全量 CVAT 复核
 
 ```bash
 make export_cvat

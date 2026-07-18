@@ -61,6 +61,7 @@ def main() -> None:
         "images": len(rows),
         "detections": sum(len(r.get("detections") or []) for r in rows),
         "negative_candidates": sum(len(r.get("negative_candidates") or []) for r in rows),
+        "autolabel_runtime": cfg.get("_autolabel_runtime"),
         "warnings": warnings,
         "errors": errors,
         "output_jsonl": str(output_jsonl),

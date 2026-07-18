@@ -60,6 +60,7 @@ def main() -> None:
             "raw_jsonl": None,
             "raw_output_policy": "omitted_to_avoid_duplicate_of_autolabel_draft",
             "hand_presence_score_policy": "omitted: current MediaPipe Python API does not expose hand presence score",
+            "autolabel_runtime": cfg.get("_autolabel_runtime"),
         }
     )
     write_json(qc_dir / "mediapipe_roi_stats.json", stats)

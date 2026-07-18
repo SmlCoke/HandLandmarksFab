@@ -20,6 +20,8 @@
 
 程序不旋转输入原图。需要先在图片进入 `images/` 前完成方向、分辨率和灰度转换。
 
+同一目录的 00～03 必须使用同一个 `AUTOLABEL_ROLE` 和 `AUTOLABEL_OVERRIDES`。`train` 可以保留低分负样本候选；`val/test` 强制不保留。各阶段 QC 的 `autolabel_runtime` 是最终生效配置的审计记录。
+
 ## 2. 可再生数据仓库与工作区
 
 `HAND_DATASET_ROOT` 指向 `/root/autodl-tmp/DatesetFab`。HLMF 2.0 的 pretrain/Val/Test 配置直接从其中读取来源目录，聚合输出写入 `HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0`：

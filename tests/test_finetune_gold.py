@@ -34,6 +34,7 @@ from hand_autolabel.finetune_gold import (
     seed_finetune_gold,
 )
 from hand_autolabel.image_io import write_image
+from hand_autolabel.formats import load_yaml_config
 
 
 def _landmarks() -> list[dict]:
@@ -121,6 +122,83 @@ class DragonContractTests(unittest.TestCase):
                 prepare_dragon_gold(
                     config, raw_root=root / "dragon_batch_a", source_id="../bad"
                 )
+
+
+class AutolabelRuntimeConfigTests(unittest.TestCase):
+    def _config(self, root: Path) -> Path:
+        path = root / "autolabel.yaml"
+        path.write_text(
+            "\n".join(
+                [
+                    "task: autolabel",
+                    "dataset: {role: train}",
+                    "palm:",
+                    "  score_threshold: 0.5",
+                    "  negative_candidate_threshold: 0.15",
+                    "  keep_low_score_candidates_for_negatives: true",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_train_role_accepts_strict_json_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._config(Path(temp))
+            env = {
+                "AUTOLABEL_ROLE": "train",
+                "AUTOLABEL_OVERRIDES": json.dumps(
+                    {"palm": {"negative_candidate_threshold": 0.22}}
+                ),
+            }
+            with mock.patch.dict(os.environ, env, clear=False):
+                config = load_yaml_config(path)
+            self.assertEqual("train", config["dataset"]["role"])
+            self.assertEqual(0.22, config["palm"]["negative_candidate_threshold"])
+            self.assertTrue(config["palm"]["keep_low_score_candidates_for_negatives"])
+            self.assertEqual(0.22, config["_autolabel_runtime"]["negative_candidate_threshold"])
+
+    def test_val_and_test_roles_force_negative_candidates_off(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._config(Path(temp))
+            for role in ("val", "test"):
+                with self.subTest(role=role), mock.patch.dict(
+                    os.environ,
+                    {
+                        "AUTOLABEL_ROLE": role,
+                        "AUTOLABEL_OVERRIDES": json.dumps(
+                            {"palm": {"keep_low_score_candidates_for_negatives": True}}
+                        ),
+                    },
+                    clear=False,
+                ):
+                    config = load_yaml_config(path)
+                    self.assertFalse(
+                        config["palm"]["keep_low_score_candidates_for_negatives"]
+                    )
+                    self.assertFalse(
+                        config["_autolabel_runtime"]["negative_candidates_enabled"]
+                    )
+
+    def test_unknown_override_key_and_invalid_threshold_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._config(Path(temp))
+            with mock.patch.dict(
+                os.environ,
+                {"AUTOLABEL_ROLE": "train", "AUTOLABEL_OVERRIDES": '{"palm":{"typo":1}}'},
+                clear=False,
+            ), self.assertRaisesRegex(ValueError, "Unknown autolabel override key"):
+                load_yaml_config(path)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "AUTOLABEL_ROLE": "train",
+                    "AUTOLABEL_OVERRIDES": '{"palm":{"negative_candidate_threshold":0.6}}',
+                },
+                clear=False,
+            ), self.assertRaisesRegex(ValueError, "thresholds"):
+                load_yaml_config(path)
 
 
 class FinetuneGoldIntegrationTests(unittest.TestCase):

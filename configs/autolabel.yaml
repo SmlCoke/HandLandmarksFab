@@ -1,3 +1,8 @@
+task: autolabel
+
+dataset:
+  role: train
+
 paths:
   images_dir: ${HLMF_SOURCE_ROOT:-data}/images
   palm_model_onnx: materials/preminilary/palm/model_opt.onnx

@@ -28,8 +28,7 @@ HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
 ```bash
 conda activate anfab
 make paths HLMF_SOURCE_ROOT=/path/to/source
-make validate_images palm_detection build_roi run_mediapipe \
-     HLMF_SOURCE_ROOT=/path/to/source
+make autolabel HLMF_SOURCE_ROOT=/path/to/source AUTOLABEL_ROLE=train
 make export_cvat HLMF_SOURCE_ROOT=/path/to/source
 
 # 人工在 CVAT 完成后放回 reviewed XML，再继续：
