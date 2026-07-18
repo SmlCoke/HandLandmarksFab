@@ -232,7 +232,22 @@ make export_finetune_gold \
 
 HLMF 会在该 finetune 工作区的 `mining/rounds/` 中寻找唯一 request，并验证 request、来源 manifest、ROI 与伪标签 SHA。任何上游变化都会阻止导出。
 
-### 7.3 CVAT 人工工作
+### 7.3 negative-removed Gold 任务
+
+negative-removed 指 pretrain 负样本人工删除复核时，被人工从“明确背景”候选树中删掉的 ROI。它们往往含手、手指、手腕，或模糊到不能当作可靠负样本；只有再次做 21 点/presence 人工 Gold 标注后，才适合以困难样本身份参与 finetune。
+
+该来源不是 HLMF 自行从 GoldSource 猜出来的。HLML 在一个新的 finetune 数据 ID 下启用 `configs/prepare_finetune_sources.yaml` 的 `selection.negative_removed`、设定本轮数量并执行 `make prepare-finetune-sources`，生成冻结的 selection request。随后在 HLMF 导出：
+
+```bash
+make export_finetune_gold \
+  HAND_FINETUNE_ID=<finetune-data-id> \
+  FINETUNE_SOURCE_ID=negative_removed_gold_<round-or-batch-id> \
+  FINETUNE_SOURCE_MODE=selection_subset
+```
+
+每次重新抽样都使用新的 source ID。程序会把 GoldSource 中历史 published、pending task、当前 request 以及 Val/Test 身份一起排除，因此旧 Gold 不会浪费，也不需要删除。
+
+### 7.4 CVAT 人工工作
 
 四类 Gold 使用统一的批次身份，但目录按生命周期出现，不是三个目录永久并存：
 
@@ -265,7 +280,7 @@ $HAND_GOLD_ROOT/<domain>/<source-id>/
 .../<domain>/<source-id>/task/reviewed.xml
 ```
 
-### 7.4 严格导入与最终聚合
+### 7.5 严格导入与最终聚合
 
 ```bash
 make import_finetune_gold HAND_FINETUNE_ID=<finetune-data-id>
@@ -281,11 +296,57 @@ $HAND_WORK_ROOT/finetune/<finetune-data-id>/hmlf_gold_merged/
 └── qc/finalize_train_finetune_report.json
 ```
 
+如果只想导入一个已经完成的 task，可显式指定：
+
+```bash
+make import_finetune_gold \
+  HAND_FINETUNE_ID=<finetune-data-id> \
+  FINETUNE_SOURCE_ID=<source-id>
+```
+
+不传 `FINETUNE_SOURCE_ID` 时会预检并导入当前所有 pending task。不要把尚未标完的 task 混在 `--all` 中；要么先完成它，要么显式逐批导入已经完成的 source。
+
 ## 8. 多轮 Gold 与历史复用
 
 同一领域可以不断增加批次，例如 `new_recorded_gold_r02`、`new_recorded_gold_r03`。每轮必须使用新的 `<round-id>` 和全局唯一 `<source-id>`，作废的 ID 也不复用。HLML 抽样会扫描 GoldSource 内所有 pending task 和 published Gold 的身份、ROI SHA、像素 SHA，再叠加 Val/Test 与当前 mining request 排重。
 
 Gold 不再从旧 finetune 工作区 seed。任意新训练版本都直接发现 `$HAND_GOLD_ROOT/*/*/published/finetune_source.json`；人工 Gold 只有一份真源，训练版本只保存本次选择清单和聚合快照。
+
+### 8.1 Gold 发布不绑定某个 finetune ID
+
+`GoldSource/<domain>/<source-id>/published/` 是长期、不可变、可跨实验复用的认证数据源，不属于某一次训练。命令里出现 `HAND_FINETUNE_ID` 有两个技术原因：
+
+- 对 disagreement/negative-removed 这类 `selection_subset`，HLMF 要到该 finetune 工作区找到 HLML 冻结的 selection request；
+- `finalize_train_finetune` 要把“当时仓库中全部 published Gold”的认证聚合快照写入该 finetune 工作区，并在报告里记录数据 ID。
+
+这不意味着 published 批次只能由该 ID 使用。未来的新 finetune ID 仍会从 GoldSource 发现、校验并复用同一批 Gold；不会复制图片，也不需要重新发布。Dragon 和 `native_existing` 新录制 Gold 即使没有 mining request，也沿用相同命令接口，以便目录和审计方式一致。
+
+### 8.2 HLMF 聚合与 HLML 训练选择是两层不同操作
+
+HLMF 的 `make finalize_train_finetune` 会认证并聚合 **GoldSource 中全部 published 批次**，它故意不判断某次模型训练该启用哪些来源。这样可以先发现重复、冲突、文件损坏或描述符变化。
+
+随后 HLML 为本次 `HAND_FINETUNE_ID` 生成 `gold_selection.yaml`，逐个 source ID 明确写 `enabled: true/false`。只有 `true` 的 Gold 才进入训练；replay 由 HLML 另行生成并强制参与。完整顺序是：
+
+```text
+HLMF 发布每个 Gold 批次
+  -> HLMF 聚合并认证全部 published Gold
+  -> HLML 逐 source ID 冻结启用/禁用清单
+  -> HLML 将 enabled Gold 与 mandatory replay 合成训练快照
+```
+
+因此“发布”不是“自动参加训练”，而“disabled”也不是删除数据。更换来源组合时使用新的 finetune 数据 ID，保留旧快照可追溯。
+
+### 8.3 时间不足时可以不新增困难样本 Gold
+
+disagreement 和 negative-removed 都是可选的人工增量来源，不是构建 finetune 的前置条件。时间不足时：
+
+1. 不创建本轮 selection round，也不导出新的 CVAT task；
+2. 保留 HLML 自动生成的 disagreement 分数池，供以后继续使用；
+3. HLMF 只导入已经完成的 task，并聚合现有 published Gold；
+4. HLML 可显式启用历史 published 困难样本 Gold，或把这些领域全部设为 disabled；
+5. 只要至少一个合格 Gold 来源满足门控，且 mandatory replay 存在，就可以继续 finetune。
+
+HLMF 不制作 replay。replay 来自 HLML 的 authenticated pretrain source registry 和 curated multitask 标签，由 HLML 确定性抽取。
 
 ## 9. 常见错误
 
@@ -299,4 +360,13 @@ Gold 不再从旧 finetune 工作区 seed。任意新训练版本都直接发现
 
 ## 10. 交接 HLML
 
-HLMF 完成 `train_pretrain_merged/`、`val_merged/`、`test_merged/`，并把所有人工任务发布到 GoldSource、生成当前 `finetune/<id>/hmlf_gold_merged/` 后，切换到 `/root/HandLandmarkerLab`。HLML 会为每个 published 子批次生成显式参与/不参与决定。
+HLMF 完成 `train_pretrain_merged/`、`val_merged/`、`test_merged/`，并把本轮已经完成的人工任务发布到 GoldSource、生成当前 `finetune/<id>/hmlf_gold_merged/` 后，切换到 `/root/HandLandmarkerLab`。HLML 会为每个 published 子批次生成显式参与/不参与决定。
+
+交接前应检查：
+
+```bash
+test -f "$HAND_WORK_ROOT/finetune/<finetune-data-id>/hmlf_gold_merged/hmlf_gold_aggregate.json"
+find "$HAND_GOLD_ROOT" -path '*/published/finetune_source.json' -print
+```
+
+`hmlf_gold_aggregate.json` 的 source 数量应与当时 GoldSource 中的 published 描述符一致；有未完成 task 不会自动进入聚合或训练。后续 replay、Gold source 选择、curation 和训练命令均在 HLML 执行。
