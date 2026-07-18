@@ -52,6 +52,7 @@ SOURCE_KIND_DOMAINS = {
     "disagreement_gold": "disagreement_gold",
     "new_recorded_gold": "new_recorded_gold",
 }
+RESERVED_BATCH_IDS = frozenset(SOURCE_KIND_DOMAINS.values())
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
 
@@ -87,6 +88,10 @@ def _batch_root(repository: Path, source_kind: str, source_id: str) -> Path:
         raise GoldPipelineError(f"unsupported Gold source kind: {source_kind}")
     if not source_id or source_id in {".", ".."} or Path(source_id).name != source_id:
         raise GoldPipelineError(f"invalid source_id: {source_id!r}")
+    if source_id in RESERVED_BATCH_IDS:
+        raise GoldPipelineError(
+            f"source_id must identify a concrete batch, not only its domain: {source_id}"
+        )
     return repository / SOURCE_KIND_DOMAINS[source_kind] / source_id
 
 
@@ -281,8 +286,8 @@ def _dynamic_cvat_config(cfg: Mapping[str, Any], task_root: Path) -> Dict[str, A
         }
     )
     dynamic["paths"] = {
-        "roi_crops_dir": str(task_root / "02_roi_crops"),
-        "reviewed_dir": str(task_root / "03_reviewed"),
+        "roi_crops_dir": str(task_root),
+        "reviewed_dir": str(task_root),
         "qc_dir": str(task_root / "qc"),
     }
     return dynamic
@@ -389,7 +394,7 @@ def _materialize_rows_from_selection(
     digest_cache: Dict[Path, str] = {}
     manifests: List[Dict[str, Any]] = []
     drafts: List[Dict[str, Any]] = []
-    image_dir = task_root / "02_roi_crops" / "images"
+    image_dir = task_root / "images"
     seen_parent_ids: set[str] = set()
     source_kinds = {str(row.get("source_kind", "")) for row in requests if row.get("source_kind")}
     if len(source_kinds) > 1:
@@ -464,7 +469,7 @@ def _materialize_rows_from_selection(
                 "source_crop_id": crop_id,
                 "crop_id": crop_id,
                 "palm_det_id": palm_id,
-                "crop_path": f"02_roi_crops/images/{filename}",
+                "crop_path": f"images/{filename}",
                 "image_sha256": actual_sha,
                 "parent_dataset_id": parent_dataset,
                 "parent_source_crop_id": parent_local,
@@ -482,7 +487,7 @@ def _materialize_rows_from_selection(
                 "crop_id": crop_id,
                 "palm_det_id": palm_id,
                 "hand_id": f"{crop_id}:hand" if bool((new_draft.get("hand_presence") or {}).get("present")) else None,
-                "crop_path": f"02_roi_crops/images/{filename}",
+                "crop_path": f"images/{filename}",
                 "image_sha256": actual_sha,
                 "parent_dataset_id": parent_dataset,
                 "parent_source_crop_id": parent_local,
@@ -589,7 +594,7 @@ def _materialize_rows_from_native(
     selected_ids = _select_native_ids(manifest_idx, source_id, min(max_items, len(manifest_idx)))
     manifests: List[Dict[str, Any]] = []
     drafts: List[Dict[str, Any]] = []
-    image_dir = task_root / "02_roi_crops" / "images"
+    image_dir = task_root / "images"
     seen_names: set[str] = set()
     for index, parent_local in enumerate(selected_ids):
         manifest = copy.deepcopy(manifest_idx[parent_local])
@@ -624,7 +629,7 @@ def _materialize_rows_from_native(
             "source_crop_id": crop_id,
             "crop_id": crop_id,
             "palm_det_id": palm_id,
-            "crop_path": f"02_roi_crops/images/{filename}",
+            "crop_path": f"images/{filename}",
             "image_sha256": image_sha,
             "parent_dataset_id": None,
             "parent_source_crop_id": None,
@@ -780,16 +785,18 @@ def export_finetune_gold(
         task_root = batch_root / "task"
         published_root = batch_root / "published"
         if task_root.exists() or published_root.exists():
-            raise GoldPipelineError(f"source/task already exists: {source_id}")
+            raise GoldPipelineError(
+                f"Gold batch task or published output already exists: {source_id}"
+            )
         if len(manifests) > hard_limit:
             raise GoldPipelineError(f"CVAT task exceeds hard limit {hard_limit}: {len(manifests)}")
-        manifest_path = temp_root / "02_roi_crops" / "hand_roi_crops_manifest.jsonl"
-        draft_path = temp_root / "02_roi_crops" / "hand_landmarks_autolabel_draft.jsonl"
+        manifest_path = temp_root / "hand_roi_crops_manifest.jsonl"
+        draft_path = temp_root / "hand_landmarks_autolabel_draft.jsonl"
         atomic_write_jsonl(manifest_path, manifests)
         atomic_write_jsonl(draft_path, drafts)
         crop_hash_path = temp_root / "qc" / "crop_images_sha256.jsonl"
         _write_hash_manifest(
-            list((temp_root / "02_roi_crops" / "images").iterdir()), temp_root, crop_hash_path
+            list((temp_root / "images").iterdir()), temp_root, crop_hash_path
         )
         dynamic = _dynamic_cvat_config(cfg, temp_root)
         xml_path = temp_root / "cvat_autolabel.xml"
@@ -908,6 +915,12 @@ def _source_descriptor(
     task_descriptor = source_root / "audit" / "task_descriptor.json"
     if task_descriptor.is_file():
         artifacts["task_descriptor"] = _artifact(task_descriptor, source_root)
+    reviewed_xml = source_root / "audit" / "reviewed.xml"
+    if reviewed_xml.is_file():
+        artifacts["reviewed_xml"] = _artifact(reviewed_xml, source_root)
+    cvat_xml = source_root / "audit" / "cvat_autolabel.xml"
+    if cvat_xml.is_file():
+        artifacts["cvat_autolabel"] = _artifact(cvat_xml, source_root)
     selection = source_root / "audit" / "selection_request.jsonl"
     if selection.is_file():
         artifacts["selection_audit"] = _artifact(selection, source_root, count=len(read_jsonl(selection)))
@@ -1008,16 +1021,47 @@ def import_finetune_gold(config_path: Path, *, source_id: str, dry_run: bool = F
     source_root.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{_safe_name(source_id)}.", dir=source_root.parent))
     try:
+        published_manifests = copy.deepcopy(manifests)
+        published_drafts = copy.deepcopy(drafts)
+        published_rows = copy.deepcopy(rows)
         (staging / "02_roi_crops" / "images").mkdir(parents=True, exist_ok=True)
-        for manifest in manifests:
+        for manifest in published_manifests:
             filename = Path(str(manifest["crop_path"])).name
-            _copy_or_link(task_root / "02_roi_crops" / "images" / filename, staging / "02_roi_crops" / "images" / filename)
-        atomic_write_jsonl(staging / "02_roi_crops" / "hand_roi_crops_manifest.jsonl", manifests)
-        atomic_write_jsonl(staging / "02_roi_crops" / "hand_landmarks_autolabel_draft.jsonl", drafts)
-        atomic_write_jsonl(staging / "03_reviewed" / "hand_landmarks_reviewed.jsonl", rows)
-        ignored = [row for row in rows if bool(row.get("ignore_for_training"))]
+            task_crop = _safe_relative_file(
+                task_root, manifest.get("crop_path"), "task crop image"
+            )
+            _copy_or_link(
+                task_crop, staging / "02_roi_crops" / "images" / filename
+            )
+        for collection in (published_manifests, published_drafts, published_rows):
+            for row in collection:
+                filename = Path(str(row.get("crop_path") or "")).name
+                if not filename:
+                    raise GoldPipelineError("Gold row has no crop image basename")
+                row["crop_path"] = f"02_roi_crops/images/{filename}"
+        atomic_write_jsonl(
+            staging / "02_roi_crops" / "hand_roi_crops_manifest.jsonl",
+            published_manifests,
+        )
+        atomic_write_jsonl(
+            staging / "02_roi_crops" / "hand_landmarks_autolabel_draft.jsonl",
+            published_drafts,
+        )
+        atomic_write_jsonl(
+            staging / "03_reviewed" / "hand_landmarks_reviewed.jsonl",
+            published_rows,
+        )
+        ignored = [
+            row for row in published_rows if bool(row.get("ignore_for_training"))
+        ]
         atomic_write_jsonl(staging / "03_reviewed" / "ignored.jsonl", ignored)
         _copy_or_link(descriptor_path, staging / "audit" / "task_descriptor.json")
+        _copy_or_link(reviewed_xml, staging / "audit" / "reviewed.xml")
+        cvat_xml_artifact = (task.get("artifacts") or {}).get("cvat_xml") or {}
+        cvat_xml = _safe_relative_file(
+            task_root, cvat_xml_artifact.get("path"), "task CVAT XML"
+        )
+        _copy_or_link(cvat_xml, staging / "audit" / "cvat_autolabel.xml")
         provenance = task.get("provenance") or {}
         selection_path = provenance.get("selection_request")
         if selection_path:
@@ -1054,11 +1098,12 @@ def import_finetune_gold(config_path: Path, *, source_id: str, dry_run: bool = F
             parent_pretrain_id=cfg.get("parent_pretrain_id"),
             input_sha256={"task_descriptor": task_sha, "reviewed_xml": sha256_file(reviewed_xml)},
             manifest_count=len(manifests),
-            gold_count=len(rows),
+            gold_count=len(published_rows),
             ignored_count=len(ignored),
         )
         atomic_write_json(staging / "finetune_source.json", source_descriptor)
         os.replace(staging, source_root)
+        shutil.rmtree(task_root)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise

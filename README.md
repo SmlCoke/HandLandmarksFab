@@ -19,13 +19,13 @@ HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
   可再生数据仓库
 
 HAND_GOLD_ROOT=$HAND_DATASET_ROOT/GoldSource
-  跨训练版本复用的 Gold 真源；结构为 domain/source-id/{source,task,published}
+  跨训练版本复用的 Gold 真源；结构为 domain/source-id/<生命周期目录>
 
 HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
   当前版本的聚合、mining/replay 和 HLML 训练结果
 ```
 
-普通来源的 00～06 直接在 `HLMF_SOURCE_ROOT` 内工作。Gold 的 CVAT task 与 published source 也长期保存在 GoldSource，不再绑定某个 `HAND_FINETUNE_ID`；当前训练版本只生成可重建的认证聚合。
+普通来源的 00～06 直接在 `HLMF_SOURCE_ROOT` 内工作。Gold 的待标任务和 published 真源保存在 GoldSource，不再绑定某个 `HAND_FINETUNE_ID`；CVAT `task/` 在严格发布成功后自动退休，只留下 `published/`。当前训练版本只生成可重建的认证聚合。
 
 ## 最短命令索引
 

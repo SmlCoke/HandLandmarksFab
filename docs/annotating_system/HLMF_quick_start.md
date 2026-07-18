@@ -87,6 +87,8 @@ make import_finetune_gold HAND_FINETUNE_ID=<finetune-data-id>
 make finalize_train_finetune HAND_FINETUNE_ID=<finetune-data-id>
 ```
 
+import 成功后 `task/` 自动删除，必要审计文件进入 `published/audit/`；看到 `published/finetune_source.json` 即表示该批已完成。Dragon 长期保留 `source + published`，其他批次不要手工同时维护 task/published 两套内容。
+
 ## 7. 多批次复用
 
 每个领域可持续增加 `<source-id>` 子批次。旧 Gold 不复制、不删除；任意 finetune 版本都直接从 `$HAND_GOLD_ROOT/*/*/published/` 发现它们，并由 HLML 的本次选择清单逐批启停。

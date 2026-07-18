@@ -558,6 +558,11 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(descriptor["counts"]["included"], 1)
             self.assertEqual(descriptor["handedness_policy"], "optional_per_row")
+            self.assertFalse(task_root.exists())
+            self.assertTrue((batch_root / "published" / "audit" / "reviewed.xml").is_file())
+            self.assertTrue(
+                (batch_root / "published" / "audit" / "cvat_autolabel.xml").is_file()
+            )
 
             published_root = batch_root / "published"
             gold_only_config = config_dir / "gold_only.yaml"
@@ -607,7 +612,7 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
             self.assertEqual(job_plan["total_images"], 1)
             self.assertEqual(job_plan["segment_size"], 100)
             native_manifest = json.loads(
-                (repository / "new_recorded_gold" / "native_gold" / "task" / "02_roi_crops" / "hand_roi_crops_manifest.jsonl")
+                (repository / "new_recorded_gold" / "native_gold" / "task" / "hand_roi_crops_manifest.jsonl")
                 .read_text(encoding="utf-8")
                 .strip()
             )

@@ -234,25 +234,30 @@ HLMF 会在该 finetune 工作区的 `mining/rounds/` 中寻找唯一 request，
 
 ### 7.3 CVAT 人工工作
 
-四类 Gold 使用统一结构：
+四类 Gold 使用统一的批次身份，但目录按生命周期出现，不是三个目录永久并存：
 
 ```text
 $HAND_GOLD_ROOT/<domain>/<source-id>/
-├── source/                    # 新录制/Dragon 才有
-├── task/
-│   ├── 02_roi_crops/images/
+├── source/                    # 新录制/Dragon 原始真源；选样类可无
+├── task/                      # 仅“等待人工/等待 import”期间存在
+│   ├── images/                # 本任务选中的 ROI；与 source 能硬链接则不复制数据块
+│   ├── hand_roi_crops_manifest.jsonl
+│   ├── hand_landmarks_autolabel_draft.jsonl
 │   ├── cvat_autolabel.xml
 │   ├── task_descriptor.json
 │   ├── reviewed.xml           # 人工返回
 │   └── qc/cvat_job_plan.json
-└── published/                 # import/prepare 后生成
+└── published/                 # import/prepare 成功后生成；此时 task/ 自动删除
     ├── finetune_source.json
     ├── 02_roi_crops/
     ├── 03_reviewed/
+    ├── audit/                 # reviewed.xml、自动标注 XML、任务描述符等小型审计文件
     └── qc/
 ```
 
-`<domain>` 只能是 `new_recorded_gold`、`disagreement_gold`、`negative_removed_gold` 或 `dragon`。一个领域可以有任意多个批次；`source-id` 在整个 GoldSource 中必须唯一。
+`<domain>` 只能是 `new_recorded_gold`、`disagreement_gold`、`negative_removed_gold` 或 `dragon`。一个领域可以有任意多个批次；`source-id` 在整个 GoldSource 中必须唯一，并且必须包含批次信息，不能直接使用领域名。例如历史来源可命名为 `disagreement_gold_hlml2.0`，新任务可命名为 `disagreement_gold_r02`。
+
+`source`、`task`、`published` 不能按文件名相似就强行合并：`source` 是原始真源，`task` 是暂存的人工任务快照，`published` 是认证训练产物。程序只消除没有长期价值的 task：发布成功后把必要的小型审计文件移入 `published/audit/`，再删除 task。Dragon 的原始整图/标注与生成的 Hand ROI 数据性质不同，长期保留 `source + published`。
 
 按 `cvat_job_plan.json` 的 job 边界分工，不自行拆散或重命名图片。团队先用少量校准图统一 21 点、左右手和 ignore 规则；正式 job 不交叉。完成后把完整 task 导出的 XML 保存为：
 
@@ -267,7 +272,7 @@ make import_finetune_gold HAND_FINETUNE_ID=<finetune-data-id>
 make finalize_train_finetune HAND_FINETUNE_ID=<finetune-data-id>
 ```
 
-程序先完整预检所有待导入 task，再事务式发布到同批次的 `published/`。最终聚合仍是当前训练版本的派生产物：
+程序先完整预检所有待导入 task，再事务式发布到同批次的 `published/`。发布成功后 task 自动退休；不能同时看到 task 和 published，若同时存在说明上一次发布后的清理异常，应先检查 `published/finetune_source.json`，不要重复 import。最终聚合仍是当前训练版本的派生产物：
 
 ```text
 $HAND_WORK_ROOT/finetune/<finetune-data-id>/hmlf_gold_merged/
@@ -278,13 +283,13 @@ $HAND_WORK_ROOT/finetune/<finetune-data-id>/hmlf_gold_merged/
 
 ## 8. 多轮 Gold 与历史复用
 
-同一领域可以不断增加批次，例如 `new_recorded_gold_r01`、`new_recorded_gold_r02`。每轮必须使用新的 `<round-id>` 和全局唯一 `<source-id>`。HLML 抽样会扫描 GoldSource 内所有 pending task 和 published Gold 的身份、ROI SHA、像素 SHA，再叠加 Val/Test 与当前 mining request 排重。
+同一领域可以不断增加批次，例如 `new_recorded_gold_r02`、`new_recorded_gold_r03`。每轮必须使用新的 `<round-id>` 和全局唯一 `<source-id>`，作废的 ID 也不复用。HLML 抽样会扫描 GoldSource 内所有 pending task 和 published Gold 的身份、ROI SHA、像素 SHA，再叠加 Val/Test 与当前 mining request 排重。
 
 Gold 不再从旧 finetune 工作区 seed。任意新训练版本都直接发现 `$HAND_GOLD_ROOT/*/*/published/finetune_source.json`；人工 Gold 只有一份真源，训练版本只保存本次选择清单和聚合快照。
 
 ## 9. 常见错误
 
-- `source/task already exists`：ID 已发布；换新 round/source ID，不覆盖历史 Gold。
+- `Gold batch task or published output already exists`：ID 已使用；换新 round/source ID，不覆盖或复用历史批次。
 - `raw source must be archived at .../source`：先按规范建立 GoldSource 批次，不能从临时目录发布。
 - `DRAGON_SOURCE_ROOT/DRAGON_BATCH_ID is required`：Dragon 批次身份必须在命令中显式提供。
 - `native_existing requires max_items`：新录制任务必须显式冻结数量。

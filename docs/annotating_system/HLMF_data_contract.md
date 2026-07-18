@@ -29,8 +29,8 @@
 ```text
 GoldSource/<domain>/<source_id>/
 ├── source/                         # 原始图片和 00～03；选样类任务可无此目录
-├── task/                           # CVAT 任务及 reviewed.xml
-└── published/                      # 认证 finetune_source.json 与人工标签
+├── task/                           # 仅待标/待导入期间存在
+└── published/                      # 发布后存在；task 此时自动退休
 ```
 
 `HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0` 只保存 pretrain/Val/Test 聚合、finetune mining/replay、当前 Gold 聚合和训练产物。聚合标签的 `crop_path` 直接指向 DatesetFab；无需建立 `train_sources` 或逐版本复制 Gold。
@@ -40,20 +40,25 @@ GoldSource/<domain>/<source_id>/
 每个 `source_id` 是不可变的一轮任务，例如：
 
 ```text
+disagreement_gold_hlml2.0   source_kind=disagreement_gold
 disagreement_gold_r02       source_kind=disagreement_gold
-new_recorded_gold_r01       source_kind=new_recorded_gold
+new_recorded_gold_r02       source_kind=new_recorded_gold
 ```
 
 任务包内重要文件：
 
 ```text
 GoldSource/<domain>/<source_id>/task/
-├── 02_roi_crops/images/
+├── images/
+├── hand_roi_crops_manifest.jsonl
+├── hand_landmarks_autolabel_draft.jsonl
 ├── cvat_autolabel.xml
 ├── reviewed.xml                    # 人工放回
 ├── task_descriptor.json
 └── qc/cvat_job_plan.json           # 每个 job 的范围、数量和 SHA
 ```
+
+任务图片是冻结的所选 ROI 快照；能与 `source` 共用时使用硬链接，不产生第二份图片数据。严格 import 会把 `reviewed.xml`、自动标注 XML 和任务描述符转存至 `published/audit/`，然后删除整个 task。Dragon 是例外：原始整图/Dragon 标注与发布后的 ROI 不同，长期保留 `source + published`。
 
 每轮人工预算和每个来源的限额由执行计划冻结，并在命令中显式传入；系统按配置的安全上限拒绝超量任务。`cvat_job_plan.json` 按配置的 segment size 规划 job。
 
