@@ -5,12 +5,13 @@
 PYTHON ?= python
 HAND_WORK_ROOT ?= /root/autodl-tmp/TrainFab/HLML-3.0
 HAND_DATASET_ROOT ?= /root/autodl-tmp/DatesetFab
+HAND_GOLD_ROOT ?= $(HAND_DATASET_ROOT)/GoldSource
 HLMF_SOURCE_ROOT ?= data
 HAND_FINETUNE_ID ?= v3-finetune-r1
 HAND_PRETRAIN_ID ?= v3-pretrain-r1
 DRAGON_SOURCE_ROOT ?=
 DRAGON_BATCH_ID ?=
-export HAND_WORK_ROOT HAND_DATASET_ROOT HLMF_SOURCE_ROOT
+export HAND_WORK_ROOT HAND_DATASET_ROOT HAND_GOLD_ROOT HLMF_SOURCE_ROOT
 export HAND_FINETUNE_ID HAND_PRETRAIN_ID
 
 AUTOLABEL_CONFIG ?= configs/autolabel.yaml
@@ -29,14 +30,13 @@ FINETUNE_SOURCE_MODE ?=
 FINETUNE_RAW_SOURCE_ROOT ?=
 FINETUNE_SELECTION_REQUEST ?=
 FINETUNE_MAX_ITEMS ?=
-BASE_FINETUNE_ID ?=
 VISUALIZE_MEDIAPIPE_ROIS ?= 0
 VISUALIZE_FINALIZED_TRAIN_ROIS ?= 0
 
 .DEFAULT_GOAL := help
 .PHONY: help paths autolabel validate_images palm_detection build_roi run_mediapipe \
 	export_cvat import_cvat visualize finalize_train_pretrain finalize_val finalize_test \
-	prepare_dragon_gold build_pretrain_source_registry seed_finetune_gold \
+	prepare_dragon_gold build_pretrain_source_registry \
 	export_finetune_gold import_finetune_gold finalize_train_finetune compile test
 
 help:
@@ -47,7 +47,6 @@ help:
 	@echo   make export_cvat import_cvat visualize
 	@echo   make finalize_train_pretrain build_pretrain_source_registry
 	@echo   make prepare_dragon_gold DRAGON_SOURCE_ROOT=... DRAGON_BATCH_ID=...
-	@echo   make seed_finetune_gold BASE_FINETUNE_ID=... HAND_FINETUNE_ID=...
 	@echo   make export_finetune_gold FINETUNE_SOURCE_ID=... FINETUNE_SOURCE_MODE=...
 	@echo   make import_finetune_gold FINETUNE_SOURCE_ID=...
 	@echo   make finalize_train_finetune
@@ -55,6 +54,7 @@ help:
 
 paths:
 	@echo HAND_DATASET_ROOT=$(HAND_DATASET_ROOT)
+	@echo HAND_GOLD_ROOT=$(HAND_GOLD_ROOT)
 	@echo HAND_WORK_ROOT=$(HAND_WORK_ROOT)
 	@echo HLMF_SOURCE_ROOT=$(HLMF_SOURCE_ROOT)
 	@echo HAND_PRETRAIN_ID=$(HAND_PRETRAIN_ID)
@@ -101,10 +101,6 @@ prepare_dragon_gold:
 
 build_pretrain_source_registry:
 	$(PYTHON) scripts/08_finetune_gold.py source-registry --config $(FINALIZE_TRAIN_CONFIG)
-
-seed_finetune_gold:
-	$(if $(strip $(BASE_FINETUNE_ID)),,$(error BASE_FINETUNE_ID is required))
-	$(PYTHON) scripts/08_finetune_gold.py seed --config $(FINETUNE_GOLD_CONFIG) --base-finetune-id $(BASE_FINETUNE_ID) --finetune-id $(HAND_FINETUNE_ID)
 
 export_finetune_gold:
 	$(if $(strip $(FINETUNE_SOURCE_ID)),,$(error FINETUNE_SOURCE_ID is required))

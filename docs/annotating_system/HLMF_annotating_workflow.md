@@ -16,13 +16,15 @@ make compile
 make test
 
 export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
+export HAND_GOLD_ROOT=$HAND_DATASET_ROOT/GoldSource
 export HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
 export HAND_PRETRAIN_ID=<pretrain-id>
 export HAND_FINETUNE_ID=<finetune-data-id>
 ```
 
 - `HAND_DATASET_ROOT`：可再生数据仓库，保存原始图、来源级 ROI 和标注。
-- `HAND_WORK_ROOT`：聚合标签、CVAT 任务、认证 Gold 和 HLML 运行结果。
+- `HAND_GOLD_ROOT`：跨训练版本复用的人工 Gold 源仓库。
+- `HAND_WORK_ROOT`：当前训练版本的 mining、replay、Gold 聚合和运行结果；不再保存 Gold 真源。
 - `HAND_FINETUNE_ID`：一份冻结的 finetune 数据快照，不等同于某次模型实验 ID。
 
 ## 3. 普通图片来源：00～06
@@ -152,14 +154,16 @@ $HAND_WORK_ROOT/test_merged/
 
 ### 6.1 通用输入契约
 
-每一批 Dragon 数据使用独立目录，至少包含：
+每一批 Dragon 数据先放入自己的规范批次目录：
 
 ```text
-<dragon-batch-root>/
-├── images/
-├── annotations_hand.txt
-├── annotations_palm.txt
-└── README.md
+$HAND_GOLD_ROOT/dragon/<dragon-batch-id>/
+├── source/
+│   ├── images/
+│   ├── annotations_hand.txt
+│   ├── annotations_palm.txt
+│   └── README.md
+└── published/                 # prepare_dragon_gold 生成
 ```
 
 `configs/dragon_gold.yaml` 只保存上述文件名和 ROI 规则，不保存某批数据的路径、批次 ID、预期 SHA 或预期数量。程序会读取每张图的 EXIF 方向和实际尺寸，并把本批实际 SHA256、计数、拒绝原因写入报告。
@@ -171,14 +175,14 @@ $HAND_WORK_ROOT/test_merged/
 ```bash
 make prepare_dragon_gold \
   HAND_FINETUNE_ID=<finetune-data-id> \
-  DRAGON_SOURCE_ROOT=$HAND_DATASET_ROOT/<dragon-batch-root> \
+  DRAGON_SOURCE_ROOT=$HAND_GOLD_ROOT/dragon/<dragon-batch-id>/source \
   DRAGON_BATCH_ID=<unique-dragon-batch-id>
 ```
 
 结果：
 
 ```text
-$HAND_WORK_ROOT/finetune/<finetune-data-id>/sources/gold/<unique-dragon-batch-id>/
+$HAND_GOLD_ROOT/dragon/<unique-dragon-batch-id>/published/
 ├── 02_roi_crops/
 ├── 03_reviewed/
 ├── source_images/
@@ -186,20 +190,30 @@ $HAND_WORK_ROOT/finetune/<finetune-data-id>/sources/gold/<unique-dragon-batch-id
 └── qc/gold_source_report.json
 ```
 
-来了 N 批就执行 N 次，每次使用不同 `DRAGON_BATCH_ID`。已发布目录不可覆盖；相同输入需要重发时也应使用新 ID，让旧批次继续可追溯。最终 `finalize_train_finetune` 会聚合所有已发布批次并跨来源去重。
+来了 N 批就执行 N 次，每次使用不同 `DRAGON_BATCH_ID`。`source/` 和 `published/` 都不可覆盖；相同输入需要重发时也应使用新 ID，让旧批次继续可追溯。
 
 ## 7. Finetune Gold：新录制与 HLML 选样
 
 ### 7.1 新录制来源的 Gold 任务
 
-先按第 3 节把新来源跑到 `run_mediapipe`，再由程序确定性抽样；人工不要从原图目录随意挑选：
+先建立批次目录，把原图和 00～03 全部放在 `source/` 中：
+
+```text
+$HAND_GOLD_ROOT/new_recorded_gold/<source-id>/source/
+├── images/
+├── 01_palm/
+├── 02_roi_crops/
+└── qc/
+```
+
+以这个 `source/` 作为 `HLMF_SOURCE_ROOT` 跑第 3 节，再由程序确定性抽样；人工不要从原图目录随意挑选：
 
 ```bash
 make export_finetune_gold \
   HAND_FINETUNE_ID=<finetune-data-id> \
   FINETUNE_SOURCE_ID=<unique-new-recorded-source-id> \
   FINETUNE_SOURCE_MODE=native_existing \
-  FINETUNE_RAW_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id> \
+  FINETUNE_RAW_SOURCE_ROOT=$HAND_GOLD_ROOT/new_recorded_gold/<unique-new-recorded-source-id>/source \
   FINETUNE_MAX_ITEMS=<this-task-limit>
 ```
 
@@ -220,20 +234,30 @@ HLMF 会在该 finetune 工作区的 `mining/rounds/` 中寻找唯一 request，
 
 ### 7.3 CVAT 人工工作
 
-任务位于：
+四类 Gold 使用统一结构：
 
 ```text
-$HAND_WORK_ROOT/finetune/<finetune-data-id>/cvat/<source-id>/
-├── 02_roi_crops/images/
-├── cvat_autolabel.xml
-├── task_descriptor.json
-└── qc/cvat_job_plan.json
+$HAND_GOLD_ROOT/<domain>/<source-id>/
+├── source/                    # 新录制/Dragon 才有
+├── task/
+│   ├── 02_roi_crops/images/
+│   ├── cvat_autolabel.xml
+│   ├── task_descriptor.json
+│   ├── reviewed.xml           # 人工返回
+│   └── qc/cvat_job_plan.json
+└── published/                 # import/prepare 后生成
+    ├── finetune_source.json
+    ├── 02_roi_crops/
+    ├── 03_reviewed/
+    └── qc/
 ```
+
+`<domain>` 只能是 `new_recorded_gold`、`disagreement_gold`、`negative_removed_gold` 或 `dragon`。一个领域可以有任意多个批次；`source-id` 在整个 GoldSource 中必须唯一。
 
 按 `cvat_job_plan.json` 的 job 边界分工，不自行拆散或重命名图片。团队先用少量校准图统一 21 点、左右手和 ignore 规则；正式 job 不交叉。完成后把完整 task 导出的 XML 保存为：
 
 ```text
-.../cvat/<source-id>/reviewed.xml
+.../<domain>/<source-id>/task/reviewed.xml
 ```
 
 ### 7.4 严格导入与最终聚合
@@ -243,32 +267,25 @@ make import_finetune_gold HAND_FINETUNE_ID=<finetune-data-id>
 make finalize_train_finetune HAND_FINETUNE_ID=<finetune-data-id>
 ```
 
-程序先完整预检所有待导入 task，再事务式发布到 `sources/gold/<source-id>/`。最终输出：
+程序先完整预检所有待导入 task，再事务式发布到同批次的 `published/`。最终聚合仍是当前训练版本的派生产物：
 
 ```text
 $HAND_WORK_ROOT/finetune/<finetune-data-id>/hmlf_gold_merged/
-├── hand_landmarks_gold.jsonl
-├── ignored.jsonl
-└── qc/finalize_finetune_report.json
+├── 05_labels/
+├── hmlf_gold_aggregate.json
+└── qc/finalize_train_finetune_report.json
 ```
 
-## 8. 多轮 Gold 与继承
+## 8. 多轮 Gold 与历史复用
 
-同一原始来源可以多次抽样，但每轮必须使用新的 `<round-id>` 和 `<source-id>`。HLML 会从历史 Gold、历史 selection、已有 CVAT、Val/Test 中提取多种身份和像素 SHA，排除已出现 ROI；旧 Gold 始终保留，不需要删除。
+同一领域可以不断增加批次，例如 `new_recorded_gold_r01`、`new_recorded_gold_r02`。每轮必须使用新的 `<round-id>` 和全局唯一 `<source-id>`。HLML 抽样会扫描 GoldSource 内所有 pending task 和 published Gold 的身份、ROI SHA、像素 SHA，再叠加 Val/Test 与当前 mining request 排重。
 
-创建新的 finetune 数据快照时，可继承上一快照的认证 Gold：
-
-```bash
-make seed_finetune_gold \
-  BASE_FINETUNE_ID=<old-data-id> \
-  HAND_FINETUNE_ID=<new-data-id>
-```
-
-目标工作区必须不存在。程序优先硬链接复用文件，逐项验证 SHA，不修改旧快照。随后用新 round/source ID 继续添加 Gold，再重新 finalize。
+Gold 不再从旧 finetune 工作区 seed。任意新训练版本都直接发现 `$HAND_GOLD_ROOT/*/*/published/finetune_source.json`；人工 Gold 只有一份真源，训练版本只保存本次选择清单和聚合快照。
 
 ## 9. 常见错误
 
 - `source/task already exists`：ID 已发布；换新 round/source ID，不覆盖历史 Gold。
+- `raw source must be archived at .../source`：先按规范建立 GoldSource 批次，不能从临时目录发布。
 - `DRAGON_SOURCE_ROOT/DRAGON_BATCH_ID is required`：Dragon 批次身份必须在命令中显式提供。
 - `native_existing requires max_items`：新录制任务必须显式冻结数量。
 - `SHA mismatch`：descriptor 生成后输入内容变化；恢复原文件，或用新 ID 重新发布。
@@ -277,4 +294,4 @@ make seed_finetune_gold \
 
 ## 10. 交接 HLML
 
-HLMF 完成 `train_pretrain_merged/`、`val_merged/`、`test_merged/` 和 `finetune/<id>/hmlf_gold_merged/` 后，切换到 `/root/HandLandmarkerLab`。训练命令见 HLML 的 `docs/training_system/HLML_training_workflow.md`。
+HLMF 完成 `train_pretrain_merged/`、`val_merged/`、`test_merged/`，并把所有人工任务发布到 GoldSource、生成当前 `finetune/<id>/hmlf_gold_merged/` 后，切换到 `/root/HandLandmarkerLab`。HLML 会为每个 published 子批次生成显式参与/不参与决定。

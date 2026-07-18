@@ -1,5 +1,6 @@
 schema_version: finetune_gold_v1
 workspace_root: ${HAND_WORK_ROOT}/finetune/${HAND_FINETUNE_ID}
+gold_repository_root: ${HAND_GOLD_ROOT}
 parent_pretrain_id: ${HAND_PRETRAIN_ID:v3-pretrain-r1}
 
 image: {width: 1280, height: 720, channels: 1, orientation: upright}

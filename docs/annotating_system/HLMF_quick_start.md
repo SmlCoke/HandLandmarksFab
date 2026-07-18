@@ -9,6 +9,7 @@ cd /root/HandLandmarksFab
 git pull --ff-only
 conda activate anfab
 export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
+export HAND_GOLD_ROOT=$HAND_DATASET_ROOT/GoldSource
 export HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
 make compile
 make test
@@ -53,11 +54,11 @@ make finalize_test
 ```bash
 make prepare_dragon_gold \
   HAND_FINETUNE_ID=<finetune-data-id> \
-  DRAGON_SOURCE_ROOT=$HAND_DATASET_ROOT/<dragon-batch-root> \
+  DRAGON_SOURCE_ROOT=$HAND_GOLD_ROOT/dragon/<dragon-batch-id>/source \
   DRAGON_BATCH_ID=<unique-dragon-batch-id>
 ```
 
-N 批重复 N 次，每批换唯一 ID。
+N 批重复 N 次，每批换唯一 ID。结果位于 `GoldSource/dragon/<id>/published/`。
 
 ## 5. 导出新录制 Gold
 
@@ -66,7 +67,7 @@ make export_finetune_gold \
   HAND_FINETUNE_ID=<finetune-data-id> \
   FINETUNE_SOURCE_ID=<new-recorded-source-id> \
   FINETUNE_SOURCE_MODE=native_existing \
-  FINETUNE_RAW_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id> \
+  FINETUNE_RAW_SOURCE_ROOT=$HAND_GOLD_ROOT/new_recorded_gold/<new-recorded-source-id>/source \
   FINETUNE_MAX_ITEMS=<task-limit>
 ```
 
@@ -79,17 +80,13 @@ make export_finetune_gold \
   FINETUNE_SOURCE_MODE=selection_subset
 ```
 
-按 `cvat/<source-id>/qc/cvat_job_plan.json` 分工，返回 XML 保存为 `cvat/<source-id>/reviewed.xml`，然后：
+按 `GoldSource/<domain>/<source-id>/task/qc/cvat_job_plan.json` 分工，返回 XML 保存为同批次的 `task/reviewed.xml`，然后：
 
 ```bash
 make import_finetune_gold HAND_FINETUNE_ID=<finetune-data-id>
 make finalize_train_finetune HAND_FINETUNE_ID=<finetune-data-id>
 ```
 
-## 7. 新快照继承旧 Gold
+## 7. 多批次复用
 
-```bash
-make seed_finetune_gold \
-  BASE_FINETUNE_ID=<old-data-id> \
-  HAND_FINETUNE_ID=<new-data-id>
-```
+每个领域可持续增加 `<source-id>` 子批次。旧 Gold 不复制、不删除；任意 finetune 版本都直接从 `$HAND_GOLD_ROOT/*/*/published/` 发现它们，并由 HLML 的本次选择清单逐批启停。

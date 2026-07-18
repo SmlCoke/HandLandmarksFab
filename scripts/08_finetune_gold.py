@@ -17,7 +17,6 @@ from hand_autolabel.finetune_gold import (
     import_all_finetune_gold,
     import_finetune_gold,
     prepare_dragon_gold,
-    seed_finetune_gold,
 )
 from hand_autolabel.formats import resolve_path
 
@@ -41,11 +40,6 @@ def parse_args() -> argparse.Namespace:
     export.add_argument("--raw-source-root")
     export.add_argument("--selection-request")
     export.add_argument("--max-items", type=int)
-
-    seed = subparsers.add_parser("seed", help="Seed a new workspace from authenticated historical Gold.")
-    seed.add_argument("--config", default="configs/finetune_gold.yaml")
-    seed.add_argument("--base-finetune-id", required=True)
-    seed.add_argument("--finetune-id", required=True)
 
     imported = subparsers.add_parser("import", help="Strictly import one or all returned CVAT Gold tasks.")
     imported.add_argument("--config", default="configs/finetune_gold.yaml")
@@ -78,12 +72,6 @@ def main() -> None:
                 raw_source_root=Path(args.raw_source_root).resolve() if args.raw_source_root else None,
                 selection_request=Path(args.selection_request).resolve() if args.selection_request else None,
                 max_items=args.max_items,
-            )
-        elif args.command == "seed":
-            result = seed_finetune_gold(
-                config_path,
-                base_finetune_id=args.base_finetune_id,
-                finetune_id=args.finetune_id,
             )
         elif args.command == "import":
             result = (

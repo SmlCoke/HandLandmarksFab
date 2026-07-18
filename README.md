@@ -9,19 +9,23 @@ HLMF 2.0 是一套新的、精简的操作契约，不兼容旧版多套 Train/V
 - [完整操作流程](docs/annotating_system/HLMF_annotating_workflow.md)：首次使用、理解数据契约和排错时阅读。
 - [Quick Start](docs/annotating_system/HLMF_quick_start.md)：熟悉流程后直接照着运行。
 - [目录与接口](docs/annotating_system/HLMF_data_contract.md)：查询输入、输出、Gold 和 HLML 交接格式。
+- [当前数据状态](docs/annotating_system/HLMF_current_status.md)：服务器上已归档批次和进行中的人工任务。
 - [当前下一步计划](docs/annotating_system/HLMF_next_step_plan.md)：当前批次的路径、数量、人工分工和执行顺序。
 
 ## 两个根目录
 
 ```text
 HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
-  可再生数据仓库；原始图片、来源级 01/02/03、已有精标数据；尽量只读
+  可再生数据仓库
+
+HAND_GOLD_ROOT=$HAND_DATASET_ROOT/GoldSource
+  跨训练版本复用的 Gold 真源；结构为 domain/source-id/{source,task,published}
 
 HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
-  HLMF 聚合标签、Gold/CVAT 工作区和 HLML 训练结果
+  当前版本的聚合、mining/replay 和 HLML 训练结果
 ```
 
-普通来源的 00～06 直接在 `HLMF_SOURCE_ROOT` 内工作。聚合程序直接引用 `DatesetFab` 中的 ROI，不把图片复制进 `HLML-3.0`。只有 CVAT 人工标注任务需要物化 ROI；程序优先创建硬链接，跨文件系统时才复制，并验证 SHA-256。
+普通来源的 00～06 直接在 `HLMF_SOURCE_ROOT` 内工作。Gold 的 CVAT task 与 published source 也长期保存在 GoldSource，不再绑定某个 `HAND_FINETUNE_ID`；当前训练版本只生成可重建的认证聚合。
 
 ## 最短命令索引
 

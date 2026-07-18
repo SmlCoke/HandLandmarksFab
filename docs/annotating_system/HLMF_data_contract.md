@@ -24,20 +24,16 @@
 
 ## 2. 可再生数据仓库与工作区
 
-`HAND_DATASET_ROOT` 指向 `/root/autodl-tmp/DatesetFab`。HLMF 2.0 的 pretrain/Val/Test 配置直接从其中读取来源目录，聚合输出写入 `HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0`：
+`HAND_DATASET_ROOT` 指向 `/root/autodl-tmp/DatesetFab`。人工 Gold 真源固定在 `HAND_GOLD_ROOT=$HAND_DATASET_ROOT/GoldSource`：
 
 ```text
-HLML-3.0/
-├── train_pretrain_merged/          # pretrain 聚合标签、注册表、QC
-├── val_merged/                     # Val Gold 聚合标签
-├── test_merged/                    # Test Gold 聚合标签
-└── finetune/<HAND_FINETUNE_ID>/
-    ├── cvat/<source_id>/           # 允许物化图片的人工任务包
-    ├── sources/gold/<source_id>/   # 导入并认证后的 Gold source
-    └── hmlf_gold_merged/           # 所有轮次 Gold 聚合
+GoldSource/<domain>/<source_id>/
+├── source/                         # 原始图片和 00～03；选样类任务可无此目录
+├── task/                           # CVAT 任务及 reviewed.xml
+└── published/                      # 认证 finetune_source.json 与人工标签
 ```
 
-聚合标签里的 `crop_path` 是指向 `DatesetFab` 或认证 Gold 包的绝对路径。HLML 会按允许根目录校验，不需要建立 `train_sources` 副本。
+`HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0` 只保存 pretrain/Val/Test 聚合、finetune mining/replay、当前 Gold 聚合和训练产物。聚合标签的 `crop_path` 直接指向 DatesetFab；无需建立 `train_sources` 或逐版本复制 Gold。
 
 ## 3. CVAT Gold 任务
 
@@ -51,7 +47,7 @@ new_recorded_gold_r01       source_kind=new_recorded_gold
 任务包内重要文件：
 
 ```text
-cvat/<source_id>/
+GoldSource/<domain>/<source_id>/task/
 ├── 02_roi_crops/images/
 ├── cvat_autolabel.xml
 ├── reviewed.xml                    # 人工放回

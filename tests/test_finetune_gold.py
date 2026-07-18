@@ -31,7 +31,6 @@ from hand_autolabel.finetune_gold import (
     parse_dragon_hand_annotations,
     parse_dragon_palm_annotations,
     prepare_dragon_gold,
-    seed_finetune_gold,
 )
 from hand_autolabel.image_io import write_image
 from hand_autolabel.formats import load_yaml_config
@@ -71,12 +70,14 @@ class DragonContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             workspace = root / "workspace"
+            repository = root / "GoldSource"
             config = root / "dragon.yaml"
             config.write_text(
                 "\n".join(
                     [
                         "schema_version: finetune_gold_v1",
                         f"workspace_root: {workspace.as_posix()}",
+                        f"gold_repository_root: {repository.as_posix()}",
                         "hand_roi:",
                         "  output_width: 256",
                         "  output_height: 256",
@@ -101,7 +102,7 @@ class DragonContractTests(unittest.TestCase):
             hand_row = "a.png 1 " + " ".join(str(value) for value in points) + "\n"
             palm_row = "frame: a.png 0.2 0.2 0.8 0.8 0.5 0.65 0.5 0.4\n"
             for name, value in (("dragon_batch_a", 70), ("dragon_batch_b", 110)):
-                batch = root / name
+                batch = repository / "dragon" / name / "source"
                 (batch / "images").mkdir(parents=True)
                 Image.fromarray(
                     np.full((240, 320, 3), value, dtype=np.uint8), mode="RGB"
@@ -112,15 +113,19 @@ class DragonContractTests(unittest.TestCase):
                 descriptor = prepare_dragon_gold(config, raw_root=batch, source_id=name)
                 self.assertEqual(name, descriptor["source_id"])
                 self.assertEqual(name, descriptor["dataset_id"])
-                self.assertTrue((workspace / "sources" / "gold" / name).is_dir())
+                self.assertTrue((repository / "dragon" / name / "published").is_dir())
 
             with self.assertRaisesRegex(GoldPipelineError, "already exists"):
                 prepare_dragon_gold(
-                    config, raw_root=root / "dragon_batch_a", source_id="dragon_batch_a"
+                    config,
+                    raw_root=repository / "dragon" / "dragon_batch_a" / "source",
+                    source_id="dragon_batch_a",
                 )
             with self.assertRaisesRegex(GoldPipelineError, "invalid Dragon batch"):
                 prepare_dragon_gold(
-                    config, raw_root=root / "dragon_batch_a", source_id="../bad"
+                    config,
+                    raw_root=repository / "dragon" / "dragon_batch_a" / "source",
+                    source_id="../bad",
                 )
 
 
@@ -393,6 +398,7 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             workspace = root / "finetune" / "ft-test"
+            repository = root / "GoldSource"
             parent = root / "parent"
             parent_image = parent / "02_roi_crops" / "images" / "crop.png"
             self.assertTrue(write_image(parent_image, np.full((256, 256), 127, dtype=np.uint8)))
@@ -494,6 +500,7 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
                 "\n".join(
                     [
                         f'workspace_root: "{workspace.as_posix()}"',
+                        f'gold_repository_root: "{repository.as_posix()}"',
                         "image: {width: 1280, height: 720, channels: 1, orientation: upright}",
                         "hand_roi: {output_width: 256, output_height: 256, scale_x: 1.8, scale_y: 1.8, shift_x: 0.0, shift_y: -0.1}",
                         "cvat:",
@@ -521,15 +528,16 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
                     source_mode="selection_subset",
                     selection_request=tampered_draft_request,
                 )
-            self.assertFalse((workspace / "cvat" / "tampered_manifest").exists())
-            self.assertFalse((workspace / "cvat" / "tampered_draft").exists())
+            self.assertFalse((repository / "negative_removed_gold" / "tampered_manifest").exists())
+            self.assertFalse((repository / "negative_removed_gold" / "tampered_draft").exists())
             export_finetune_gold(
                 config,
                 source_id="hard_gold",
                 source_mode="selection_subset",
                 selection_request=request,
             )
-            task_root = workspace / "cvat" / "hard_gold"
+            batch_root = repository / "negative_removed_gold" / "hard_gold"
+            task_root = batch_root / "task"
             xml_path = task_root / "cvat_autolabel.xml"
             xml_text = xml_path.read_text(encoding="utf-8")
             self.assertNotIn('<tag label="Left"', xml_text)
@@ -546,31 +554,12 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
             batch = import_all_finetune_gold(config)
             self.assertEqual([item["source_id"] for item in batch["published"]], ["hard_gold"])
             descriptor = json.loads(
-                (workspace / "sources" / "gold" / "hard_gold" / "finetune_source.json").read_text(encoding="utf-8")
+                (batch_root / "published" / "finetune_source.json").read_text(encoding="utf-8")
             )
             self.assertEqual(descriptor["counts"]["included"], 1)
             self.assertEqual(descriptor["handedness_policy"], "optional_per_row")
 
-            seed_config = config_dir / "seed.yaml"
-            seed_config.write_text(
-                f'workspace_root: "{(root / "finetune" / "ft-new").as_posix()}"\n',
-                encoding="utf-8",
-            )
-            seed_report = seed_finetune_gold(
-                seed_config, base_finetune_id="ft-test", finetune_id="ft-new"
-            )
-            self.assertEqual("ok", seed_report["status"])
-            seeded_descriptor = (
-                root / "finetune" / "ft-new" / "sources" / "gold" / "hard_gold" / "finetune_source.json"
-            )
-            original_descriptor = (
-                workspace / "sources" / "gold" / "hard_gold" / "finetune_source.json"
-            )
-            self.assertEqual(sha256_file(original_descriptor), sha256_file(seeded_descriptor))
-            if os.name != "nt":
-                self.assertEqual(original_descriptor.stat().st_ino, seeded_descriptor.stat().st_ino)
-
-            published_root = workspace / "sources" / "gold" / "hard_gold"
+            published_root = batch_root / "published"
             gold_only_config = config_dir / "gold_only.yaml"
             gold_only_output = root / "gold_only_output"
             gold_only_config.write_text(
@@ -600,23 +589,25 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
             gold_only_report = finalize_training(gold_only_config, "finetune")
             self.assertEqual(gold_only_report["counts"]["included"], 1)
 
+            native_source = repository / "new_recorded_gold" / "native_gold" / "source"
+            shutil.copytree(parent, native_source)
             native_task = export_finetune_gold(
                 config,
                 source_id="native_gold",
                 source_mode="native_existing",
-                raw_source_root=parent,
+                raw_source_root=native_source,
                 max_items=1,
             )
             self.assertEqual(native_task["source_mode"], "native_existing")
             job_plan = json.loads(
-                (workspace / "cvat" / "native_gold" / "qc" / "cvat_job_plan.json").read_text(
+                (repository / "new_recorded_gold" / "native_gold" / "task" / "qc" / "cvat_job_plan.json").read_text(
                     encoding="utf-8"
                 )
             )
             self.assertEqual(job_plan["total_images"], 1)
             self.assertEqual(job_plan["segment_size"], 100)
             native_manifest = json.loads(
-                (workspace / "cvat" / "native_gold" / "02_roi_crops" / "hand_roi_crops_manifest.jsonl")
+                (repository / "new_recorded_gold" / "native_gold" / "task" / "02_roi_crops" / "hand_roi_crops_manifest.jsonl")
                 .read_text(encoding="utf-8")
                 .strip()
             )
@@ -629,9 +620,11 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
                 "\n".join(
                     [
                         f'workspace_root: "{workspace.as_posix()}"',
+                        f'gold_repository_root: "{repository.as_posix()}"',
                         "source_discovery:",
-                        f'  root: "{(workspace / "sources" / "gold").as_posix()}"',
+                        f'  root: "{repository.as_posix()}"',
                         "  descriptor_name: finetune_source.json",
+                        "  layout: domain_batch_published_v1",
                         "outputs:",
                         f'  root: "{output.as_posix()}"',
                     ]
@@ -641,8 +634,8 @@ class FinetuneGoldIntegrationTests(unittest.TestCase):
             old_id = os.environ.get("HAND_FINETUNE_ID")
             os.environ["HAND_FINETUNE_ID"] = "ft-test"
             try:
-                conflicting_root = workspace / "sources" / "gold" / "conflicting_gold"
-                shutil.copytree(workspace / "sources" / "gold" / "hard_gold", conflicting_root)
+                conflicting_root = repository / "negative_removed_gold" / "conflicting_gold" / "published"
+                shutil.copytree(published_root, conflicting_root)
                 conflicting_labels = conflicting_root / "03_reviewed" / "hand_landmarks_reviewed.jsonl"
                 conflict_row = json.loads(conflicting_labels.read_text(encoding="utf-8").strip())
                 conflict_row["handedness"] = {"label": "Left", "score": None}

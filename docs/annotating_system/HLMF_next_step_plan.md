@@ -1,161 +1,122 @@
 # HLMF 当前下一步计划
 
-更新时间：2026-07-18。本文只记录本次两天冲刺；通用方法见 [完整标注流程](HLMF_annotating_workflow.md)。
+更新时间：2026-07-18。本文只记录当前任务；通用方法见 [完整标注流程](HLMF_annotating_workflow.md)，最短命令见 [Quick Start](HLMF_quick_start.md)。
 
-## 1. 当前目标和已有 Gold
+## 1. 当前事实
 
-- 当前 finetune 数据快照：`v3-finetune-r1`。
-- 已有 Dragon 批次：`dragon_gold_0716_v1`，已发布 5,191 个 ROI，其中 5,189 个标签本身可训练、2 个 ignored；不要重复执行 prepare，也不要删除或覆盖。由于其 H.264/I420 视频抽帧 JPEG 与最终无损 TIFF 评测域不同，HLML 当前通过 source 开关禁用它；HLMF 仍保留原数据和完整认证链。
-- 本轮新增人工 Gold 总预算优先冻结为 800 个 Hand ROI；如果实际人手不足，在导出任何 disagreement 任务前统一降为 600。
-- 800 方案：新录制来源最多 300，disagreement 使用剩余额度；600 方案：新录制来源最多 200，disagreement 使用剩余额度。
-- 本轮不再制作新的 `negative_removed_gold`。其含义是“旧负样本候选经人工发现实际有手后，转为精标正样本”；当前新工作区没有必须补做的同类任务。
+- HLML `pretrain-geometry` 正在训练；本轮 HLMF/HLML 更新不修改其 `HLML-3.0` 输入和 run。
+- `v3-pretrain-r1` 的人工负样本删除复核已经完成。
+- 新录制 TIFF 图片流已经在 `HandViolenceHard0718/peak` 跑完 00～03，自动标注使用 `negative_candidate_threshold=0.3`。
+- `new_recorded_gold_r01` 已确定性导出 300 个 ROI，CVAT 人工标注正在进行。
+- 本轮允许继续增加 `new_recorded_gold_r02`、`r03` 等独立批次；所有人工 Gold 的合计人工上限仍不超过当前团队可完成的 800 个 ROI。
 
-## 2. 人工录制 source e
+## 2. 已归档的长期 Gold
 
-建议总录制 20～40 分钟，分成多个短视频，至少覆盖：
-
-1. 握拳及从张掌缓慢收拳、从拳头展开；
-2. 数字 1，食指伸直、略弯、正面和侧面；
-3. 张掌侧对镜头、手背/手心、手腕旋转；
-4. 手指互相遮挡、两手靠近或短暂重叠；
-5. 手靠近/远离镜头、位于画面中心和边缘；
-6. 左右手、不同参与者、背景和明暗条件。
-
-保持横屏 `1280×720`，手应大部分时间完整可见。不要长时间保持同一静止姿态。原视频放在：
+规范仓库是：
 
 ```text
-/root/autodl-tmp/DatesetFab/finetune_source_e_r01/raw_videos/
+/root/autodl-tmp/DatesetFab/GoldSource/
+├── new_recorded_gold/
+├── disagreement_gold/
+├── negative_removed_gold/
+└── dragon/
 ```
 
-程序当前不负责抽视频帧。每个视频稀疏抽取约每 2 秒一帧，并用 session 前缀避免重名：
+历史 `disagreement_gold` 和 `negative_removed_gold` 都是人工精标数据，不应废弃。它们已作为独立 published 批次归档；后续 HLML 可逐批选择。Dragon 也保留，但因 H.264/I420/JPEG 与板端无损 TIFF 域不一致，本次选择应设为 disabled。
+
+查看每批是否齐全：
 
 ```bash
-mkdir -p /root/autodl-tmp/DatesetFab/finetune_source_e_r01/images
-ffmpeg -i raw_videos/person01_session01.mp4 \
-  -vf "fps=1/2,format=gray" \
-  images/person01_session01_%06d.tiff
+find "$HAND_GOLD_ROOT" -path '*/published/finetune_source.json' -print
+find "$HAND_GOLD_ROOT" -path '*/task/task_descriptor.json' -print
 ```
 
-如果原视频不是正向 `1280×720`，先按实际方向旋转/缩放后再导出；不要拉伸宽高比。最终以 `make validate_images` 为准。
+## 3. 完成 `new_recorded_gold_r01`
 
-## 3. 程序处理 source e
+把 CVAT 完整导出 XML 上传到：
+
+```text
+$HAND_GOLD_ROOT/new_recorded_gold/new_recorded_gold_r01/task/reviewed.xml
+```
+
+然后只导入这一批，避免其他未完成人工任务阻塞 `--all`：
 
 ```bash
 cd /root/HandLandmarksFab
 conda activate anfab
 export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
+export HAND_GOLD_ROOT=$HAND_DATASET_ROOT/GoldSource
 export HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
+export HAND_PRETRAIN_ID=v3-pretrain-r1
 export HAND_FINETUNE_ID=v3-finetune-r1
-export HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/finetune_source_e_r01
 
-make autolabel \
-  HLMF_SOURCE_ROOT=$HLMF_SOURCE_ROOT \
-  AUTOLABEL_ROLE=train
-```
-
-如果本批次已经根据 Palm 分数分布确定了不同的低分候选阈值，则改为：
-
-```bash
-make autolabel \
-  HLMF_SOURCE_ROOT=$HLMF_SOURCE_ROOT \
-  AUTOLABEL_ROLE=train \
-  AUTOLABEL_OVERRIDES='{"palm":{"negative_candidate_threshold":<source-e-threshold>}}'
-```
-
-不要凭感觉反复改变阈值。先查看少量 Palm 检测及 `palm_detection_stats.json`，冻结本批阈值后再生成最终 ROI；四份 QC 中的 `autolabel_runtime` 必须一致。
-
-人工只需要检查：
-
-```text
-$HLMF_SOURCE_ROOT/qc/image_validation_report.json
-$HLMF_SOURCE_ROOT/qc/palm_detection_stats.json
-$HLMF_SOURCE_ROOT/qc/mediapipe_roi_stats.json
-$HLMF_SOURCE_ROOT/02_roi_crops/images/
-```
-
-抽看 ROI 是否包含整手、困难手势是否真正出现。若大量无手或裁切异常，先修正录制/抽帧或 Palm 输入，不进入 CVAT。
-
-## 4. 先导出新录制 Gold
-
-只能在团队确认本轮采用哪档总预算后运行。800 方案：
-
-```bash
-make export_finetune_gold \
-  HAND_FINETUNE_ID=v3-finetune-r1 \
-  FINETUNE_SOURCE_ID=new_recorded_gold_r01 \
-  FINETUNE_SOURCE_MODE=native_existing \
-  FINETUNE_RAW_SOURCE_ROOT=$HLMF_SOURCE_ROOT \
-  FINETUNE_MAX_ITEMS=300
-```
-
-若采用 600 方案，只把 `FINETUNE_MAX_ITEMS` 改为 `200`。查看实际选中了多少张：
-
-```text
-/root/autodl-tmp/TrainFab/HLML-3.0/finetune/v3-finetune-r1/cvat/new_recorded_gold_r01/task_descriptor.json
-.../cvat/new_recorded_gold_r01/qc/cvat_job_plan.json
-.../cvat/new_recorded_gold_r01/02_roi_crops/images/
-```
-
-任务生成后不要换预算、改图片或重跑同一 ID。
-
-## 5. 等 HLML 生成 disagreement request
-
-HLML 完成 geometry、负样本复核、multitask 和 `make prepare-finetune-sources` 后，运行本轮选择。800 方案命令由 HLML 仓库执行：
-
-```bash
-make prepare-finetune-round \
-  HAND_FINETUNE_ID=v3-finetune-r1 \
-  FINETUNE_ROUND_ID=r01 \
-  FINETUNE_GOLD_BUDGET=800 \
-  NEW_RECORDED_SOURCE_ID=new_recorded_gold_r01
-```
-
-600 方案把预算改为 `600`。HLML 会用 disagreement 自动补齐“总预算减 new-recorded 实际任务数”，并排除 Dragon、已有 Gold、当前 CVAT、Val/Test 和历史 request 重复项。
-
-返回 HLMF 导出：
-
-```bash
-cd /root/HandLandmarksFab
-make export_finetune_gold \
-  HAND_FINETUNE_ID=v3-finetune-r1 \
-  FINETUNE_SOURCE_ID=disagreement_gold_r01 \
-  FINETUNE_SOURCE_MODE=selection_subset
+make import_finetune_gold FINETUNE_SOURCE_ID=new_recorded_gold_r01
 ```
 
 检查：
 
 ```text
-.../finetune/v3-finetune-r1/cvat/disagreement_gold_r01/task_descriptor.json
-.../finetune/v3-finetune-r1/cvat/disagreement_gold_r01/qc/cvat_job_plan.json
+$HAND_GOLD_ROOT/new_recorded_gold/new_recorded_gold_r01/published/finetune_source.json
+.../published/qc/gold_source_report.json
 ```
 
-## 6. 团队 CVAT 分工
+## 4. 制作额外的新录制批次
 
-人工量只包括 `new_recorded_gold_r01` 和 `disagreement_gold_r01`，两者合计不超过冻结的 600/800。开始前所有人共同标 10 张校准图；之后按各自 `cvat_job_plan.json` 的不重叠 job 工作。
-
-每张 ROI：清楚时标完整 21 点和 handedness；确定无手时标 `no_hand`；模糊、严重截断或点无法可靠落在 ROI 内时标 `ignore_for_training`。负责人抽查每人约 5%，重点看腕点、拇指、左右手和握拳遮挡点。
-
-每个完整 task 导出 `CVAT for images 1.1`，分别上传为：
+每批使用新的图片流和唯一 ID，例如 `new_recorded_gold_r02`。直接把图片放在：
 
 ```text
-.../cvat/new_recorded_gold_r01/reviewed.xml
-.../cvat/disagreement_gold_r01/reviewed.xml
+$HAND_GOLD_ROOT/new_recorded_gold/new_recorded_gold_r02/source/images/
 ```
 
-## 7. 导入、聚合和交接
+建议优先录制当前模型薄弱姿态：握拳及开合过程、数字 1、侧向张掌、手指遮挡、手腕旋转、画面边缘、不同距离和左右手。必须保存板端同域的无损 TIFF 图片流，不导出 H.264 视频再抽 JPEG。
+
+运行：
 
 ```bash
-cd /root/HandLandmarksFab
-make import_finetune_gold HAND_FINETUNE_ID=v3-finetune-r1
+make autolabel \
+  HLMF_SOURCE_ROOT=$HAND_GOLD_ROOT/new_recorded_gold/new_recorded_gold_r02/source \
+  AUTOLABEL_ROLE=train \
+  AUTOLABEL_OVERRIDES='{"palm":{"negative_candidate_threshold":<本批冻结阈值>}}'
+
+make export_finetune_gold \
+  FINETUNE_SOURCE_ID=new_recorded_gold_r02 \
+  FINETUNE_SOURCE_MODE=native_existing \
+  FINETUNE_RAW_SOURCE_ROOT=$HAND_GOLD_ROOT/new_recorded_gold/new_recorded_gold_r02/source \
+  FINETUNE_MAX_ITEMS=<本批人工上限>
+```
+
+阈值根据本批 Palm 分布决定，不沿用 `0.3` 作为永久常量。查看 `source/qc/*` 中的 `autolabel_runtime`，确认四阶段参数一致。
+
+人工完成后上传到 `.../new_recorded_gold_r02/task/reviewed.xml`，再按 source ID 单批导入。
+
+## 5. disagreement / negative-removed 新批次
+
+HLML 生成 selection request 后，HLMF 只负责恢复认证 ROI、导出 CVAT 和发布：
+
+```bash
+make export_finetune_gold \
+  FINETUNE_SOURCE_ID=disagreement_gold_<round-id> \
+  FINETUNE_SOURCE_MODE=selection_subset
+```
+
+如当前计划决定继续采样 `negative_removed_gold`，也必须使用新的 source ID。HLML 会扫描 GoldSource 中所有历史 `task/` 和 `published/`，不会再次抽到已经标注或已进入待标任务的 ROI。
+
+## 6. 全部人工批次完成后的聚合
+
+所有计划使用的 task 都已导入后：
+
+```bash
 make finalize_train_finetune HAND_FINETUNE_ID=v3-finetune-r1
 ```
 
-必须查看：
+输出位于：
 
 ```text
-.../finetune/v3-finetune-r1/sources/gold/new_recorded_gold_r01/qc/gold_source_report.json
-.../finetune/v3-finetune-r1/sources/gold/disagreement_gold_r01/qc/gold_source_report.json
-.../finetune/v3-finetune-r1/hmlf_gold_merged/qc/finalize_finetune_report.json
+/root/autodl-tmp/TrainFab/HLML-3.0/finetune/v3-finetune-r1/hmlf_gold_merged/
 ```
 
-只有报告 `status=ok`、计数符合实际且无 blocking error，才交回 HLML 执行 finetune curate/gate/smoke。若时间只够完成一部分，必须在 CVAT 任务冻结前降低总预算；不要冻结大任务后只返回部分 XML。
+这里是本次训练版本的认证聚合，不是 Gold 真源。Gold 真源始终位于 `DatesetFab/GoldSource`。
+
+## 7. 交接 HLML
+
+HLMF 聚合完成后，HLML 先生成逐批选择清单。当前建议启用：历史 `disagreement_gold`、历史 `negative_removed_gold`、本轮已经完成的每个 `new_recorded_gold_r*`；禁用 `dragon_gold_0716_v1`。具体命令和检查见 HLML 的 `HLML_next_step_plan.md`。

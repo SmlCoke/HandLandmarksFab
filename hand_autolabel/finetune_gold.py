@@ -46,6 +46,12 @@ ROLE_PRECEDENCE = {
     "disagreement_gold": 2,
     "new_recorded_gold": 3,
 }
+SOURCE_KIND_DOMAINS = {
+    "external_gold": "dragon",
+    "reviewed_hard_gold": "negative_removed_gold",
+    "disagreement_gold": "disagreement_gold",
+    "new_recorded_gold": "new_recorded_gold",
+}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
 
@@ -62,6 +68,49 @@ def _workspace(cfg: Mapping[str, Any], config_path: Path) -> Path:
     if not value:
         raise GoldPipelineError("workspace_root is required")
     return resolve_path(_repo_root(config_path), str(value))
+
+
+def _gold_repository(
+    cfg: Mapping[str, Any], config_path: Path, *, create: bool = False
+) -> Path:
+    value = cfg.get("gold_repository_root")
+    if not value:
+        raise GoldPipelineError("gold_repository_root is required")
+    root = resolve_path(_repo_root(config_path), str(value))
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    return _assert_directory(root, "Gold repository")
+
+
+def _batch_root(repository: Path, source_kind: str, source_id: str) -> Path:
+    if source_kind not in SOURCE_KIND_DOMAINS:
+        raise GoldPipelineError(f"unsupported Gold source kind: {source_kind}")
+    if not source_id or source_id in {".", ".."} or Path(source_id).name != source_id:
+        raise GoldPipelineError(f"invalid source_id: {source_id!r}")
+    return repository / SOURCE_KIND_DOMAINS[source_kind] / source_id
+
+
+def _find_batch(repository: Path, source_id: str) -> Path:
+    matches = sorted(
+        path
+        for path in repository.glob(f"*/{source_id}")
+        if path.is_dir() and not path.is_symlink()
+    )
+    if len(matches) != 1:
+        raise GoldPipelineError(
+            f"expected exactly one GoldSource batch for {source_id}; found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _published_descriptors(repository: Path, descriptor_name: str) -> List[Path]:
+    paths = sorted(repository.glob(f"*/*/published/{descriptor_name}"), key=str)
+    for path in paths:
+        _assert_regular_file(path, "published Gold descriptor")
+        batch = path.parent.parent
+        if batch.name.startswith(".") or batch.parent.name.startswith("."):
+            raise GoldPipelineError(f"hidden Gold batch/domain is not allowed: {batch}")
+    return paths
 
 
 def _safe_name(value: str) -> str:
@@ -169,30 +218,6 @@ def _copy_or_link(source: Path, target: Path) -> None:
         shutil.copy2(source, target)
     if sha256_file(source) != sha256_file(target):
         raise GoldPipelineError(f"copy SHA mismatch: {source} -> {target}")
-
-
-def _link_tree(source: Path, target: Path) -> tuple[int, int]:
-    """Clone a trusted directory with hard links and verify every byte identity."""
-
-    source = _assert_directory(source, "seed source")
-    if target.exists():
-        raise GoldPipelineError(f"seed target already exists: {target}")
-    file_count = 0
-    byte_count = 0
-    for path in sorted(source.rglob("*"), key=lambda value: str(value).lower()):
-        if path.is_symlink():
-            raise GoldPipelineError(f"seed source contains a symlink: {path}")
-        relative = path.relative_to(source)
-        destination = target / relative
-        if path.is_dir():
-            destination.mkdir(parents=True, exist_ok=True)
-            continue
-        if not path.is_file():
-            raise GoldPipelineError(f"seed source contains a non-regular entry: {path}")
-        _copy_or_link(path, destination)
-        file_count += 1
-        byte_count += path.stat().st_size
-    return file_count, byte_count
 
 
 def _artifact(path: Path, root: Path, *, count: int | None = None) -> Dict[str, Any]:
@@ -672,6 +697,7 @@ def export_finetune_gold(
     config_path = Path(config_path).resolve()
     cfg = load_yaml_config(config_path)
     workspace = _workspace(cfg, config_path)
+    repository = _gold_repository(cfg, config_path, create=True)
     if source_mode not in {"selection_subset", "native_existing"}:
         raise GoldPipelineError("source_mode must be selection_subset or native_existing")
     if not source_id or source_id in {".", ".."} or Path(source_id).name != source_id:
@@ -683,12 +709,7 @@ def export_finetune_gold(
         raise GoldPipelineError("cvat.max_task_items must be in [1, 800]")
     if max_items is not None and (max_items <= 0 or max_items > hard_limit):
         raise GoldPipelineError(f"max_items must be in [1, {hard_limit}]")
-    task_root = workspace / "cvat" / source_id
-    published_root = workspace / "sources" / "gold" / source_id
-    if task_root.exists() or published_root.exists():
-        raise GoldPipelineError(f"source/task already exists: {source_id}")
-    task_root.parent.mkdir(parents=True, exist_ok=True)
-    temp_root = Path(tempfile.mkdtemp(prefix=f".{_safe_name(source_id)}.", dir=task_root.parent))
+    temp_root = Path(tempfile.mkdtemp(prefix=f".{_safe_name(source_id)}.", dir=repository))
     try:
         if source_mode == "selection_subset":
             request = selection_request or workspace / "mining" / source_id / "selection_request.jsonl"
@@ -743,6 +764,23 @@ def export_finetune_gold(
                 raise GoldPipelineError("native_existing requires source_kind new_recorded_gold")
         if resolved_kind not in ALLOWED_SOURCE_KINDS:
             raise GoldPipelineError(f"unsupported source_kind: {resolved_kind}")
+        batch_root = _batch_root(repository, str(resolved_kind), source_id)
+        existing_batches = sorted(repository.glob(f"*/{source_id}"), key=str)
+        expected_source = batch_root / "source"
+        if source_mode == "native_existing":
+            raw_source = _assert_directory(Path(raw_source_root), "native Gold source")
+            if raw_source != _assert_directory(expected_source, "canonical native Gold source"):
+                raise GoldPipelineError(
+                    f"native_existing raw source must be archived at {expected_source}"
+                )
+            if any(path != batch_root for path in existing_batches):
+                raise GoldPipelineError(f"source_id already exists in another Gold domain: {source_id}")
+        elif existing_batches:
+            raise GoldPipelineError(f"Gold batch already exists: {source_id}")
+        task_root = batch_root / "task"
+        published_root = batch_root / "published"
+        if task_root.exists() or published_root.exists():
+            raise GoldPipelineError(f"source/task already exists: {source_id}")
         if len(manifests) > hard_limit:
             raise GoldPipelineError(f"CVAT task exceeds hard limit {hard_limit}: {len(manifests)}")
         manifest_path = temp_root / "02_roi_crops" / "hand_roi_crops_manifest.jsonl"
@@ -785,60 +823,12 @@ def export_finetune_gold(
             "provenance": provenance,
         }
         atomic_write_json(temp_root / "task_descriptor.json", task_descriptor)
+        task_root.parent.mkdir(parents=True, exist_ok=True)
         os.replace(temp_root, task_root)
     except Exception:
         shutil.rmtree(temp_root, ignore_errors=True)
         raise
     return task_descriptor
-
-
-def seed_finetune_gold(
-    config_path: Path, *, base_finetune_id: str, finetune_id: str
-) -> Dict[str, Any]:
-    """Seed a new immutable finetune workspace from authenticated historical Gold."""
-
-    config_path = Path(config_path).resolve()
-    cfg = load_yaml_config(config_path)
-    workspace = _workspace(cfg, config_path)
-    if workspace.name != finetune_id:
-        raise GoldPipelineError(
-            f"workspace/HAND_FINETUNE_ID mismatch: {workspace.name!r} != {finetune_id!r}"
-        )
-    if not base_finetune_id or base_finetune_id == finetune_id:
-        raise GoldPipelineError("base_finetune_id must identify a different workspace")
-    if workspace.exists():
-        raise GoldPipelineError(f"seed target workspace already exists: {workspace}")
-    base_workspace = _assert_directory(workspace.parent / base_finetune_id, "base finetune workspace")
-    base_gold = _assert_directory(base_workspace / "sources" / "gold", "base Gold sources")
-    temp = Path(tempfile.mkdtemp(prefix=f".{_safe_name(finetune_id)}.", dir=workspace.parent))
-    try:
-        files, bytes_total = _link_tree(base_gold, temp / "sources" / "gold")
-        descriptors = sorted((temp / "sources" / "gold").glob("*/finetune_source.json"))
-        if not descriptors:
-            raise GoldPipelineError("base workspace contains no Gold source descriptors")
-        source_ids = []
-        for descriptor_path in descriptors:
-            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
-            _validate_source_descriptor(descriptor_path.parent, descriptor)
-            source_ids.append(str(descriptor["source_id"]))
-        report = {
-            "schema_version": "finetune_gold_seed_v1",
-            "status": "ok",
-            "base_finetune_id": base_finetune_id,
-            "finetune_id": finetune_id,
-            "source_ids": source_ids,
-            "source_count": len(source_ids),
-            "file_count": files,
-            "logical_bytes": bytes_total,
-            "storage_method": "hardlink_with_copy_fallback",
-            "created_at": _utc_now(),
-        }
-        atomic_write_json(temp / "qc" / "seed_finetune_gold_report.json", report)
-        os.replace(temp, workspace)
-    except Exception:
-        shutil.rmtree(temp, ignore_errors=True)
-        raise
-    return report
 
 
 def _validate_task_artifacts(task_root: Path, descriptor: Mapping[str, Any]) -> None:
@@ -948,13 +938,19 @@ def _source_descriptor(
 def import_finetune_gold(config_path: Path, *, source_id: str, dry_run: bool = False) -> Dict[str, Any]:
     config_path = Path(config_path).resolve()
     cfg = load_yaml_config(config_path)
-    workspace = _workspace(cfg, config_path)
-    task_root = workspace / "cvat" / source_id
+    repository = _gold_repository(cfg, config_path)
+    batch_root = _find_batch(repository, source_id)
+    task_root = batch_root / "task"
     descriptor_path = _safe_relative_file(task_root, "task_descriptor.json", "task descriptor")
     with descriptor_path.open("r", encoding="utf-8") as handle:
         task = json.load(handle)
     if task.get("schema_version") != "finetune_gold_task_v1" or task.get("source_id") != source_id:
         raise GoldPipelineError("task descriptor identity/schema mismatch")
+    expected_batch = _batch_root(repository, str(task.get("source_kind")), source_id)
+    if batch_root != expected_batch:
+        raise GoldPipelineError(
+            f"Gold task is stored in the wrong domain: {batch_root.parent.name}"
+        )
     _validate_task_artifacts(task_root, task)
     reviewed_xml = _safe_relative_file(
         task_root, task.get("reviewed_xml", "reviewed.xml"), "reviewed XML"
@@ -1006,7 +1002,7 @@ def import_finetune_gold(config_path: Path, *, source_id: str, dry_run: bool = F
             "reviewed_xml_sha256": sha256_file(reviewed_xml),
         }
 
-    source_root = workspace / "sources" / "gold" / source_id
+    source_root = batch_root / "published"
     if source_root.exists():
         raise GoldPipelineError(f"published source already exists: {source_root}")
     source_root.parent.mkdir(parents=True, exist_ok=True)
@@ -1074,14 +1070,15 @@ def import_all_finetune_gold(config_path: Path) -> Dict[str, Any]:
     config_path = Path(config_path).resolve()
     cfg = load_yaml_config(config_path)
     workspace = _workspace(cfg, config_path)
-    task_descriptors = sorted((workspace / "cvat").glob("*/task_descriptor.json"))
+    repository = _gold_repository(cfg, config_path)
+    task_descriptors = sorted(repository.glob("*/*/task/task_descriptor.json"), key=str)
     if not task_descriptors:
-        raise GoldPipelineError(f"no finetune Gold tasks found under {workspace / 'cvat'}")
+        raise GoldPipelineError(f"no finetune Gold tasks found under {repository}")
     pending: List[str] = []
     already_published: List[str] = []
     for path in task_descriptors:
-        source_id = path.parent.name
-        if (workspace / "sources" / "gold" / source_id / "finetune_source.json").is_file():
+        source_id = path.parent.parent.name
+        if (path.parent.parent / "published" / "finetune_source.json").is_file():
             already_published.append(source_id)
         else:
             pending.append(source_id)
@@ -1100,14 +1097,16 @@ def import_all_finetune_gold(config_path: Path) -> Dict[str, Any]:
                 "source_kind": item["source_kind"],
                 "counts": item["counts"],
                 "descriptor_sha256": sha256_file(
-                    workspace / "sources" / "gold" / item["source_id"] / "finetune_source.json"
+                    _find_batch(repository, item["source_id"])
+                    / "published"
+                    / "finetune_source.json"
                 ),
             }
             for item in published
         ],
         "already_published": already_published,
     }
-    atomic_write_json(workspace / "cvat" / "batch_import_report.json", report)
+    atomic_write_json(workspace / "qc" / "gold_batch_import_report.json", report)
     return report
 
 
@@ -1227,7 +1226,7 @@ def prepare_dragon_gold(
 ) -> Dict[str, Any]:
     config_path = Path(config_path).resolve()
     cfg = load_yaml_config(config_path)
-    workspace = _workspace(cfg, config_path)
+    repository = _gold_repository(cfg, config_path, create=True)
     dragon = cfg.get("dragon") or {}
     raw_root = _assert_directory(Path(raw_root).resolve(), "Dragon raw root")
     source_id = str(source_id)
@@ -1239,7 +1238,13 @@ def prepare_dragon_gold(
     ):
         raise GoldPipelineError(f"invalid Dragon batch/source ID: {source_id!r}")
     dataset_id = source_id
-    source_root = workspace / "sources" / "gold" / source_id
+    batch_root = _batch_root(repository, "external_gold", source_id)
+    canonical_raw_root = batch_root / "source"
+    if raw_root != _assert_directory(canonical_raw_root, "canonical Dragon source"):
+        raise GoldPipelineError(f"Dragon raw source must be archived at {canonical_raw_root}")
+    if any(path != batch_root for path in repository.glob(f"*/{source_id}")):
+        raise GoldPipelineError(f"Dragon source_id already exists in another Gold domain: {source_id}")
+    source_root = batch_root / "published"
     if source_root.exists():
         raise GoldPipelineError(f"Dragon source already exists: {source_root}")
     hand_path = _safe_relative_file(
@@ -1459,8 +1464,8 @@ def prepare_dragon_gold(
 def _validate_source_descriptor(source_root: Path, descriptor: Mapping[str, Any]) -> None:
     if descriptor.get("schema_version") != "finetune_source_v1":
         raise GoldPipelineError(f"invalid source descriptor schema: {source_root}")
-    if str(descriptor.get("source_id", "")) != source_root.name:
-        raise GoldPipelineError(f"source_id does not match source directory: {source_root}")
+    if not str(descriptor.get("source_id", "")):
+        raise GoldPipelineError(f"source descriptor has no source_id: {source_root}")
     if descriptor.get("source_kind") not in ALLOWED_SOURCE_KINDS:
         raise GoldPipelineError(f"invalid source_kind: {descriptor.get('source_kind')}")
     if descriptor.get("supervision_tier") != "gold" or descriptor.get("enabled_stages") != ["finetune"]:
@@ -1591,16 +1596,10 @@ def finalize_gold_aggregate(config_path: Path) -> Dict[str, Any]:
         source_value if source_value.is_absolute() else _repo_root(config_path) / source_value,
         "Gold source discovery root",
     )
+    if str(discovery.get("layout", "")) != "domain_batch_published_v1":
+        raise GoldPipelineError("source_discovery.layout must be domain_batch_published_v1")
     descriptor_name = str(discovery.get("descriptor_name", "finetune_source.json"))
-    descriptor_paths: List[Path] = []
-    if source_root.is_dir():
-        for candidate in sorted(source_root.iterdir(), key=lambda path: path.name):
-            if candidate.name.startswith("."):
-                continue
-            if candidate.is_symlink() or not candidate.is_dir():
-                raise GoldPipelineError(f"invalid entry in Gold source discovery root: {candidate}")
-            descriptor = _safe_relative_file(candidate, descriptor_name, "Gold source descriptor")
-            descriptor_paths.append(descriptor)
+    descriptor_paths = _published_descriptors(source_root, descriptor_name)
     if not descriptor_paths:
         raise GoldPipelineError(f"no Gold source descriptors found under {source_root}")
     identity_cfg = cfg.get("cross_source_identity") or {}
@@ -1632,15 +1631,18 @@ def finalize_gold_aggregate(config_path: Path) -> Dict[str, Any]:
         _validate_source_descriptor(root, descriptor)
         source_id = str(descriptor["source_id"])
         dataset_id = str(descriptor["dataset_id"])
+        batch_root = root.parent
+        expected_batch = _batch_root(source_root, str(descriptor["source_kind"]), source_id)
+        if batch_root != expected_batch or root.name != "published":
+            raise GoldPipelineError(
+                f"Gold descriptor is outside its canonical domain/batch: {descriptor_path}"
+            )
         if source_id in seen_source_ids or dataset_id in seen_dataset_ids:
             raise GoldPipelineError(f"duplicate source_id/dataset_id: {source_id}/{dataset_id}")
         seen_source_ids.add(source_id)
         seen_dataset_ids.add(dataset_id)
         descriptor_sha = sha256_file(descriptor_path)
-        try:
-            relative_descriptor = descriptor_path.resolve().relative_to(workspace.resolve())
-        except ValueError as exc:
-            raise GoldPipelineError(f"descriptor outside finetune workspace: {descriptor_path}") from exc
+        relative_descriptor = descriptor_path.resolve().relative_to(source_root.resolve())
         source_descriptors.append(
             {"source_id": source_id, "path": str(relative_descriptor).replace("\\", "/"), "sha256": descriptor_sha}
         )
@@ -1829,6 +1831,7 @@ def finalize_gold_aggregate(config_path: Path) -> Dict[str, Any]:
             "schema_version": "hmlf_gold_aggregate_v1",
             "finetune_id": os.environ.get("HAND_FINETUNE_ID"),
             "created_at": _utc_now(),
+            "gold_repository_root": str(source_root.resolve()),
             "source_descriptors": source_descriptors,
             "artifacts": artifacts,
             "counts": {"catalog": len(catalog), "included": len(included), "excluded": len(excluded)},

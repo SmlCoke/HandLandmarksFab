@@ -2,8 +2,9 @@ schema_version: hmlf_gold_finalize_v1
 workspace_root: ${HAND_WORK_ROOT}/finetune/${HAND_FINETUNE_ID}
 
 source_discovery:
-  root: ${HAND_WORK_ROOT}/finetune/${HAND_FINETUNE_ID}/sources/gold
+  root: ${HAND_GOLD_ROOT}
   descriptor_name: finetune_source.json
+  layout: domain_batch_published_v1
 
 cross_source_identity:
   keys: [parent_global_crop_id, global_crop_id, image_sha256, normalized_pixel_sha256]
