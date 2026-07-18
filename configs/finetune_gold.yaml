@@ -7,7 +7,6 @@ hand_roi: {output_width: 256, output_height: 256, scale_x: 1.8, scale_y: 1.8, sh
 
 cvat:
   max_task_items: 800
-  native_max_items: 300
   segment_size: 100
   label_name: hand_landmarks
   no_hand_label_name: no_hand

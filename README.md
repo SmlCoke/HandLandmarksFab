@@ -9,6 +9,7 @@ HLMF 2.0 是一套新的、精简的操作契约，不兼容旧版多套 Train/V
 - [完整操作流程](docs/annotating_system/HLMF_annotating_workflow.md)：首次使用、理解数据契约和排错时阅读。
 - [Quick Start](docs/annotating_system/HLMF_quick_start.md)：熟悉流程后直接照着运行。
 - [目录与接口](docs/annotating_system/HLMF_data_contract.md)：查询输入、输出、Gold 和 HLML 交接格式。
+- [当前下一步计划](docs/annotating_system/HLMF_next_step_plan.md)：当前批次的路径、数量、人工分工和执行顺序。
 
 ## 两个根目录
 
@@ -39,4 +40,4 @@ make compile
 make test
 ```
 
-完整的 pretrain 聚合、Dragon Gold、多轮 finetune Gold 和 800 张团队标注流程见完整操作文档。
+完整的 pretrain 聚合、Dragon 多批次 Gold 和多轮 finetune Gold 流程见完整操作文档；当前一次性任务目标只记录在下一步计划中。

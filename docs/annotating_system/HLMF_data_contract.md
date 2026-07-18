@@ -57,7 +57,9 @@ cvat/<source_id>/
 └── qc/cvat_job_plan.json           # 每个 job 的范围、数量和 SHA
 ```
 
-单个或多任务合计人工预算由团队冻结为 600 或 800；系统硬上限是 800。`cvat_job_plan.json` 默认按每 100 张规划 job。
+每轮人工预算和每个来源的限额由执行计划冻结，并在命令中显式传入；系统按配置的安全上限拒绝超量任务。`cvat_job_plan.json` 按配置的 segment size 规划 job。
+
+Dragon 外部 Gold 同样使用不可变 `source_id`。`configs/dragon_gold.yaml` 只描述输入格式；每次运行通过 `DRAGON_SOURCE_ROOT` 和 `DRAGON_BATCH_ID` 指定一批，因此多批 Dragon 可以同时存在并参与最终聚合。
 
 ## 4. 人工标签决策
 

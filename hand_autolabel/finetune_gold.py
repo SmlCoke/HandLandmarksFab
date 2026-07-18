@@ -735,11 +735,6 @@ def export_finetune_gold(
                 raise GoldPipelineError("native_existing requires raw_source_root")
             if max_items is None:
                 raise GoldPipelineError("native_existing requires max_items")
-            native_limit = int(cvat_cfg.get("native_max_items", 300))
-            if native_limit <= 0 or native_limit > hard_limit or max_items > native_limit:
-                raise GoldPipelineError(
-                    f"native_existing max_items exceeds configured limit {native_limit}: {max_items}"
-                )
             manifests, drafts, provenance = _materialize_rows_from_native(
                 raw_source_root, source_id, dataset_id, temp_root, max_items
             )
@@ -1183,14 +1178,10 @@ def match_dragon_hands_to_palms(hands: Sequence[Sequence[float]], palms: Sequenc
     return matches
 
 
-def _load_dragon_image(path: Path, *, expected_orientation: int, logical_size: tuple[int, int]) -> tuple[np.ndarray, int]:
+def _load_dragon_image(path: Path) -> tuple[np.ndarray, int]:
     with Image.open(path) as image:
         orientation = int(image.getexif().get(274, 1))
-        if orientation != expected_orientation:
-            raise GoldPipelineError(f"Dragon image {path.name}: EXIF orientation {orientation}, expected {expected_orientation}")
         logical = ImageOps.exif_transpose(image).convert("RGB")
-        if logical.size != logical_size:
-            raise GoldPipelineError(f"Dragon image {path.name}: logical size {logical.size}, expected {logical_size}")
         array = np.asarray(logical)
     if array.ndim != 3 or array.shape[2] != 3:
         raise GoldPipelineError(f"Dragon image {path.name}: RGB image required")
@@ -1231,18 +1222,23 @@ def _draw_dragon_overlay(path: Path, crop: np.ndarray, points: Sequence[Mapping[
         raise GoldPipelineError(f"failed to write overlay: {path}")
 
 
-def prepare_dragon_gold(config_path: Path) -> Dict[str, Any]:
+def prepare_dragon_gold(
+    config_path: Path, *, raw_root: Path, source_id: str
+) -> Dict[str, Any]:
     config_path = Path(config_path).resolve()
     cfg = load_yaml_config(config_path)
     workspace = _workspace(cfg, config_path)
     dragon = cfg.get("dragon") or {}
-    raw_value = Path(str(dragon["raw_root"]))
-    raw_root = _assert_directory(
-        raw_value if raw_value.is_absolute() else _repo_root(config_path) / raw_value,
-        "Dragon raw root",
-    )
-    source_id = str(dragon["source_id"])
-    dataset_id = str(dragon.get("dataset_id", source_id))
+    raw_root = _assert_directory(Path(raw_root).resolve(), "Dragon raw root")
+    source_id = str(source_id)
+    if (
+        not source_id
+        or source_id in {".", ".."}
+        or Path(source_id).name != source_id
+        or _safe_name(source_id) != source_id
+    ):
+        raise GoldPipelineError(f"invalid Dragon batch/source ID: {source_id!r}")
+    dataset_id = source_id
     source_root = workspace / "sources" / "gold" / source_id
     if source_root.exists():
         raise GoldPipelineError(f"Dragon source already exists: {source_root}")
@@ -1253,11 +1249,7 @@ def prepare_dragon_gold(config_path: Path) -> Dict[str, Any]:
         raw_root, dragon.get("palm_annotations", "annotations_palm.txt"), "Dragon palm annotations"
     )
     readme_path = _safe_relative_file(raw_root, dragon.get("readme", "README.md"), "Dragon README")
-    expected_sha = dragon.get("expected_sha256") or {}
     actual_sha = {"annotations_hand": sha256_file(hand_path), "annotations_palm": sha256_file(palm_path), "readme": sha256_file(readme_path)}
-    for name, expected in expected_sha.items():
-        if name in actual_sha and str(expected).lower() != actual_sha[name].lower():
-            raise GoldPipelineError(f"Dragon input SHA mismatch: {name}")
     hands = parse_dragon_hand_annotations(hand_path)
     palms = parse_dragon_palm_annotations(palm_path)
     if set(hands) != set(palms):
@@ -1279,7 +1271,6 @@ def prepare_dragon_gold(config_path: Path) -> Dict[str, Any]:
     rejects: List[Dict[str, Any]] = []
     source_image_paths: Dict[str, Path] = {}
     overlay_candidates: List[tuple[str, Path, List[Dict[str, Any]]]] = []
-    logical_width, logical_height = [int(value) for value in dragon.get("logical_size", [1280, 720])]
     hand_roi = cfg.get("hand_roi") or {}
     try:
         for image_name in hands:
@@ -1296,11 +1287,8 @@ def prepare_dragon_gold(config_path: Path) -> Dict[str, Any]:
                 reason = "HAND_COUNT_EXCEEDS_PALM_COUNT" if len(image_hands) > len(image_palms) else "HAND_PALM_MATCH_AMBIGUOUS"
                 rejects.append({"image": image_name, "reason": reason, "hands": len(image_hands), "palms": len(image_palms)})
                 continue
-            gray, orientation = _load_dragon_image(
-                image_path,
-                expected_orientation=int(dragon.get("expected_exif_orientation", 6)),
-                logical_size=(logical_width, logical_height),
-            )
+            gray, orientation = _load_dragon_image(image_path)
+            logical_height, logical_width = gray.shape
             source_image_paths[image_name] = image_path
             for hand_index, palm_index in enumerate(matches):
                 palm = image_palms[palm_index]
@@ -1390,7 +1378,6 @@ def prepare_dragon_gold(config_path: Path) -> Dict[str, Any]:
                 if not outside:
                     overlay_candidates.append((crop_id, crop_path, crop_px))
 
-        expected_counts = dragon.get("expected_counts") or {}
         observed = {
             "images": len(image_files),
             "annotation_rows": len(hands),
@@ -1402,9 +1389,6 @@ def prepare_dragon_gold(config_path: Path) -> Dict[str, Any]:
             "included": sum(not row["ignore_for_training"] for row in labels),
             "ignored": sum(bool(row["ignore_for_training"]) for row in labels),
         }
-        for key, expected in expected_counts.items():
-            if key in observed and int(expected) != int(observed[key]):
-                raise GoldPipelineError(f"Dragon count mismatch {key}: {observed[key]} != {expected}")
         manifests.sort(key=lambda row: row["crop_id"])
         labels.sort(key=lambda row: row["crop_id"])
         ignored = [row for row in labels if row["ignore_for_training"]]
@@ -1431,6 +1415,8 @@ def prepare_dragon_gold(config_path: Path) -> Dict[str, Any]:
             "schema_version": "dragon_gold_import_v1",
             "status": "ok",
             "source_id": source_id,
+            "dataset_id": dataset_id,
+            "raw_source_root": str(raw_root),
             "counts": observed,
             "reject_reasons": dict(Counter(row["reason"] for row in rejects)),
             "input_sha256": actual_sha,

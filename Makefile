@@ -8,9 +8,10 @@ HAND_DATASET_ROOT ?= /root/autodl-tmp/DatesetFab
 HLMF_SOURCE_ROOT ?= data
 HAND_FINETUNE_ID ?= v3-finetune-r1
 HAND_PRETRAIN_ID ?= v3-pretrain-r1
-DRAGON_RAW_ROOT ?= $(HAND_DATASET_ROOT)/HandViolenceEnhanced0716/dragon_gold_0716_v1
+DRAGON_SOURCE_ROOT ?=
+DRAGON_BATCH_ID ?=
 export HAND_WORK_ROOT HAND_DATASET_ROOT HLMF_SOURCE_ROOT
-export HAND_FINETUNE_ID HAND_PRETRAIN_ID DRAGON_RAW_ROOT
+export HAND_FINETUNE_ID HAND_PRETRAIN_ID
 
 AUTOLABEL_CONFIG ?= configs/autolabel.yaml
 FINALIZE_TRAIN_CONFIG ?= configs/finalize_train.yaml
@@ -41,7 +42,7 @@ help:
 	@echo   make validate_images palm_detection build_roi run_mediapipe
 	@echo   make export_cvat import_cvat visualize
 	@echo   make finalize_train_pretrain build_pretrain_source_registry
-	@echo   make prepare_dragon_gold
+	@echo   make prepare_dragon_gold DRAGON_SOURCE_ROOT=... DRAGON_BATCH_ID=...
 	@echo   make seed_finetune_gold BASE_FINETUNE_ID=... HAND_FINETUNE_ID=...
 	@echo   make export_finetune_gold FINETUNE_SOURCE_ID=... FINETUNE_SOURCE_MODE=...
 	@echo   make import_finetune_gold FINETUNE_SOURCE_ID=...
@@ -86,7 +87,9 @@ finalize_test:
 	$(PYTHON) scripts/07B_finalize_evaluation_labels.py --config $(FINALIZE_TEST_CONFIG) --split test
 
 prepare_dragon_gold:
-	$(PYTHON) scripts/08_finetune_gold.py prepare-dragon --config $(DRAGON_GOLD_CONFIG)
+	$(if $(strip $(DRAGON_SOURCE_ROOT)),,$(error DRAGON_SOURCE_ROOT is required))
+	$(if $(strip $(DRAGON_BATCH_ID)),,$(error DRAGON_BATCH_ID is required))
+	$(PYTHON) scripts/08_finetune_gold.py prepare-dragon --config $(DRAGON_GOLD_CONFIG) --raw-source-root "$(DRAGON_SOURCE_ROOT)" --batch-id "$(DRAGON_BATCH_ID)"
 
 build_pretrain_source_registry:
 	$(PYTHON) scripts/08_finetune_gold.py source-registry --config $(FINALIZE_TRAIN_CONFIG)

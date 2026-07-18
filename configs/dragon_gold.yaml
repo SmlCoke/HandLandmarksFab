@@ -10,27 +10,8 @@ hand_roi:
   shift_y: -0.1
 
 dragon:
-  raw_root: ${DRAGON_RAW_ROOT}
-  source_id: dragon_gold_0716_v1
-  dataset_id: dragon_gold_0716_v1
   images_dir: images
   hand_annotations: annotations_hand.txt
   palm_annotations: annotations_palm.txt
   readme: README.md
-  logical_size: [1280, 720]
-  expected_exif_orientation: 6
   overlay_count: 64
-  expected_sha256:
-    annotations_hand: A5E6DF1A6D77AB82017E0A01693F82C7A531706920073EF0450C640A615E223A
-    annotations_palm: C88DB227B3F1EB4E9D2EC40AD3EFCAEC670528270545E6B2E3A8DF2A5BA4A661
-    readme: 9CDB8F3C94D8040E0510914C8F2489166820ACA9DA57701AD017E100A68D0D59
-  expected_counts:
-    images: 8593
-    annotation_rows: 4500
-    unannotated_images: 4093
-    p0_images: 850
-    raw_hands: 5311
-    matched_images: 3565
-    matched_rois: 5191
-    included: 5189
-    ignored: 2

@@ -30,6 +30,7 @@ from hand_autolabel.finetune_gold import (
     match_dragon_hands_to_palms,
     parse_dragon_hand_annotations,
     parse_dragon_palm_annotations,
+    prepare_dragon_gold,
     seed_finetune_gold,
 )
 from hand_autolabel.image_io import write_image
@@ -61,11 +62,65 @@ class DragonContractTests(unittest.TestCase):
             exif = image.getexif()
             exif[274] = 6
             image.save(root / "a.jpg", exif=exif)
-            logical, orientation = _load_dragon_image(
-                root / "a.jpg", expected_orientation=6, logical_size=(1280, 720)
-            )
+            logical, orientation = _load_dragon_image(root / "a.jpg")
             self.assertEqual(logical.shape, (720, 1280))
             self.assertEqual(orientation, 6)
+
+    def test_each_dragon_batch_publishes_as_an_independent_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            workspace = root / "workspace"
+            config = root / "dragon.yaml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "schema_version: finetune_gold_v1",
+                        f"workspace_root: {workspace.as_posix()}",
+                        "hand_roi:",
+                        "  output_width: 256",
+                        "  output_height: 256",
+                        "  scale_x: 1.8",
+                        "  scale_y: 1.8",
+                        "  shift_x: 0.0",
+                        "  shift_y: -0.1",
+                        "dragon:",
+                        "  images_dir: images",
+                        "  hand_annotations: annotations_hand.txt",
+                        "  palm_annotations: annotations_palm.txt",
+                        "  readme: README.md",
+                        "  overlay_count: 0",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            points = []
+            for index in range(21):
+                points.extend((0.42 + (index % 5) * 0.035, 0.35 + (index // 5) * 0.07))
+            hand_row = "a.png 1 " + " ".join(str(value) for value in points) + "\n"
+            palm_row = "frame: a.png 0.2 0.2 0.8 0.8 0.5 0.65 0.5 0.4\n"
+            for name, value in (("dragon_batch_a", 70), ("dragon_batch_b", 110)):
+                batch = root / name
+                (batch / "images").mkdir(parents=True)
+                Image.fromarray(
+                    np.full((240, 320, 3), value, dtype=np.uint8), mode="RGB"
+                ).save(batch / "images" / "a.png")
+                (batch / "annotations_hand.txt").write_text(hand_row, encoding="utf-8")
+                (batch / "annotations_palm.txt").write_text(palm_row, encoding="utf-8")
+                (batch / "README.md").write_text(f"{name}\n", encoding="utf-8")
+                descriptor = prepare_dragon_gold(config, raw_root=batch, source_id=name)
+                self.assertEqual(name, descriptor["source_id"])
+                self.assertEqual(name, descriptor["dataset_id"])
+                self.assertTrue((workspace / "sources" / "gold" / name).is_dir())
+
+            with self.assertRaisesRegex(GoldPipelineError, "already exists"):
+                prepare_dragon_gold(
+                    config, raw_root=root / "dragon_batch_a", source_id="dragon_batch_a"
+                )
+            with self.assertRaisesRegex(GoldPipelineError, "invalid Dragon batch"):
+                prepare_dragon_gold(
+                    config, raw_root=root / "dragon_batch_a", source_id="../bad"
+                )
 
 
 class FinetuneGoldIntegrationTests(unittest.TestCase):

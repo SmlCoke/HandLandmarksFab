@@ -28,6 +28,8 @@ def parse_args() -> argparse.Namespace:
 
     dragon = subparsers.add_parser("prepare-dragon", help="Import the legacy Dragon external-Gold dataset.")
     dragon.add_argument("--config", default="configs/dragon_gold.yaml")
+    dragon.add_argument("--raw-source-root", required=True)
+    dragon.add_argument("--batch-id", required=True)
 
     registry = subparsers.add_parser("source-registry", help="Build the authenticated pretrain source lookup for HLML.")
     registry.add_argument("--config", default="configs/finalize_train.yaml")
@@ -61,7 +63,11 @@ def main() -> None:
     config_path = resolve_path(ROOT, args.config)
     try:
         if args.command == "prepare-dragon":
-            result = prepare_dragon_gold(config_path)
+            result = prepare_dragon_gold(
+                config_path,
+                raw_root=Path(args.raw_source_root).resolve(),
+                source_id=args.batch_id,
+            )
         elif args.command == "source-registry":
             result = build_pretrain_source_registry(config_path)
         elif args.command == "export":
