@@ -55,6 +55,174 @@ sources:
     pseudo_labels: dragon/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
     crop_images_dir: dragon/02_roi_crops/images
 
+  # Peak domain: 握拳增强
+  - dataset_id: peak-0719-enhance-fist
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/enhance-fist
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # Peak domain: 平掌增强
+  - dataset_id: peak-0719-enhance-flat
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/enhance-flat
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # Peak domain: “数字 1” 手势增强
+  - dataset_id: peak-0719-enhance-one
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/enhance-one
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # Peak domain: 随机增强
+  - dataset_id: peak-0719-enhance-random
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/enhance-random
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # Peak domain: 随机增强（黑暗环境）
+  - dataset_id: peak-0719-enhance-random-dark
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/enhance-random-dark
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # Peak domain: 手语动作：去
+  - dataset_id: peak-0719-sl-go
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/sl-go
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+  
+  # Peak domain: 手语动作：长
+  - dataset_id: peak-0719-sl-long
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/sl-long
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+  
+  # Peak domain: 手语动作：厚
+  - dataset_id: peak-0719-sl-thick
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/sl-thick
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # Peak domain: 手语动作：雨
+  - dataset_id: peak-0719-sl-rain
+    contributor: Peak
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/peak/sl-rain
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # dragon domain: 握拳增强
+  - dataset_id: dragon-0719-enhance-fist
+    contributor: dragon
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/dragon/enhance-fist
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # dragon domain: 平掌增强
+  - dataset_id: dragon-0719-enhance-flat
+    contributor: dragon
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/dragon/enhance-flat
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # dragon domain: “数字 1” 手势增强
+  - dataset_id: dragon-0719-enhance-one
+    contributor: dragon
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/dragon/enhance-one
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # dragon domain: 随机增强
+  - dataset_id: dragon-0719-enhance-random
+    contributor: dragon
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/dragon/enhance-random
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # dragon domain: 手语动作：去
+  - dataset_id: dragon-0719-sl-go
+    contributor: dragon
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/dragon/sl-go
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+  
+  # dragon domain: 手语动作：厚
+  - dataset_id: dragon-0719-sl-thick
+    contributor: dragon
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/dragon/sl-thick
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+  
+  # dragon domain: 手语动作：雨
+  - dataset_id: dragon-0719-sl-rain
+    contributor: dragon
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/dragon/sl-rain
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # soar domain: 0719 data 2
+  - dataset_id: soar-0719-data2
+    contributor: soar
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/soar/data2
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # soar domain: 0719 data 3
+  - dataset_id: soar-0719-data3
+    contributor: soar
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/soar/data3
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # soar domain: 0719 data 4
+  - dataset_id: soar-0719-data4
+    contributor: soar
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/soar/data4
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # soar domain: 0719 data 5
+  - dataset_id: soar-0719-data5
+    contributor: soar
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/soar/data5
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+
+  # soar domain: 0719 data 6
+  - dataset_id: soar-0719-data6
+    contributor: soar
+    root: ${HAND_DATASET_ROOT}/PretrainSource/HandViolencePro0719/soar/data6
+    manifest: 02_roi_crops/hand_roi_crops_manifest.jsonl
+    pseudo_labels: 02_roi_crops/hand_landmarks_autolabel_draft.jsonl
+    crop_images_dir: 02_roi_crops/images
+    
 validation:
   check_crop_images: true
 
