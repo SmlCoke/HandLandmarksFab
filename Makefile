@@ -1,120 +1,91 @@
-# HLMF 2.0: one source pipeline, plus dataset finalization and Gold workflows.
-
--include Makefile.local
+.DEFAULT_GOAL := help
 
 PYTHON ?= python
-HAND_WORK_ROOT ?= /root/autodl-tmp/TrainFab/HLML-3.0
 HAND_DATASET_ROOT ?= /root/autodl-tmp/DatesetFab
-HAND_GOLD_ROOT ?= $(HAND_DATASET_ROOT)/GoldSource
-HLMF_SOURCE_ROOT ?= data
-HAND_FINETUNE_ID ?= v3-finetune-r1
-HAND_PRETRAIN_ID ?= v3-pretrain-r1
-DRAGON_SOURCE_ROOT ?=
-DRAGON_BATCH_ID ?=
-export HAND_WORK_ROOT HAND_DATASET_ROOT HAND_GOLD_ROOT HLMF_SOURCE_ROOT
-export HAND_FINETUNE_ID HAND_PRETRAIN_ID
-
+DATASET_SCOPE ?= pretrain
+DATASET_ID ?=
+CAPTURE_SOURCE_ID ?=
+PROPOSAL_VARIANT ?= p01
 AUTOLABEL_CONFIG ?= configs/autolabel.yaml
-AUTOLABEL_ROLE ?= train
-AUTOLABEL_OVERRIDES ?= {}
-export AUTOLABEL_ROLE AUTOLABEL_OVERRIDES
-FINALIZE_TRAIN_CONFIG ?= configs/finalize_train.yaml
-FINALIZE_VAL_CONFIG ?= configs/finalize_val.yaml
-FINALIZE_TEST_CONFIG ?= configs/finalize_test.yaml
-FINETUNE_GOLD_CONFIG ?= configs/finetune_gold.yaml
-FINALIZE_FINETUNE_CONFIG ?= configs/finalize_finetune.yaml
-DRAGON_GOLD_CONFIG ?= configs/dragon_gold.yaml
+REVIEW_CONFIG ?= configs/review.yaml
+DATASETS_CONFIG ?= configs/datasets.yaml
 
-FINETUNE_SOURCE_ID ?=
-FINETUNE_SOURCE_MODE ?=
-FINETUNE_RAW_SOURCE_ROOT ?=
-FINETUNE_SELECTION_REQUEST ?=
-FINETUNE_MAX_ITEMS ?=
-VISUALIZE_MEDIAPIPE_ROIS ?= 0
-VISUALIZE_FINALIZED_TRAIN_ROIS ?= 0
+NEGATIVE_DATASET_ID ?=
+NEGATIVE_CANDIDATE_LABELS ?=
+SELECTION_ID ?=
+MINING_REQUEST ?=
 
-.DEFAULT_GOAL := help
-.PHONY: help paths autolabel validate_images palm_detection build_roi run_mediapipe \
-	export_cvat import_cvat visualize finalize_train_pretrain finalize_val finalize_test \
-	prepare_dragon_gold build_pretrain_source_registry \
-	export_finetune_gold import_finetune_gold finalize_train_finetune compile test
+CLI = $(PYTHON) -B scripts/hlmf.py --autolabel-config "$(AUTOLABEL_CONFIG)" --review-config "$(REVIEW_CONFIG)" --datasets-config "$(DATASETS_CONFIG)"
+SOURCE_ARGS = --dataset-root "$(HAND_DATASET_ROOT)" --scope "$(DATASET_SCOPE)" --dataset-id "$(DATASET_ID)" --capture-source-id "$(CAPTURE_SOURCE_ID)" --proposal-variant "$(PROPOSAL_VARIANT)"
+
+.PHONY: help paths source-check train-autolabel eval-autolabel hand-cvat-export \
+	hand-cvat-import source-publish negative-review negative-publish hard-review \
+	hard-publish registry-check compile test
 
 help:
-	@echo HLMF 2.0 - one configurable source pipeline
-	@echo   make paths HLMF_SOURCE_ROOT=/path/to/source
-	@echo   make autolabel HLMF_SOURCE_ROOT=... AUTOLABEL_ROLE=train/val/test AUTOLABEL_OVERRIDES='{"palm":{"negative_candidate_threshold":0.2}}'
-	@echo   make validate_images palm_detection build_roi run_mediapipe
-	@echo   make export_cvat import_cvat visualize
-	@echo   make finalize_train_pretrain build_pretrain_source_registry
-	@echo   make prepare_dragon_gold DRAGON_SOURCE_ROOT=... DRAGON_BATCH_ID=...
-	@echo   make export_finetune_gold FINETUNE_SOURCE_ID=... FINETUNE_SOURCE_MODE=...
-	@echo   make import_finetune_gold FINETUNE_SOURCE_ID=...
-	@echo   make finalize_train_finetune
-	@echo   make compile test
+	@echo HLMF 3.0 - Palm proposals to versioned Hand ROI datasets
+	@echo Configs: autolabel.yaml=automatic labels, review.yaml=Hand CVAT, datasets.yaml=publication, cvat_label.json=CVAT schema
+	@echo   make source-check DATASET_SCOPE=pretrain/eval DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=p01
+	@echo   make train-autolabel ...          Validate, Palm, ROI, MediaPipe and publish Train
+	@echo   make eval-autolabel ...           Validate, Palm, ROI and MediaPipe for Val/Test
+	@echo   make hand-cvat-export ...         Export Hand ROI CVAT XML only
+	@echo   make hand-cvat-import ...         Import reviewed Hand ROI XML
+	@echo   make source-publish ...           Publish reviewed Val/Test labels
+	@echo   make negative-review NEGATIVE_DATASET_ID=... NEGATIVE_CANDIDATE_LABELS=/abs/candidates.jsonl
+	@echo   make negative-publish NEGATIVE_DATASET_ID=...
+	@echo   make hard-review SELECTION_ID=... MINING_REQUEST=/abs/request.jsonl
+	@echo   make hard-publish SELECTION_ID=...
+	@echo   make registry-check
+	@echo No command exports, imports or edits Palm annotations; Hand ROIs are always program-generated.
 
 paths:
 	@echo HAND_DATASET_ROOT=$(HAND_DATASET_ROOT)
-	@echo HAND_GOLD_ROOT=$(HAND_GOLD_ROOT)
-	@echo HAND_WORK_ROOT=$(HAND_WORK_ROOT)
-	@echo HLMF_SOURCE_ROOT=$(HLMF_SOURCE_ROOT)
-	@echo HAND_PRETRAIN_ID=$(HAND_PRETRAIN_ID)
-	@echo HAND_FINETUNE_ID=$(HAND_FINETUNE_ID)
-	@echo AUTOLABEL_ROLE=$(AUTOLABEL_ROLE)
-	@echo AUTOLABEL_OVERRIDES=$(AUTOLABEL_OVERRIDES)
+	@echo DATASET_SCOPE=$(DATASET_SCOPE)
+	@echo DATASET_ID=$(DATASET_ID)
+	@echo CAPTURE_SOURCE_ID=$(CAPTURE_SOURCE_ID)
+	@echo PROPOSAL_VARIANT=$(PROPOSAL_VARIANT)
 
-autolabel: validate_images palm_detection build_roi run_mediapipe
+source-check:
+	$(CLI) validate-source $(SOURCE_ARGS)
 
-validate_images:
-	$(PYTHON) scripts/00_validate_images.py --config $(AUTOLABEL_CONFIG)
+train-autolabel:
+	$(CLI) autolabel-train $(SOURCE_ARGS)
 
-palm_detection:
-	$(PYTHON) scripts/01_export_palm_detections.py --config $(AUTOLABEL_CONFIG)
+eval-autolabel:
+	$(CLI) autolabel-eval $(SOURCE_ARGS)
 
-build_roi:
-	$(PYTHON) scripts/02_build_hand_roi_crops.py --config $(AUTOLABEL_CONFIG)
+hand-cvat-export:
+	$(CLI) export-cvat $(SOURCE_ARGS)
 
-run_mediapipe:
-	$(PYTHON) scripts/03_run_mediapipe_on_rois.py --config $(AUTOLABEL_CONFIG) --visualize-rois $(VISUALIZE_MEDIAPIPE_ROIS)
+hand-cvat-import:
+	$(CLI) import-cvat $(SOURCE_ARGS)
 
-export_cvat:
-	$(PYTHON) scripts/04_export_cvat_xml.py --config $(AUTOLABEL_CONFIG)
+source-publish:
+	$(CLI) publish-source $(SOURCE_ARGS)
 
-import_cvat:
-	$(PYTHON) scripts/05_import_cvat_xml.py --config $(AUTOLABEL_CONFIG)
+negative-review:
+	$(if $(strip $(NEGATIVE_DATASET_ID)),,$(error NEGATIVE_DATASET_ID is required))
+	$(if $(strip $(NEGATIVE_CANDIDATE_LABELS)),,$(error NEGATIVE_CANDIDATE_LABELS is required))
+	$(CLI) prepare-negative-review --dataset-root "$(HAND_DATASET_ROOT)" --negative-dataset-id "$(NEGATIVE_DATASET_ID)" --candidate-labels "$(NEGATIVE_CANDIDATE_LABELS)"
 
-visualize:
-	$(PYTHON) scripts/06_visualize_autolabels.py --config $(AUTOLABEL_CONFIG)
+negative-publish:
+	$(if $(strip $(NEGATIVE_DATASET_ID)),,$(error NEGATIVE_DATASET_ID is required))
+	$(CLI) publish-negative-review --dataset-root "$(HAND_DATASET_ROOT)" --negative-dataset-id "$(NEGATIVE_DATASET_ID)"
 
-finalize_train_pretrain:
-	$(PYTHON) scripts/07A_finalize_training_labels.py --config $(FINALIZE_TRAIN_CONFIG) --stage pretrain --visualize-rois $(VISUALIZE_FINALIZED_TRAIN_ROIS)
+hard-review:
+	$(if $(strip $(SELECTION_ID)),,$(error SELECTION_ID is required))
+	$(if $(strip $(MINING_REQUEST)),,$(error MINING_REQUEST is required))
+	$(CLI) prepare-selection-review --dataset-root "$(HAND_DATASET_ROOT)" --selection-id "$(SELECTION_ID)" --request "$(MINING_REQUEST)"
 
-finalize_val:
-	$(PYTHON) scripts/07B_finalize_evaluation_labels.py --config $(FINALIZE_VAL_CONFIG) --split val
+hard-publish:
+	$(if $(strip $(SELECTION_ID)),,$(error SELECTION_ID is required))
+	$(CLI) publish-selection-review --dataset-root "$(HAND_DATASET_ROOT)" --selection-id "$(SELECTION_ID)"
 
-finalize_test:
-	$(PYTHON) scripts/07B_finalize_evaluation_labels.py --config $(FINALIZE_TEST_CONFIG) --split test
-
-prepare_dragon_gold:
-	$(if $(strip $(DRAGON_SOURCE_ROOT)),,$(error DRAGON_SOURCE_ROOT is required))
-	$(if $(strip $(DRAGON_BATCH_ID)),,$(error DRAGON_BATCH_ID is required))
-	$(PYTHON) scripts/08_finetune_gold.py prepare-dragon --config $(DRAGON_GOLD_CONFIG) --raw-source-root "$(DRAGON_SOURCE_ROOT)" --batch-id "$(DRAGON_BATCH_ID)"
-
-build_pretrain_source_registry:
-	$(PYTHON) scripts/08_finetune_gold.py source-registry --config $(FINALIZE_TRAIN_CONFIG)
-
-export_finetune_gold:
-	$(if $(strip $(FINETUNE_SOURCE_ID)),,$(error FINETUNE_SOURCE_ID is required))
-	$(if $(strip $(FINETUNE_SOURCE_MODE)),,$(error FINETUNE_SOURCE_MODE is required))
-	$(PYTHON) scripts/08_finetune_gold.py export --config $(FINETUNE_GOLD_CONFIG) --source-id $(FINETUNE_SOURCE_ID) --source-mode $(FINETUNE_SOURCE_MODE) $(if $(strip $(FINETUNE_RAW_SOURCE_ROOT)),--raw-source-root $(FINETUNE_RAW_SOURCE_ROOT),) $(if $(strip $(FINETUNE_SELECTION_REQUEST)),--selection-request $(FINETUNE_SELECTION_REQUEST),) $(if $(strip $(FINETUNE_MAX_ITEMS)),--max-items $(FINETUNE_MAX_ITEMS),)
-
-import_finetune_gold:
-	$(PYTHON) scripts/08_finetune_gold.py import --config $(FINETUNE_GOLD_CONFIG) $(if $(strip $(FINETUNE_SOURCE_ID)),--source-id $(FINETUNE_SOURCE_ID),--all)
-
-finalize_train_finetune:
-	$(PYTHON) scripts/08_finetune_gold.py finalize --config $(FINALIZE_FINETUNE_CONFIG)
+registry-check:
+	$(CLI) registry-check --dataset-root "$(HAND_DATASET_ROOT)"
 
 compile:
-	$(PYTHON) -c "from pathlib import Path; files=[p for root in ('hand_autolabel','scripts','tests') for p in Path(root).rglob('*.py')]; [compile(p.read_bytes(), str(p), 'exec') for p in files]; print('syntax-checked', len(files), 'Python files')"
+	$(PYTHON) -B -c "from pathlib import Path; files=[p for root in ('hand_autolabel','scripts','tests','tools') for p in Path(root).rglob('*.py')]; [compile(p.read_bytes(), str(p), 'exec') for p in files]; print('syntax-checked', len(files), 'Python files')"
 
 test:
-	$(PYTHON) -m unittest discover -s tests -p "test_*.py"
+	$(PYTHON) -B -m unittest discover -s tests -p "test_*.py"

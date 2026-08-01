@@ -1,0 +1,21 @@
+schema_version: hlmf_dataset_selection_v1
+
+# This file is the small operator-owned catalog.  Source manifests and labels
+# remain beside the images under HAND_DATASET_ROOT and never move into a run.
+collections:
+  pretrain:
+    dataset_ids: []
+    proposal_variants: {}
+  evaluation:
+    val_dataset_ids: []
+    test_dataset_ids: []
+    proposal_variants: {}
+
+policies:
+  capture_source_split: fail
+  performer_cross_split: warn
+  one_proposal_variant_per_capture_source: fail
+
+evaluation_limits:
+  max_raw_images_per_split: 2000
+  max_rois_per_split: 3000

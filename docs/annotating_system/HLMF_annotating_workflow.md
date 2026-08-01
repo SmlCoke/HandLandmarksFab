@@ -1,372 +1,498 @@
-# HLMF 完整标注流程
+# HLMF 3.0 标注与发布工作流
 
-本文只描述可重复使用的 HLMF 操作方法。当前批次名称、数量、时间安排和负责人见 [当前下一步计划](HLMF_next_step_plan.md)。
+## 0. 环境依赖
+
+本轮 HLMF 3.0 更新没有改变标注环境：继续使用 Conda 环境 `anfab`，Python 版本保持为 3.11，Python 依赖以仓库根目录的 `requirements.txt` 为准。新代码使用的 SQLite、压缩包处理和文件操作均来自 Python 标准库，不需要新增第三方包。
+
+首次创建环境：
+
+```bash
+cd /path/to/HandLandmarkerFab
+conda create -n anfab python=3.11 pip -y
+conda activate anfab
+python -m pip install -r requirements.txt
+python -m pip check
+```
+
+Ubuntu 服务器缺少 OpenCV/MediaPipe 所需系统动态库时，一次性安装：
+
+```bash
+apt-get update
+apt-get install -y libglvnd0 libgles2 libegl1 libgl1 libglib2.0-0
+ldconfig
+```
+
+输入：仓库根目录的 `requirements.txt`。
+
+处理：在 `anfab` 中安装 NumPy、OpenCV、Pillow、PyYAML、MediaPipe、ONNX Runtime 和 tqdm。系统动态库只需在新服务器首次部署时安装，不要在每次标注任务中重复执行。
+
+输出：名为 `anfab` 的 Conda 环境；`python -m pip check` 应无依赖冲突。创建完成后运行 `make compile` 和 `make test` 验证代码。已有环境时只需执行 `conda activate anfab`。
 
 ## 1. 系统边界
 
-HLMF 把原始图片变为可认证的 Hand ROI、MediaPipe 伪标签和人工 Gold 标签；HLML 读取这些产物完成选样、训练、评估和导出。普通图片来源共用一份 `configs/autolabel.yaml`，由 `HLMF_SOURCE_ROOT` 指定当前来源。HLMF 不负责训练模型，也不要求把 `DatesetFab` 中可直接引用的数据复制进训练工作区。
+HLMF 从既有 Palm Detector 模型开始工作。程序在原图上运行 Palm Detector，原样使用模型给出的 bbox、p0 和 p9，随后自动生成 `256×256` canonical Hand ROI，再在 ROI 内运行 MediaPipe Hand Landmarker。
 
-## 2. 初始化和目录
+HLMF 不制作 Palm Detector 训练数据，不导出或导入 Palm CVAT 标注，也不允许人工修改 bbox、p0、p9 或手工划分 Hand ROI。唯一的人工复核对象是程序已经生成的 Hand ROI，复核内容仅包括 21 个关键点、handedness 和 Hand ROI 内的状态标签。
+
+长期数据写入 `HAND_DATASET_ROOT`；仓库代码、配置和模型文件位于 HLMF 仓库。本文示例使用服务器默认目录：
 
 ```bash
-cd /root/HandLandmarksFab
-git pull --ff-only
-conda activate anfab
-make compile
-make test
-
 export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
-export HAND_GOLD_ROOT=$HAND_DATASET_ROOT/GoldSource
-export HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
-export HAND_PRETRAIN_ID=<pretrain-id>
-export HAND_FINETUNE_ID=<finetune-data-id>
+cd /path/to/HandLandmarkerFab
 ```
 
-- `HAND_DATASET_ROOT`：可再生数据仓库，保存原始图、来源级 ROI 和标注。
-- `HAND_GOLD_ROOT`：跨训练版本复用的人工 Gold 源仓库。
-- `HAND_WORK_ROOT`：当前训练版本的 mining、replay、Gold 聚合和运行结果；不再保存 Gold 真源。
-- `HAND_FINETUNE_ID`：一份冻结的 finetune 数据快照，不等同于某次模型实验 ID。
+每条来源命令都需要四个身份参数：
 
-## 3. 普通图片来源：00～06
+- `DATASET_SCOPE`：`pretrain` 或 `eval`。
+- `DATASET_ID`：一次数据发布的逻辑 ID。
+- `CAPTURE_SOURCE_ID`：一次拍摄来源的固定七段 ID。
+- `PROPOSAL_VARIANT`：Palm 模型和 proposal 配置的版本 ID，例如 `palm-v1`。
 
-### 3.1 人工准备输入
+## 2. 来源命名与目录
 
-每个来源使用独立且长期稳定的目录：
+`capture_source_id` 的顺序固定为：
 
 ```text
-$HAND_DATASET_ROOT/<source-id>/images/
+<background>-<distance>-<lighting>-<condition>-<split>-<session>-<performer>
 ```
 
-把图片整理为 `1280×720`、正向、灰度 TIFF。不同录制场次使用不同文件名前缀；不要混入 Val、Test 或固定 infer 图片。完成后：
-
-```bash
-export HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id>
-make paths
-```
-
-### 3.2 选择数据角色和覆盖参数
-
-同一份 `configs/autolabel.yaml` 提供默认值，运行时通过 Make 顶层参数区分数据性质：
-
-- `AUTOLABEL_ROLE=train`：允许按配置保留低分 Palm 负样本候选；
-- `AUTOLABEL_ROLE=val` 或 `test`：程序强制关闭低分负样本候选，只处理正常检测到的 ROI；
-- `AUTOLABEL_OVERRIDES`：JSON 对象，严格覆盖配置中已经存在的任意局部字段。未知键、非法 JSON 或不合理阈值会直接失败。
-
-训练批次使用默认值：
-
-```bash
-make autolabel \
-  HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id> \
-  AUTOLABEL_ROLE=train
-```
-
-单独覆盖本批次的低分负样本阈值：
-
-```bash
-make autolabel \
-  HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<source-id> \
-  AUTOLABEL_ROLE=train \
-  AUTOLABEL_OVERRIDES='{"palm":{"negative_candidate_threshold":<threshold>}}'
-```
-
-Val/Test：
-
-```bash
-make autolabel HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<val-source> AUTOLABEL_ROLE=val
-make autolabel HLMF_SOURCE_ROOT=$HAND_DATASET_ROOT/<test-source> AUTOLABEL_ROLE=test
-```
-
-`negative_candidate_threshold` 必须小于 `score_threshold`。推荐使用单个 `make autolabel` 命令，确保 00～03 全程使用同一 role/override；若逐步运行，则每条命令必须重复完全相同的顶层参数。
-
-### 3.3 程序检查、Palm、ROI 和伪标签
-
-```bash
-make validate_images
-make palm_detection
-make build_roi
-make run_mediapipe
-```
-
-依次查看：
+例如：
 
 ```text
-$HLMF_SOURCE_ROOT/qc/image_validation_report.json
-$HLMF_SOURCE_ROOT/01_palm/palm_detections.jsonl
-$HLMF_SOURCE_ROOT/qc/palm_detection_stats.json
-$HLMF_SOURCE_ROOT/02_roi_crops/hand_roi_crops_manifest.jsonl
-$HLMF_SOURCE_ROOT/02_roi_crops/hand_landmarks_autolabel_draft.jsonl
-$HLMF_SOURCE_ROOT/qc/mediapipe_roi_stats.json
+white-far-bright-fist-train-s01-peak
+room-near-daylight-normal-val-s02-alice
 ```
 
-`build_roi` 生成与训练/板端一致的 `256×256` 灰度 Hand ROI。`run_mediapipe` 只是生成可供复核或 pretrain 使用的教师伪标签，不会把它自动提升为人工 Gold。
+七段都使用小写字母、数字或下划线；`condition` 不能包含连字符；`session` 必须为 `s` 加数字；`split` 只能是 `train`、`val` 或 `test`。一个来源目录只能属于一个 split。Train 来源放在：
 
-四个 QC 报告均保存 `autolabel_runtime`，其中记录 role、显式 overrides、最终负样本开关和实际阈值。检查报告时不要只看数量，也要确认运行参数与本批计划一致。
-
-### 3.4 可选的普通全量 CVAT 复核
-
-```bash
-make export_cvat
+```text
+HAND_DATASET_ROOT/PretrainSource/<dataset_id>/<capture_source_id>/images/
 ```
 
-把 `02_roi_crops/images/` 和生成的 CVAT XML 上传到一个 CVAT image task。每张图只能作一种决定：
+Val/Test 来源放在：
 
-- 清楚可标：完整标 21 个点，并选择 Left、Right 或 unknown；
-- 确定无手：标 `no_hand`；
-- 模糊、严重截断或无法可靠判断：标 `ignore_for_training`。
-
-从完整 task 导出 `CVAT for images 1.1`，保存为 `03_reviewed/cvat_reviewed.xml`，然后：
-
-```bash
-make import_cvat
-make visualize
+```text
+HAND_DATASET_ROOT/EValSource/<dataset_id>/<capture_source_id>/images/
 ```
 
-人工只编辑 CVAT 标注，不手改 JSONL、SHA256、descriptor 或聚合报告。
+`images/` 必须平铺，只能放 `.tif` 或 `.tiff`。不要在里面再建立子目录。
 
-## 4. Pretrain、Val、Test 聚合
+每个来源的派生产物按 proposal 变体隔离：
 
-`configs/finalize_train.yaml`、`finalize_val.yaml` 和 `finalize_test.yaml` 定义允许进入各集合的来源。先在配置中登记新的来源；同一原始身份不得同时进入训练和 Val/Test。
+```text
+<capture_source_id>/
+  images/
+  01_palm/<proposal_variant>/
+  02_roi_crops/<proposal_variant>/
+  03_reviewed/<proposal_variant>/
+  05_labels/<proposal_variant>/
+  qc/<proposal_variant>/
+```
+
+同一原图在不同 `proposal_variant` 下共享 `raw_image_id`，但生成不同 `roi_id` 和不同派生目录；同一变体重跑时 ID 保持稳定。
+
+## 3. 可选阶段：本地固定间隔抽帧
+
+阶段名：本地采样，和服务器 HLMF 主流水线隔离。
+
+命令：
 
 ```bash
-make finalize_train_pretrain
-make build_pretrain_source_registry
-make finalize_val
-make finalize_test
+python tools/downsample.py <input_dir> <interval> <output_dir>
+```
+
+输入：`input_dir` 是本地相机导出的平铺 TIFF 全帧目录；`interval` 为保留间隔，例如 `5` 表示每 5 帧保留一帧；`output_dir` 必须不存在或为空。
+
+处理：按文件名排序后选择第 0、N、2N……帧，通过文件复制保留 TIFF，不做重编码。输入存在非 TIFF、子目录或目标目录非空时立即拒绝。
+
+输出：筛选后的 TIFF 被平铺写入 `output_dir`。只把这个输出目录中的最终保留帧上传到来源的 `images/`；HLMF 不保存未上传的全帧。
+
+## 4. 阶段一：来源检查与稳定身份建立
+
+阶段名：Source Check。
+
+Train 命令示例：
+
+```bash
+make source-check \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=pretrain \
+  DATASET_ID=FullEnhance0801 \
+  CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak \
+  PROPOSAL_VARIANT=palm-v1
+```
+
+Val/Test 将 `DATASET_SCOPE` 改为 `eval`，并在 ID 的第 5 段使用 `val` 或 `test`。
+
+输入：
+
+```text
+PretrainSource/<dataset_id>/<capture_source_id>/images/*.tif[f]
+```
+
+或：
+
+```text
+EValSource/<dataset_id>/<capture_source_id>/images/*.tif[f]
+```
+
+处理：
+
+1. 检查目录、来源 ID、split 和 TIFF 解码。
+2. `720×1280` TIFF 顺时针无损旋转一次为 `1280×720`；已经是 `1280×720` 时直接通过，重复运行不会再次旋转。
+3. 拒绝其他尺寸、非 TIFF 和解码失败文件。
+4. 首次验证时建立并持久化 `raw_image_id`。
+5. 记录文件大小、尺寸、像素 CRC32 和 dHash64 等轻量指纹，并写入 SQLite registry。不会反复计算图片 SHA-256。
+
+输出：
+
+```text
+<source>/raw_images.jsonl
+<source>/source.json
+<source>/qc/image_validation_report.json
+HAND_DATASET_ROOT/Registry/registry.sqlite3
+```
+
+出现错误时先查看 `image_validation_report.json`；修复输入后可以安全重跑同一命令。
+
+## 5. 阶段二：Train 自动标注与发布
+
+阶段名：Train Autolabel。
+
+命令：
+
+```bash
+make train-autolabel \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=pretrain \
+  DATASET_ID=FullEnhance0801 \
+  CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak \
+  PROPOSAL_VARIANT=palm-v1
+```
+
+输入：来源 `images/`、`configs/autolabel.yaml`、`paths.palm_model_onnx` 指向的 Palm ONNX 模型，以及 `mediapipe.model_asset_path` 指向的 MediaPipe task 文件。
+
+处理：该高层命令依次执行来源检查、Palm 推理、稳定 proposal slot 分配、canonical ROI 裁剪、MediaPipe ROI 推理、质量门控和 Train 来源发布。Palm 结果从产生到发布都不经过人工修改。
+
+输出按步骤写入：
+
+```text
+<source>/01_palm/<variant>/palm_detections.jsonl
+<source>/02_roi_crops/<variant>/images/<roi_id>.png
+<source>/02_roi_crops/<variant>/hand_roi_crops_manifest.jsonl
+<source>/02_roi_crops/<variant>/hand_landmarks_autolabel_draft.jsonl
+<source>/05_labels/<variant>/hand_training_labels.jsonl
+<source>/05_labels/<variant>/candidate_negatives.jsonl
+<source>/05_labels/<variant>/ignored.jsonl
+<source>/qc/<variant>/*_report.json
+<dataset>/dataset_manifest.json
+```
+
+分流规则：
+
+- MediaPipe 确认有手且通过质量门控：发布为 positive，`label_origin=mediapipe`。
+- MediaPipe 未确认有手：只进入 `candidate_negatives.jsonl`，不能直接参与训练。
+- MediaPipe positive 未通过质量门控：进入 `ignored.jsonl`。
+- 常规 Train positive 不逐张进入 CVAT。
+
+## 6. 阶段三：Val/Test 自动标注
+
+阶段名：Eval Autolabel。
+
+命令：
+
+```bash
+make eval-autolabel \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=eval \
+  DATASET_ID=national-eval-0801 \
+  CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice \
+  PROPOSAL_VARIANT=palm-v1
+```
+
+输入：Val/Test 来源的 `images/`、Palm 模型、MediaPipe 模型和 `autolabel.yaml`。
+
+处理：与 Train 一样运行来源检查、Palm、程序化 ROI 和 MediaPipe，但只保留 Palm Detector 实际产生的 runtime ROI，并强制关闭低分候选负样本。这里不会补 Palm 漏检，也不会从原图人工补 ROI。
+
+输出：Palm、ROI、MediaPipe draft 和 QC 文件与 Train 的路径相同，但此时不发布最终评估标签。命令返回的下一步是 CVAT 导出。
+
+限制：每个 Val/Test split 最多 2000 张原图、3000 个实际生成 ROI；最终在来源发布阶段根据 dataset manifest 统一检查。
+
+## 7. 阶段四：导出 Hand ROI CVAT 任务
+
+阶段名：Hand CVAT Export。
+
+命令：
+
+```bash
+make hand-cvat-export \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=eval \
+  DATASET_ID=national-eval-0801 \
+  CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice \
+  PROPOSAL_VARIANT=palm-v1
+```
+
+输入：
+
+```text
+<source>/02_roi_crops/<variant>/hand_roi_crops_manifest.jsonl
+<source>/02_roi_crops/<variant>/hand_landmarks_autolabel_draft.jsonl
+<source>/02_roi_crops/<variant>/images/*.png
+configs/cvat_label.json
+```
+
+处理：为该来源全部实际 ROI 生成 CVAT for images 1.1 XML。Train split 会被拒绝。导出内容只描述 Hand ROI 内的 skeleton 和 tag，不存在 Palm shape。
+
+输出：
+
+```text
+<source>/03_reviewed/<variant>/cvat_autolabel.xml
+<source>/qc/<variant>/cvat_export_report.json
+```
+
+在 CVAT 中创建 Images 任务时，上传 `02_roi_crops/<variant>/images/` 下的 ROI 图片并导入 `cvat_autolabel.xml`。标签契约的实际名称保持为：
+
+- `hand_landmarks`：21 点 skeleton，子点名为 `1` 到 `21`，对应模型 landmark ID `0` 到 `20`。
+- `Left`、`Right`：目标手 handedness；有可靠 skeleton 时二选一。
+- `unknown_handedness`：确认有手和关键点，但无法可靠判定左右。
+- `no_hand`：该固定 Hand ROI 内没有手。
+- `ignore_for_training`：目标手或关键点无法可靠判定，本条不进入训练或评估。
+
+复核规则：教师点正确则不动；明确错误时只修正错误点；teacher abstain 且能可靠判断时删除 `no_hand`、补齐完整 skeleton 和 handedness；无手时只保留 `no_hand`；无法可靠决定时使用 `ignore_for_training`。不得绘制、调整或替换 ROI。
+
+## 8. 阶段五：导入 CVAT 复核结果
+
+阶段名：Hand CVAT Import。
+
+先从 CVAT 导出 CVAT for images 1.1 XML，并将文件放到固定位置且改名为：
+
+```text
+<source>/03_reviewed/<variant>/cvat_reviewed.xml
+```
+
+然后执行：
+
+```bash
+make hand-cvat-import \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=eval \
+  DATASET_ID=national-eval-0801 \
+  CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice \
+  PROPOSAL_VARIANT=palm-v1
+```
+
+输入：reviewed XML、原始 MediaPipe draft 和 ROI manifest。
+
+处理：检查每个 ROI 的 presence、handedness、skeleton 完整性和冲突 tag，并比较教师点与复核点，记录人工实际修改的 landmark ID。
+
+输出：
+
+```text
+<source>/03_reviewed/<variant>/hand_landmarks_reviewed.jsonl
+<source>/qc/<variant>/cvat_import_report.json
+```
+
+provenance 规则：未修改教师点为 `mediapipe/mediapipe_v1`；人工修正教师点为 `mediapipe_human_corrected/project_consensus_v1`；teacher abstain 后人工完整补标为 `human/project_consensus_v1`。所有复核记录同时保存 `human_reviewed` 和 `human_modified_landmark_ids`。存在阻断错误时不会生成可发布结果，应根据导入报告修复 CVAT XML 后重试。
+
+## 9. 阶段六：发布 Val/Test 来源
+
+阶段名：Source Publish。
+
+命令：
+
+```bash
+make source-publish \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=eval \
+  DATASET_ID=national-eval-0801 \
+  CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice \
+  PROPOSAL_VARIANT=palm-v1
+```
+
+输入：`hand_landmarks_reviewed.jsonl`、ROI manifest、raw manifest 和 registry。
+
+处理：排除 `ignore_for_training`，验证来源和 proposal variant，发布已复核的 fixed Hand ROI 标签，更新 dataset manifest，并检查 Val/Test 的原图数和 ROI 数上限。
+
+输出：
+
+```text
+<source>/05_labels/<variant>/hand_evaluation_labels.jsonl
+<source>/05_labels/<variant>/candidate_negatives.jsonl  # 必须为空
+<source>/05_labels/<variant>/ignored.jsonl
+<source>/qc/<variant>/source_publish_report.json
+EValSource/<dataset_id>/dataset_manifest.json
+```
+
+这些标签只衡量给定固定 Hand ROI 上的 Hand Landmarker。未产生 ROI 的原图不计入指标，当前系统不报告 Palm 漏检率或原图级联性能。
+
+## 10. 阶段七：真负样本删除式复核与发布
+
+阶段名：Negative Review / Negative Publish。
+
+准备审核树：
+
+```bash
+make negative-review \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  NEGATIVE_DATASET_ID=background-neg-0801 \
+  NEGATIVE_CANDIDATE_LABELS="$HAND_DATASET_ROOT/PretrainSource/FullEnhance0801/<capture_source_id>/05_labels/palm-v1/candidate_negatives.jsonl"
+```
+
+输入：一个 Train 来源的 `candidate_negatives.jsonl`。需要合并多个来源时可直接调用 CLI 并重复传入 `--candidate-labels`；公共 Make 入口一次接收一个文件。
+
+处理与人工动作：程序按 `capture_source_id` 建立硬链接审核树。人工只在以下目录删除含手、模糊或无法确认的图片，剩下的必须全部是真背景：
+
+```text
+HAND_DATASET_ROOT/GoldSource/NegativeSamples/<negative_dataset_id>/review/images/<capture_source_id>/
+```
+
+硬链接只用于服务器同一文件系统内节省空间：不同路径指向同一份文件数据，删除审核树中的一个硬链接不会删除 PretrainSource 原始 ROI。普通 zip/7z 压缩、网盘上传和下载不会保留硬链接关系，但本流程允许离线复核产生普通文件副本。推荐操作如下：
+
+1. 只压缩并下载本批次的 `review/images/`；服务器上的 `candidate_manifest.jsonl` 和 `README.json` 保持不动。
+2. 在本地只删除不合格图片，不重编码、不改名、不移动相对路径，也不新增图片。
+3. 复核完成后压缩 `images/`，上传网盘并传回服务器。
+4. 核对目标确实是当前 `negative_dataset_id` 后，只删除服务器上的该批次 `review/images/`，再原路径解压复核后的 `images/`。不得删除整个 `review/`、PretrainSource 原始 ROI、Registry 或任何 `published/`。
+5. 重新上传的普通文件与硬链接文件均可执行 `negative-publish`；该阶段允许发生一次性数据拷贝。
+
+发布命令：
+
+```bash
+make negative-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" NEGATIVE_DATASET_ID=background-neg-0801
 ```
 
 输出：
 
 ```text
-$HAND_WORK_ROOT/train_pretrain_merged/
-$HAND_WORK_ROOT/val_merged/
-$HAND_WORK_ROOT/test_merged/
+GoldSource/NegativeSamples/<id>/published/images/<capture_source_id>/*.png
+GoldSource/NegativeSamples/<id>/published/negative_labels.jsonl
+GoldSource/NegativeSamples/<id>/published/manifest.json
+GoldSource/NegativeSamples/<id>/published/review_report.json
 ```
 
-聚合目录主要保存标签、来源注册表和 QC；`crop_path` 可以直接指向 `DatesetFab`，无需复制 ROI。
+如果全程在服务器内复核，发布图片继续通过同文件系统硬链接生成，不重复占用图片数据块；如果审核图片经过网盘往返成为普通文件，发布结果保留这一份人工确认后的文件副本，这是人工复核阶段允许的数据拷贝例外。成功后临时 `review/` 被移除；SQLite 将 `negative_dataset_id` 和 `roi_id` 锁定，已使用或作废的 ID 不可复用。
 
-## 5. 人工负样本删除复核
+## 11. 阶段八：困难正样本复核与零拷贝发布
 
-这一步由 HLML 的 `make pretrain-curate` 生成候选树。人工把候选树复制成 reviewed 树，逐图删除所有含手、手指、手腕、模糊或无法确认的图片，只保留明确背景，然后由 HLML 执行 `make pretrain-curate-reviewed`。
+阶段名：Hard Positive Review / Publish。
 
-候选树可以 zip/7z 压缩后经网盘传输。正常压缩、解压不会改变文件内容 SHA256；不要用会重编码图片的软件，也不要编辑、改名或移动保留图片。HLML 会逐文件重新校验内容。
-
-## 6. Dragon 外部 Gold：按批次独立发布
-
-### 6.1 通用输入契约
-
-每一批 Dragon 数据先放入自己的规范批次目录：
-
-```text
-$HAND_GOLD_ROOT/dragon/<dragon-batch-id>/
-├── source/
-│   ├── images/
-│   ├── annotations_hand.txt
-│   ├── annotations_palm.txt
-│   └── README.md
-└── published/                 # prepare_dragon_gold 生成
-```
-
-`configs/dragon_gold.yaml` 只保存上述文件名和 ROI 规则，不保存某批数据的路径、批次 ID、预期 SHA 或预期数量。程序会读取每张图的 EXIF 方向和实际尺寸，并把本批实际 SHA256、计数、拒绝原因写入报告。
-
-### 6.2 发布一批
-
-为每批选择一个不会复用的安全 ID：
+准备审核树：
 
 ```bash
-make prepare_dragon_gold \
-  HAND_FINETUNE_ID=<finetune-data-id> \
-  DRAGON_SOURCE_ROOT=$HAND_GOLD_ROOT/dragon/<dragon-batch-id>/source \
-  DRAGON_BATCH_ID=<unique-dragon-batch-id>
+make hard-review \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  SELECTION_ID=hard-positive-0801 \
+  MINING_REQUEST=/root/autodl-tmp/TrainFab/HLML-4.0/mining/v4-r1/hlmf_review_request.jsonl
 ```
 
-结果：
+输入：HLML multitask 阶段产生的 Train-only mining request；每条记录必须引用 registry 中已存在的 PretrainSource ROI。
+
+处理与人工动作：审核图片位于：
 
 ```text
-$HAND_GOLD_ROOT/dragon/<unique-dragon-batch-id>/published/
-├── 02_roi_crops/
-├── 03_reviewed/
-├── source_images/
-├── finetune_source.json
-└── qc/gold_source_report.json
+HAND_DATASET_ROOT/Selections/<selection_id>/review/images/<capture_source_id>/
 ```
 
-来了 N 批就执行 N 次，每次使用不同 `DRAGON_BATCH_ID`。`source/` 和 `published/` 都不可覆盖；相同输入需要重发时也应使用新 ID，让旧批次继续可追溯。
+人工只删除 MediaPipe 21 点明显错误的 ROI，不重新标点，也不修改 Palm/ROI。
 
-## 7. Finetune Gold：新录制与 HLML 选样
+困难正样本支持与真负样本相同的压缩包/网盘/本地删除式复核。只替换当前 `selection_id` 的 `review/images/`，保留服务器上的 `request_manifest.jsonl` 和 `README.json`；图片相对路径与文件名必须保持不变。重新上传的图片可以是普通文件，不要求保留硬链接。发布时这些审核图片只用于判断哪些 ROI 被保留，最终 `selection.jsonl` 仍零拷贝引用 PretrainSource 原始 ROI。
 
-### 7.1 新录制来源的 Gold 任务
+发布命令：
 
-先建立批次目录，把原图和 00～03 全部放在 `source/` 中：
+```bash
+make hard-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" SELECTION_ID=hard-positive-0801
+```
+
+输出：
 
 ```text
-$HAND_GOLD_ROOT/new_recorded_gold/<source-id>/source/
-├── images/
-├── 01_palm/
-├── 02_roi_crops/
-└── qc/
+Selections/<selection_id>/published/selection.jsonl
+Selections/<selection_id>/published/manifest.json
 ```
 
-以这个 `source/` 作为 `HLMF_SOURCE_ROOT` 跑第 3 节，再由程序确定性抽样；人工不要从原图目录随意挑选：
+selection 继续引用 PretrainSource 原 ROI，不发布图片副本；`manifest.json` 记录保留量、删除量和 `zero_copy_reference_pretrain_roi` 策略。
+
+## 12. 阶段九：Registry、配置和代码检查
+
+查看 registry 计数与状态：
 
 ```bash
-make export_finetune_gold \
-  HAND_FINETUNE_ID=<finetune-data-id> \
-  FINETUNE_SOURCE_ID=<unique-new-recorded-source-id> \
-  FINETUNE_SOURCE_MODE=native_existing \
-  FINETUNE_RAW_SOURCE_ROOT=$HAND_GOLD_ROOT/new_recorded_gold/<unique-new-recorded-source-id>/source \
-  FINETUNE_MAX_ITEMS=<this-task-limit>
+make registry-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT"
 ```
 
-`FINETUNE_MAX_ITEMS` 是本轮计划决定的上限，必须显式传入。程序按 session、来源图片和稳定哈希分散选择，并生成不可变任务包。
+输入为 `HAND_DATASET_ROOT/Registry/registry.sqlite3`，输出为终端 JSON 报告，不修改数据。
 
-### 7.2 disagreement Gold 任务
-
-这里的 disagreement 指“HLML 当前 student 模型预测的 21 点与 MediaPipe teacher 伪标签差异较大的 ROI”。它只说明值得人工核查，不说明 teacher 一定正确。HLML 完成一轮 `prepare-finetune-round` 后：
+检查 Python 语法并运行完整单元测试：
 
 ```bash
-make export_finetune_gold \
-  HAND_FINETUNE_ID=<finetune-data-id> \
-  FINETUNE_SOURCE_ID=disagreement_gold_<round-id> \
-  FINETUNE_SOURCE_MODE=selection_subset
+make compile
+make test
 ```
 
-HLMF 会在该 finetune 工作区的 `mining/rounds/` 中寻找唯一 request，并验证 request、来源 manifest、ROI 与伪标签 SHA。任何上游变化都会阻止导出。
-
-### 7.3 negative-removed Gold 任务
-
-negative-removed 指 pretrain 负样本人工删除复核时，被人工从“明确背景”候选树中删掉的 ROI。它们往往含手、手指、手腕，或模糊到不能当作可靠负样本；只有再次做 21 点/presence 人工 Gold 标注后，才适合以困难样本身份参与 finetune。
-
-该来源不是 HLMF 自行从 GoldSource 猜出来的。HLML 在一个新的 finetune 数据 ID 下启用 `configs/prepare_finetune_sources.yaml` 的 `selection.negative_removed`、设定本轮数量并执行 `make prepare-finetune-sources`，生成冻结的 selection request。随后在 HLMF 导出：
+查看所有公共入口：
 
 ```bash
-make export_finetune_gold \
-  HAND_FINETUNE_ID=<finetune-data-id> \
-  FINETUNE_SOURCE_ID=negative_removed_gold_<round-or-batch-id> \
-  FINETUNE_SOURCE_MODE=selection_subset
+make help
 ```
 
-每次重新抽样都使用新的 source ID。程序会把 GoldSource 中历史 published、pending task、当前 request 以及 Val/Test 身份一起排除，因此旧 Gold 不会浪费，也不需要删除。
+## 13. `configs/autolabel.yaml` 参数说明
 
-### 7.4 CVAT 人工工作
+### 13.1 路径与图像契约
 
-四类 Gold 使用统一的批次身份，但目录按生命周期出现，不是三个目录永久并存：
+- `paths.palm_model_onnx`：Palm Detector ONNX，相对路径按 HLMF 仓库根目录解析。更换模型时必须同时更换 `PROPOSAL_VARIANT`，防止不同模型结果写入同一版本目录。
+- `image.width/height/channels`：规范化原图契约，当前固定为 `1280/720/1`，不可在已有数据中随意修改。
+- `image.accepted_extensions`：当前只允许 TIFF；增加有损格式会破坏来源质量假设，不建议修改。
 
-```text
-$HAND_GOLD_ROOT/<domain>/<source-id>/
-├── source/                    # 新录制/Dragon 原始真源；选样类可无
-├── task/                      # 仅“等待人工/等待 import”期间存在
-│   ├── images/                # 本任务选中的 ROI；与 source 能硬链接则不复制数据块
-│   ├── hand_roi_crops_manifest.jsonl
-│   ├── hand_landmarks_autolabel_draft.jsonl
-│   ├── cvat_autolabel.xml
-│   ├── task_descriptor.json
-│   ├── reviewed.xml           # 人工返回
-│   └── qc/cvat_job_plan.json
-└── published/                 # import/prepare 成功后生成；此时 task/ 自动删除
-    ├── finetune_source.json
-    ├── 02_roi_crops/
-    ├── 03_reviewed/
-    ├── audit/                 # reviewed.xml、自动标注 XML、任务描述符等小型审计文件
-    └── qc/
-```
+### 13.2 Palm proposal
 
-`<domain>` 只能是 `new_recorded_gold`、`disagreement_gold`、`negative_removed_gold` 或 `dragon`。一个领域可以有任意多个批次；`source-id` 在整个 GoldSource 中必须唯一，并且必须包含批次信息，不能直接使用领域名。例如历史来源可命名为 `disagreement_gold_hlml2.0`，新任务可命名为 `disagreement_gold_r02`。
+- `palm.backend`：`aethersign_onnx` 使用 `palm_model_onnx`；`mediapipe_official` 用于受支持的官方 Palm 后端。切换后端应使用新 proposal variant。
+- `input_size`：Palm 网络输入尺寸，必须与模型一致。
+- `score_threshold`：runtime proposal 的最低分。提高会减少实际 ROI，降低会增加 ROI；这不是人工修框入口。
+- `nms_iou_threshold`、`cross_head_suppress_iou`：控制同一检测头和跨检测头的重复 proposal 抑制。修改会改变 proposal slot 和 ROI 集合，应发布为新 variant。
+- `max_detections`：每张原图最多保留的 runtime proposal 数，当前最多双手。
+- `keep_low_score_candidates_for_negatives` 和 `negative_candidate_threshold`：仅影响 Train 候选负样本。Val/Test 会由程序强制关闭候选负样本。
+- `compatible_bbox_expand`、官方 tile 参数：只在对应 Palm backend 中生效；任何几何/搜索范围变化都需要新 variant。
 
-`source`、`task`、`published` 不能按文件名相似就强行合并：`source` 是原始真源，`task` 是暂存的人工任务快照，`published` 是认证训练产物。程序只消除没有长期价值的 task：发布成功后把必要的小型审计文件移入 `published/audit/`，再删除 task。Dragon 的原始整图/标注与生成的 Hand ROI 数据性质不同，长期保留 `source + published`。
+### 13.3 Hand ROI
 
-按 `cvat_job_plan.json` 的 job 边界分工，不自行拆散或重命名图片。团队先用少量校准图统一 21 点、左右手和 ignore 规则；正式 job 不交叉。完成后把完整 task 导出的 XML 保存为：
+- `output_width/output_height`：当前固定 `256×256`，与 HLML v2 输入契约一致。
+- `scale_x/scale_y`：相对 Palm anchor 的 ROI 扩张比例。
+- `shift_x/shift_y`：沿 canonical ROI 坐标轴移动中心，负 `shift_y` 通常向腕部方向补充上下文。
 
-```text
-.../<domain>/<source-id>/task/reviewed.xml
-```
+这些参数改变程序生成的 ROI 几何，因此修改时必须新建 `PROPOSAL_VARIANT`；不能在 CVAT 中手工补偿。
 
-### 7.5 严格导入与最终聚合
+### 13.4 MediaPipe
 
-```bash
-make import_finetune_gold HAND_FINETUNE_ID=<finetune-data-id>
-make finalize_train_finetune HAND_FINETUNE_ID=<finetune-data-id>
-```
+- `model_asset_path`：Hand Landmarker `.task` 文件路径。
+- `num_hands`：每个 Palm ROI 只标目标手，当前为 1。
+- `min_hand_detection_confidence`、`min_hand_presence_confidence`、`min_tracking_confidence`：教师确认门限。提高会增加 teacher abstain，降低会增加自动 positive 及潜在误标。调整前应通过 QC 报告抽查，且不得把 abstain 自动当真负样本。
 
-程序先完整预检所有待导入 task，再事务式发布到同批次的 `published/`。发布成功后 task 自动退休；不能同时看到 task 和 published，若同时存在说明上一次发布后的清理异常，应先检查 `published/finetune_source.json`，不要重复 import。最终聚合仍是当前训练版本的派生产物：
+### 13.5 质量门控
 
-```text
-$HAND_WORK_ROOT/finetune/<finetune-data-id>/hmlf_gold_merged/
-├── 05_labels/
-├── hmlf_gold_aggregate.json
-└── qc/finalize_train_finetune_report.json
-```
+- `quality.handedness_review_threshold`：低于此分数时进入质量复核/忽略判断；调高会减少自动可用 positive。
+- `quality.high_palm_score_review_threshold`：帮助报告高 Palm 分但无手的可疑项，不会授权修改 Palm 输出。
 
-如果只想导入一个已经完成的 task，可显式指定：
+## 14. `configs/review.yaml` 与 `configs/cvat_label.json`
 
-```bash
-make import_finetune_gold \
-  HAND_FINETUNE_ID=<finetune-data-id> \
-  FINETUNE_SOURCE_ID=<source-id>
-```
+`review.yaml` 只包含 Hand ROI CVAT 导入导出的语义映射和人工复核门控；不包含 Palm、ROI 几何或 MediaPipe 参数。`cvat_label.json` 是创建 CVAT 项目/任务时使用的标签 schema。
 
-不传 `FINETUNE_SOURCE_ID` 时会预检并导入当前所有 pending task。不要把尚未标完的 task 混在 `--all` 中；要么先完成它，要么显式逐批导入已经完成的 source。
+### 14.1 CVAT 与人工复核参数
 
-## 8. 多轮 Gold 与历史复用
+- `cvat.label_name`：必须与 `cvat_label.json` 的 `hand_landmarks` 一致。
+- `*_label_name`：必须与五个 tag 的大小写完全一致；当前分别是 `no_hand`、`Left`、`Right`、`unknown_handedness`、`ignore_for_training`。
+- `skeleton_point_labels`：固定为字符串 `1..21`。
+- `review.require_explicit_presence_decision`：要求每个 ROI 明确为 skeleton 或 `no_hand`。
+- `review.require_explicit_handedness_decision`：有 skeleton 时要求 Left/Right/unknown 决策。
+- `review.manual_roi_editing`：必须保持 `false`。
 
-同一领域可以不断增加批次，例如 `new_recorded_gold_r02`、`new_recorded_gold_r03`。每轮必须使用新的 `<round-id>` 和全局唯一 `<source-id>`，作废的 ID 也不复用。HLML 抽样会扫描 GoldSource 内所有 pending task 和 published Gold 的身份、ROI SHA、像素 SHA，再叠加 Val/Test 与当前 mining request 排重。
+## 15. `configs/datasets.yaml`
 
-Gold 不再从旧 finetune 工作区 seed。任意新训练版本都直接发现 `$HAND_GOLD_ROOT/*/*/published/finetune_source.json`；人工 Gold 只有一份真源，训练版本只保存本次选择清单和聚合快照。
+`datasets.yaml` 是 operator-owned 发布集合目录：`pretrain.dataset_ids`、`evaluation.val_dataset_ids/test_dataset_ids` 记录采用的数据集 ID，`proposal_variants` 记录各数据集选择的 Palm 变体。单来源命令仍通过 Make 参数接收这些 ID；该文件不用于手工拼路径或存图片。
 
-### 8.1 Gold 发布不绑定某个 finetune ID
+`policies.capture_source_split` 和 `one_proposal_variant_per_capture_source` 应保持 `fail`；`performer_cross_split` 默认 `warn`，需要严格人员隔离时可升级为 `fail`。`evaluation_limits.max_raw_images_per_split` 和 `max_rois_per_split` 是 Val/Test 发布硬上限，默认分别为 2000 和 3000。
 
-`GoldSource/<domain>/<source-id>/published/` 是长期、不可变、可跨实验复用的认证数据源，不属于某一次训练。命令里出现 `HAND_FINETUNE_ID` 有两个技术原因：
+`cvat_label.json` 完整包含五个 tag 和 `hand_landmarks` 21 点 skeleton。修改任何实际 label 名称时必须同步修改 `review.yaml` 并运行测试。
 
-- 对 disagreement/negative-removed 这类 `selection_subset`，HLMF 要到该 finetune 工作区找到 HLML 冻结的 selection request；
-- `finalize_train_finetune` 要把“当时仓库中全部 published Gold”的认证聚合快照写入该 finetune 工作区，并在报告里记录数据 ID。
+## 16. 评估边界
 
-这不意味着 published 批次只能由该 ID 使用。未来的新 finetune ID 仍会从 GoldSource 发现、校验并复用同一批 Gold；不会复制图片，也不需要重新发布。Dragon 和 `native_existing` 新录制 Gold 即使没有 mining request，也沿用相同命令接口，以便目录和审计方式一致。
-
-### 8.2 HLMF 聚合与 HLML 训练选择是两层不同操作
-
-HLMF 的 `make finalize_train_finetune` 会认证并聚合 **GoldSource 中全部 published 批次**，它故意不判断某次模型训练该启用哪些来源。这样可以先发现重复、冲突、文件损坏或描述符变化。
-
-随后 HLML 为本次 `HAND_FINETUNE_ID` 生成 `gold_selection.yaml`，逐个 source ID 明确写 `enabled: true/false`。只有 `true` 的 Gold 才进入训练；replay 由 HLML 另行生成并强制参与。完整顺序是：
-
-```text
-HLMF 发布每个 Gold 批次
-  -> HLMF 聚合并认证全部 published Gold
-  -> HLML 逐 source ID 冻结启用/禁用清单
-  -> HLML 将 enabled Gold 与 mandatory replay 合成训练快照
-```
-
-因此“发布”不是“自动参加训练”，而“disabled”也不是删除数据。更换来源组合时使用新的 finetune 数据 ID，保留旧快照可追溯。
-
-### 8.3 时间不足时可以不新增困难样本 Gold
-
-disagreement 和 negative-removed 都是可选的人工增量来源，不是构建 finetune 的前置条件。时间不足时：
-
-1. 不创建本轮 selection round，也不导出新的 CVAT task；
-2. 保留 HLML 自动生成的 disagreement 分数池，供以后继续使用；
-3. HLMF 只导入已经完成的 task，并聚合现有 published Gold；
-4. HLML 可显式启用历史 published 困难样本 Gold，或把这些领域全部设为 disabled；
-5. 只要至少一个合格 Gold 来源满足门控，且 mandatory replay 存在，就可以继续 finetune。
-
-HLMF 不制作 replay。replay 来自 HLML 的 authenticated pretrain source registry 和 curated multitask 标签，由 HLML 确定性抽取。
-
-## 9. 常见错误
-
-- `Gold batch task or published output already exists`：ID 已使用；换新 round/source ID，不覆盖或复用历史批次。
-- `raw source must be archived at .../source`：先按规范建立 GoldSource 批次，不能从临时目录发布。
-- `DRAGON_SOURCE_ROOT/DRAGON_BATCH_ID is required`：Dragon 批次身份必须在命令中显式提供。
-- `native_existing requires max_items`：新录制任务必须显式冻结数量。
-- `SHA mismatch`：descriptor 生成后输入内容变化；恢复原文件，或用新 ID 重新发布。
-- CVAT import blocking errors：查看任务 QC，修正缺点、重复点、presence/handedness 冲突。
-- `landmarks_out_of_crop`：点确实无法在 ROI 内可靠表达时标 `ignore_for_training`，不要把点硬拉回 ROI，也不要绕过门控。
-
-## 10. 交接 HLML
-
-HLMF 完成 `train_pretrain_merged/`、`val_merged/`、`test_merged/`，并把本轮已经完成的人工任务发布到 GoldSource、生成当前 `finetune/<id>/hmlf_gold_merged/` 后，切换到 `/root/HandLandmarkerLab`。HLML 会为每个 published 子批次生成显式参与/不参与决定。
-
-交接前应检查：
-
-```bash
-test -f "$HAND_WORK_ROOT/finetune/<finetune-data-id>/hmlf_gold_merged/hmlf_gold_aggregate.json"
-find "$HAND_GOLD_ROOT" -path '*/published/finetune_source.json' -print
-```
-
-`hmlf_gold_aggregate.json` 的 source 数量应与当时 GoldSource 中的 published 描述符一致；有未完成 task 不会自动进入聚合或训练。后续 replay、Gold source 选择、curation 和训练命令均在 HLML 执行。
+HLMF 只发布 Palm 已经生成的固定 Hand ROI。HLML 的 Val/Test 直接读取这些 ROI，不重新运行 Palm，不把没有 ROI 的原图计入指标，也不报告 Palm 漏检率、部分双手召回率或原图级联准确率。

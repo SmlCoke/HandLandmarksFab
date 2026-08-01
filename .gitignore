@@ -25,6 +25,7 @@ artifacts/
 .ruff_cache/
 .coverage
 htmlcov/
+test_data/
 
 # config
 .vscode/

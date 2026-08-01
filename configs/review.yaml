@@ -1,14 +1,8 @@
-schema_version: finetune_gold_v1
-workspace_root: ${HAND_WORK_ROOT}/finetune/${HAND_FINETUNE_ID}
-gold_repository_root: ${HAND_GOLD_ROOT}
-parent_pretrain_id: ${HAND_PRETRAIN_ID:v3-pretrain-r1}
-
-image: {width: 1280, height: 720, channels: 1, orientation: upright}
-hand_roi: {output_width: 256, output_height: 256, scale_x: 1.8, scale_y: 1.8, shift_x: 0.0, shift_y: -0.1}
+task: hand_roi_review
+schema_version: hlmf_hand_roi_review_v1
 
 cvat:
-  max_task_items: 800
-  segment_size: 100
+  label_schema_path: configs/cvat_label.json
   label_name: hand_landmarks
   no_hand_label_name: no_hand
   left_label_name: Left
@@ -19,7 +13,8 @@ cvat:
   skeleton_point_labels: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21"]
 
 review:
-  strip_teacher_handedness: true
+  # CVAT is strictly limited to information inside program-generated Hand ROIs.
+  strip_teacher_handedness: false
   require_explicit_presence_decision: true
   require_explicit_handedness_decision: true
-  handedness_policy: optional_per_row
+  manual_roi_editing: false

@@ -1,46 +1,30 @@
-# HandLandmarkerFab（HLMF 2.0）
+# HandLandmarkerFab（HLMF 3.0）
 
-HLMF 是 HLML 的上游数据集制作系统：它把原始图片转换为 Hand ROI、生成 MediaPipe 伪标签、导出/导入 CVAT 人工复核结果，并发布带 SHA-256 证据的训练标签。
+HLMF 是 Hand Landmarker 的上游数据发布系统。它调用既有 Palm Detector 生成 proposal，再由程序生成固定的 `256×256` Hand ROI，并在 ROI 内运行 MediaPipe Hand Landmarker。
 
-HLMF 2.0 是一套新的、精简的操作契约，不兼容旧版多套 Train/Val/Test 配置。任意普通来源都使用同一份 `configs/autolabel.yaml`，只通过 `HLMF_SOURCE_ROOT` 指定当前来源目录。
+HLMF **不制作 Palm Detector 训练数据**，不提供 Palm CVAT、Palm 标签导入、bbox/p0/p9 修改或人工绘制 Hand ROI 的入口。Palm 输出始终原样使用。唯一的人工复核对象是程序生成的 Hand ROI：21 点、handedness、`no_hand` 与 `ignore_for_training`。
+
+公共配置按单一职责拆分：`autolabel.yaml` 只负责 Palm/ROI/MediaPipe 自动标注，`review.yaml` 只负责 Hand ROI CVAT 复核，`datasets.yaml` 只负责数据目录与发布策略，`cvat_label.json` 是 CVAT label schema。
 
 ## 文档入口
 
-- [完整操作流程](docs/annotating_system/HLMF_annotating_workflow.md)：首次使用、理解数据契约和排错时阅读。
-- [Quick Start](docs/annotating_system/HLMF_quick_start.md)：熟悉流程后直接照着运行。
-- [目录与接口](docs/annotating_system/HLMF_data_contract.md)：查询输入、输出、Gold 和 HLML 交接格式。
-- [当前数据状态](docs/annotating_system/HLMF_current_status.md)：服务器上已归档批次和进行中的人工任务。
-- [当前下一步计划](docs/annotating_system/HLMF_next_step_plan.md)：当前批次的路径、数量、人工分工和执行顺序。
+- [完整工作流](docs/annotating_system/HLMF_annotating_workflow.md)
+- [Quick Start](docs/annotating_system/HLMF_quick_start.md)
+- [数据契约](docs/annotating_system/HLMF_data_contract.md)
+- [当前状态](docs/annotating_system/HLMF_current_status.md)
 
-## 两个根目录
-
-```text
-HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
-  可再生数据仓库
-
-HAND_GOLD_ROOT=$HAND_DATASET_ROOT/GoldSource
-  跨训练版本复用的 Gold 真源；结构为 domain/source-id/<生命周期目录>
-
-HAND_WORK_ROOT=/root/autodl-tmp/TrainFab/HLML-3.0
-  当前版本的聚合、mining/replay 和 HLML 训练结果
-```
-
-普通来源的 00～06 直接在 `HLMF_SOURCE_ROOT` 内工作。Gold 的待标任务和 published 真源保存在 GoldSource，不再绑定某个 `HAND_FINETUNE_ID`；CVAT `task/` 在严格发布成功后自动退休，只留下 `published/`。当前训练版本只生成可重建的认证聚合。
-
-## 最短命令索引
+## 公共命令
 
 ```bash
-conda activate anfab
-make paths HLMF_SOURCE_ROOT=/path/to/source
-make autolabel HLMF_SOURCE_ROOT=/path/to/source AUTOLABEL_ROLE=train
-make export_cvat HLMF_SOURCE_ROOT=/path/to/source
-
-# 人工在 CVAT 完成后放回 reviewed XML，再继续：
-make import_cvat visualize HLMF_SOURCE_ROOT=/path/to/source
-
-# 测试代码
-make compile
-make test
+make help
+make source-check DATASET_SCOPE=pretrain DATASET_ID=demo CAPTURE_SOURCE_ID=room-near-daylight-normal-train-s01-alice PROPOSAL_VARIANT=palm-v1
+make train-autolabel DATASET_SCOPE=pretrain DATASET_ID=demo CAPTURE_SOURCE_ID=room-near-daylight-normal-train-s01-alice PROPOSAL_VARIANT=palm-v1
+make eval-autolabel DATASET_SCOPE=eval DATASET_ID=demo-eval CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=palm-v1
+make hand-cvat-export DATASET_SCOPE=eval DATASET_ID=demo-eval CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=palm-v1
+make hand-cvat-import DATASET_SCOPE=eval DATASET_ID=demo-eval CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=palm-v1
+make source-publish DATASET_SCOPE=eval DATASET_ID=demo-eval CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=palm-v1
+make registry-check
+make compile test
 ```
 
-完整的 pretrain 聚合、Dragon 多批次 Gold 和多轮 finetune Gold 流程见完整操作文档；当前一次性任务目标只记录在下一步计划中。
+长期图片、标签和 registry 只写入 `HAND_DATASET_ROOT`。HLMF 不迁移或删除旧 schema 数据；3.0 只发布新契约数据。
