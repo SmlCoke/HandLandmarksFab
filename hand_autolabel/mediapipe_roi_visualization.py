@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 import cv2
 
-from .image_io import ensure_bgr, read_image, write_image
+from .image_io import ensure_bgr, read_image, to_uint8_gray, write_image
 from .formats import load_yaml_config, read_jsonl, resolve_path
 from .progress import track_progress
 
@@ -47,9 +47,10 @@ def _draw_text(
 
 def _landmark_coordinates(
     row: Mapping[str, Any],
+    field: str = "landmarks_crop_px",
 ) -> Dict[int, tuple[int, int]]:
     coordinates: Dict[int, tuple[int, int]] = {}
-    for position, point in enumerate(row.get("landmarks_crop_px") or []):
+    for position, point in enumerate(row.get(field) or []):
         try:
             landmark_id = int(point.get("id", position))
             if 0 <= landmark_id < 21:
@@ -174,6 +175,167 @@ def render_mediapipe_roi_draft_overlays(
         else:
             stats["write_failures"] += 1
 
+    return stats
+
+
+def render_original_image_visualizations(
+    label_rows: Sequence[Mapping[str, Any]],
+    source_images_dir: Path,
+    output_dir: Path,
+    *,
+    proposal_variant: str,
+    show_progress: bool = False,
+) -> Dict[str, Any]:
+    """Render projected draft landmarks on every flat source image."""
+    source_images_dir = Path(source_images_dir)
+    output_dir = Path(output_dir)
+    if not source_images_dir.is_dir():
+        raise TrainingRoiVisualizationError(
+            f"Source images directory not found: {source_images_dir}"
+        )
+
+    source_images = sorted(
+        (
+            path
+            for path in source_images_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in {".tif", ".tiff"}
+        ),
+        key=lambda path: path.name,
+    )
+    if not source_images:
+        raise TrainingRoiVisualizationError(
+            f"No source TIFF images found: {source_images_dir}"
+        )
+
+    source_names = {path.name for path in source_images}
+    rows_by_image: Dict[str, List[Mapping[str, Any]]] = {
+        name: [] for name in source_names
+    }
+    missing_image_references = 0
+    unknown_image_references: set[str] = set()
+    for row in label_rows:
+        recorded_image = str(row.get("image") or "").strip()
+        if not recorded_image:
+            missing_image_references += 1
+            continue
+        image_name = Path(recorded_image).name
+        if image_name not in source_names:
+            unknown_image_references.add(image_name)
+            continue
+        rows_by_image[image_name].append(row)
+
+    if missing_image_references or unknown_image_references:
+        unknown_preview = ", ".join(sorted(unknown_image_references)[:10])
+        raise TrainingRoiVisualizationError(
+            "Autolabel draft cannot be matched to source images: "
+            f"missing_image_references={missing_image_references} "
+            f"unknown_image_references={len(unknown_image_references)}"
+            + (f" ({unknown_preview})" if unknown_preview else "")
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stats: Dict[str, Any] = {
+        "source_images": len(source_images),
+        "draft_rows": len(label_rows),
+        "saved": 0,
+        "images_with_hands": 0,
+        "images_without_hands": 0,
+        "positive_hands": 0,
+        "teacher_abstain_rois": 0,
+        "invalid_landmark_count": 0,
+        "out_of_bounds_landmarks": 0,
+        "read_failures": 0,
+        "write_failures": 0,
+    }
+    for source_image in track_progress(
+        source_images,
+        enabled=show_progress,
+        description="Visualize originals",
+        unit="image",
+    ):
+        image = read_image(source_image)
+        if image is None:
+            stats["read_failures"] += 1
+            continue
+        overlay = ensure_bgr(to_uint8_gray(image))
+        height, width = overlay.shape[:2]
+        positive_rows = [
+            row
+            for row in rows_by_image[source_image.name]
+            if bool((row.get("hand_presence") or {}).get("present", False))
+        ]
+        stats["teacher_abstain_rois"] += (
+            len(rows_by_image[source_image.name]) - len(positive_rows)
+        )
+
+        rendered_hands = 0
+        for row in positive_rows:
+            coordinates = _landmark_coordinates(row, "landmarks_image_px")
+            if len(coordinates) != 21:
+                stats["invalid_landmark_count"] += 1
+                continue
+            out_of_bounds = sum(
+                1
+                for x, y in coordinates.values()
+                if x < 0 or x >= width or y < 0 or y >= height
+            )
+            stats["out_of_bounds_landmarks"] += out_of_bounds
+            _draw_landmarks(overlay, coordinates)
+            rendered_hands += 1
+
+            handedness = row.get("handedness") or {}
+            label = str(handedness.get("label", "unknown"))
+            score = handedness.get("score")
+            try:
+                score_text = f"{float(score):.3f}" if score is not None else "n/a"
+            except (TypeError, ValueError):
+                score_text = str(score)
+            wrist_x, wrist_y = coordinates[0]
+            text_y = max(16, min(height - 5, wrist_y - 8))
+            _draw_text(
+                overlay,
+                f"hand={rendered_hands} {label}={score_text}",
+                (max(5, min(width - 175, wrist_x + 8)), text_y),
+                (0, 255, 0) if out_of_bounds == 0 else (0, 165, 255),
+            )
+
+        stats["positive_hands"] += rendered_hands
+        if rendered_hands:
+            stats["images_with_hands"] += 1
+            status_color = (0, 255, 0)
+        else:
+            stats["images_without_hands"] += 1
+            status_color = (0, 0, 255)
+        _draw_text(
+            overlay,
+            f"variant={proposal_variant} hands={rendered_hands}",
+            (5, 16),
+            status_color,
+            scale=0.45,
+        )
+
+        if write_image(output_dir / source_image.name, overlay):
+            stats["saved"] += 1
+        else:
+            stats["write_failures"] += 1
+
+    stale_removed = 0
+    for path in output_dir.iterdir():
+        if (
+            path.is_file()
+            and path.suffix.lower() in {".tif", ".tiff"}
+            and path.name not in source_names
+        ):
+            path.unlink()
+            stale_removed += 1
+    stats["stale_removed"] = stale_removed
+    stats["output_dir"] = str(output_dir.resolve())
+
+    if stats["saved"] != len(source_images):
+        raise TrainingRoiVisualizationError(
+            "Original-image visualization is incomplete: "
+            f"saved={stats['saved']} expected={len(source_images)}"
+        )
     return stats
 
 

@@ -29,6 +29,7 @@ make source-check DATASET_SCOPE=pretrain DATASET_ID=demo CAPTURE_SOURCE_ID=room-
 make train-autolabel DATASET_SCOPE=pretrain DATASET_ID=demo CAPTURE_SOURCE_ID=room-near-daylight-normal-train-s01-alice PROPOSAL_VARIANT=eos-1.0
 make eval-autolabel DATASET_SCOPE=eval DATASET_ID=demo-eval CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
 make autolabel-visualize DATASET_SCOPE=pretrain/eval DATASET_ID=demo CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-1.0
+make autolabel-visualize-original DATASET_SCOPE=pretrain/eval DATASET_ID=demo CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-1.0
 make hand-cvat-export DATASET_SCOPE=eval DATASET_ID=demo-eval CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
 make hand-cvat-import DATASET_SCOPE=eval DATASET_ID=demo-eval CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
 make source-publish DATASET_SCOPE=eval DATASET_ID=demo-eval CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0

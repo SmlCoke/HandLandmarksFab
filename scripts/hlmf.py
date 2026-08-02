@@ -36,6 +36,7 @@ from hand_autolabel.mediapipe_roi_labeler import label_roi_manifest
 from hand_autolabel.mediapipe_roi_visualization import (
     TrainingRoiVisualizationError,
     render_autolabel_visualizations,
+    render_original_image_visualizations,
 )
 from hand_autolabel.palm_mediapipe import run_mediapipe_palm_detector
 from hand_autolabel.palm_onnx import run_onnx_palm_detector
@@ -62,6 +63,7 @@ def _parser() -> argparse.ArgumentParser:
         "autolabel-train",
         "autolabel-eval",
         "autolabel-visualize",
+        "autolabel-visualize-original",
     )
     for name in source_commands:
         command = sub.add_parser(name)
@@ -76,6 +78,12 @@ def _parser() -> argparse.ArgumentParser:
                 choices=("true", "false"),
                 default=None,
                 help="Override visualization.enabled for this autolabel run.",
+            )
+            command.add_argument(
+                "--original-visualization",
+                choices=("true", "false"),
+                default=None,
+                help="Override visualization.original_image_enabled for this autolabel run.",
             )
     prepare_negative = sub.add_parser("prepare-negative-review")
     prepare_negative.add_argument("--dataset-root", required=True)
@@ -112,6 +120,11 @@ def _load_public_configs(args: argparse.Namespace) -> Dict[str, Any]:
     visualization_override = getattr(args, "visualization", None)
     if visualization_override is not None:
         cfg.setdefault("visualization", {})["enabled"] = visualization_override == "true"
+    original_visualization_override = getattr(args, "original_visualization", None)
+    if original_visualization_override is not None:
+        cfg.setdefault("visualization", {})["original_image_enabled"] = (
+            original_visualization_override == "true"
+        )
     return cfg
 
 
@@ -378,6 +391,15 @@ def _run_mediapipe(
         trigger="autolabel",
         show_progress=show_progress,
     )
+    original_visualization_report = _run_original_image_visualization(
+        args,
+        rows,
+        root,
+        paths,
+        enabled=(cfg.get("visualization") or {}).get("original_image_enabled", False),
+        trigger="autolabel",
+        show_progress=show_progress,
+    )
     stats = summarize_label_rows(rows, cfg)
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -387,6 +409,7 @@ def _run_mediapipe(
         "teacher_abstain": stats["negative"],
         "label_origin": "mediapipe",
         "visualization": visualization_report,
+        "original_image_visualization": original_visualization_report,
     }
     write_json(paths["qc"] / "mediapipe_report.json", report)
     return report
@@ -458,6 +481,76 @@ def _run_existing_autolabel_visualization(
         args,
         cfg,
         rows,
+        paths,
+        enabled=True,
+        trigger="standalone",
+        show_progress=show_progress,
+    )
+
+
+def _run_original_image_visualization(
+    args: argparse.Namespace,
+    rows: List[Dict[str, Any]],
+    source: Path,
+    paths: Dict[str, Path],
+    *,
+    enabled: Any,
+    trigger: str,
+    show_progress: bool,
+) -> Dict[str, Any]:
+    if not isinstance(enabled, bool):
+        raise DatasetContractError(
+            "visualization.original_image_enabled must be true or false"
+        )
+    output_dir = source / "visualizations" / "original_image_landmarks" / args.proposal_variant
+    report: Dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "enabled": enabled,
+        "trigger": trigger,
+        "output_relpath": str(
+            output_dir.relative_to(Path(args.dataset_root).resolve())
+        ).replace("\\", "/"),
+    }
+    if enabled:
+        try:
+            report.update(
+                render_original_image_visualizations(
+                    rows,
+                    source / "images",
+                    output_dir,
+                    proposal_variant=args.proposal_variant,
+                    show_progress=show_progress,
+                )
+            )
+        except TrainingRoiVisualizationError as exc:
+            raise DatasetContractError(str(exc)) from exc
+    write_json(paths["qc"] / "original_image_visualization_report.json", report)
+    return report
+
+
+def _run_existing_original_image_visualization(
+    args: argparse.Namespace,
+    *,
+    show_progress: bool = True,
+) -> Dict[str, Any]:
+    dataset_root = Path(args.dataset_root).resolve()
+    source = source_root(
+        dataset_root,
+        args.scope,
+        args.dataset_id,
+        args.capture_source_id,
+    )
+    paths = proposal_paths(source, args.proposal_variant)
+    draft_path = paths["roi"] / "hand_landmarks_autolabel_draft.jsonl"
+    rows = read_jsonl(draft_path)
+    if not rows:
+        raise DatasetContractError(
+            f"MediaPipe autolabel draft is missing or empty: {draft_path}"
+        )
+    return _run_original_image_visualization(
+        args,
+        rows,
+        source,
         paths,
         enabled=True,
         trigger="standalone",
@@ -652,6 +745,8 @@ def main() -> None:
             result = _run_source_pipeline(args, cfg, evaluation=True)
         elif args.command == "autolabel-visualize":
             result = _run_existing_autolabel_visualization(args, cfg)
+        elif args.command == "autolabel-visualize-original":
+            result = _run_existing_original_image_visualization(args)
         elif args.command == "prepare-negative-review":
             rows = [row for path in args.candidate_labels for row in read_jsonl(Path(path))]
             result = prepare_negative_review(Path(args.dataset_root), args.negative_dataset_id, rows)

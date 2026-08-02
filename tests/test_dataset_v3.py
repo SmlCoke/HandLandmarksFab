@@ -31,6 +31,7 @@ from hand_autolabel.formats import load_yaml_config, read_jsonl, write_jsonl
 from hand_autolabel.mediapipe_roi_visualization import (
     evenly_spaced_sample,
     render_autolabel_visualizations,
+    render_original_image_visualizations,
 )
 from hand_autolabel.progress import track_progress
 from scripts.hlmf import (
@@ -38,6 +39,7 @@ from scripts.hlmf import (
     _parser,
     _partition_labels,
     _run_existing_autolabel_visualization,
+    _run_existing_original_image_visualization,
 )
 from tools.downsample import downsample
 
@@ -408,14 +410,22 @@ class DatasetV3Tests(unittest.TestCase):
                 "p01",
                 "--visualization",
                 "false",
+                "--original-visualization",
+                "false",
             ]
         )
         with patch.dict(
             os.environ,
-            {"AUTOLABEL_OVERRIDES": '{"visualization":{"enabled":true}}'},
+            {
+                "AUTOLABEL_OVERRIDES": (
+                    '{"visualization":{"enabled":true,'
+                    '"original_image_enabled":true}}'
+                )
+            },
         ):
             cfg = _load_public_configs(args)
         self.assertFalse(cfg["visualization"]["enabled"])
+        self.assertFalse(cfg["visualization"]["original_image_enabled"])
 
     def test_standalone_visualization_reuses_existing_autolabel_draft(self) -> None:
         source = source_root(self.root, "pretrain", "national-r1", CAPTURE_TRAIN)
@@ -465,6 +475,103 @@ class DatasetV3Tests(unittest.TestCase):
             len(list((paths["roi"] / "hand_landmarks_visualization").glob("*.png"))),
         )
 
+    def test_original_image_visualization_preserves_every_source_filename(self) -> None:
+        source_images = self.root / "source_images"
+        write_tiff(source_images / "frame_alpha.tif", shape=(96, 128), value=31)
+        write_tiff(source_images / "frame_beta.tiff", shape=(96, 128), value=47)
+        points = [
+            {
+                "id": landmark_id,
+                "x": 15 + (landmark_id % 5) * 18,
+                "y": 25 + (landmark_id // 5) * 13,
+            }
+            for landmark_id in range(21)
+        ]
+        rows = [
+            {
+                "image": "frame_alpha.tif",
+                "hand_presence": {"present": True},
+                "handedness": {"label": "Right", "score": 0.91},
+                "landmarks_image_px": points,
+            },
+            {
+                "image": "frame_beta.tiff",
+                "hand_presence": {"present": False},
+                "handedness": {"label": "unknown", "score": None},
+                "landmarks_image_px": [],
+            },
+        ]
+        output = self.root / "original_visualization" / "p01"
+        write_tiff(output / "stale.tif", shape=(8, 8), value=0)
+        stats = render_original_image_visualizations(
+            rows,
+            source_images,
+            output,
+            proposal_variant="p01",
+        )
+
+        expected_names = {"frame_alpha.tif", "frame_beta.tiff"}
+        self.assertEqual(expected_names, {path.name for path in output.iterdir()})
+        self.assertEqual(2, stats["saved"])
+        self.assertEqual(1, stats["images_with_hands"])
+        self.assertEqual(1, stats["images_without_hands"])
+        self.assertEqual(1, stats["positive_hands"])
+        self.assertEqual(1, stats["teacher_abstain_rois"])
+        self.assertEqual(1, stats["stale_removed"])
+        rendered = cv2.imread(str(output / "frame_alpha.tif"), cv2.IMREAD_UNCHANGED)
+        self.assertIsNotNone(rendered)
+        self.assertEqual(3, rendered.ndim)
+        self.assertGreater(int(rendered.max()), 31)
+
+        second_output = self.root / "original_visualization" / "p02"
+        render_original_image_visualizations(
+            rows,
+            source_images,
+            second_output,
+            proposal_variant="p02",
+        )
+        self.assertEqual(expected_names, {path.name for path in second_output.iterdir()})
+
+    def test_standalone_original_visualization_reuses_existing_draft(self) -> None:
+        source = source_root(self.root, "eval", "national-r1", CAPTURE_VAL)
+        paths = proposal_paths(source, "p01")
+        write_tiff(source / "images" / "original_001.tiff", shape=(96, 128), value=21)
+        points = [
+            {"id": landmark_id, "x": 20 + landmark_id, "y": 30 + landmark_id}
+            for landmark_id in range(21)
+        ]
+        write_jsonl(
+            paths["roi"] / "hand_landmarks_autolabel_draft.jsonl",
+            [
+                {
+                    "image": "original_001.tiff",
+                    "hand_presence": {"present": True},
+                    "handedness": {"label": "Left", "score": 0.8},
+                    "landmarks_image_px": points,
+                }
+            ],
+        )
+        args = SimpleNamespace(
+            dataset_root=str(self.root),
+            scope="eval",
+            dataset_id="national-r1",
+            capture_source_id=CAPTURE_VAL,
+            proposal_variant="p01",
+        )
+        report = _run_existing_original_image_visualization(
+            args,
+            show_progress=False,
+        )
+
+        output = source / "visualizations" / "original_image_landmarks" / "p01"
+        self.assertTrue(report["enabled"])
+        self.assertEqual("standalone", report["trigger"])
+        self.assertEqual(1, report["saved"])
+        self.assertEqual({"original_001.tiff"}, {path.name for path in output.iterdir()})
+        self.assertTrue(
+            (paths["qc"] / "original_image_visualization_report.json").is_file()
+        )
+
     def test_public_makefile_has_no_palm_review_or_manual_roi_interface(self) -> None:
         root = Path(__file__).resolve().parents[1]
         makefile = (root / "Makefile").read_text(encoding="utf-8")
@@ -472,6 +579,7 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertNotIn("import_palm", makefile)
         self.assertIn("Hand ROIs are always program-generated", makefile)
         self.assertIn("autolabel-visualize:", makefile)
+        self.assertIn("autolabel-visualize-original:", makefile)
         self.assertEqual({"hlmf.py"}, {path.name for path in (root / "scripts").glob("*.py")})
         self.assertEqual(
             {"autolabel.yaml", "review.yaml", "datasets.yaml", "cvat_label.json"},
@@ -483,7 +591,11 @@ class DatasetV3Tests(unittest.TestCase):
         datasets = load_yaml_config(root / "configs" / "datasets.yaml")
         self.assertIn("palm", autolabel)
         self.assertEqual(
-            {"enabled": False, "train_max_samples": 200},
+            {
+                "enabled": False,
+                "original_image_enabled": False,
+                "train_max_samples": 200,
+            },
             autolabel["visualization"],
         )
         self.assertNotIn("cvat", autolabel)

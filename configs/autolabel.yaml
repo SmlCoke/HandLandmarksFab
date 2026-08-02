@@ -57,5 +57,7 @@ quality:
 visualization:
   # Global default. Override one high-level run with VISUALIZATION=true/false.
   enabled: false
+  # Draw projected landmarks on every original image, grouped by proposal variant.
+  original_image_enabled: false
   # Train uses a deterministic, evenly spaced sample; Val/Test always render all ROIs.
   train_max_samples: 200

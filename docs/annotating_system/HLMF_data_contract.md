@@ -23,9 +23,13 @@ HAND_DATASET_ROOT/
 03_reviewed/<proposal_variant>/
 05_labels/<proposal_variant>/
 qc/<proposal_variant>/
+visualizations/original_image_landmarks/<proposal_variant>/
+  <original_image_name>.tif|.tiff
 ```
 
 `hand_landmarks_visualization/` 是可删除、可重建的自动标注审核派生物，不是训练或评估输入。启用时 Train 只包含按 manifest 顺序等距抽取的最多 `visualization.train_max_samples` 张 ROI；Val/Test 包含该来源的全部实际 ROI。对应的 resolved 开关、触发方式、选择策略、可用/选择/保存数量和输出路径记录在 `qc/<proposal_variant>/autolabel_visualization_report.json`。已有 draft 可通过 `make autolabel-visualize ...` 重建该目录；该操作只读取 `images/` 和 `hand_landmarks_autolabel_draft.jsonl`。CVAT 导出与导入不写入该目录。
+
+`visualizations/original_image_landmarks/<proposal_variant>/` 是按变体隔离、可删除重建的原图审核派生物。每个变体目录必须为来源平铺 `images/` 中的每一张 TIFF 输出一张同名文件，扩展名也保持不变；同一原图关联的所有 positive ROI 使用 draft 的 `landmarks_image_px` 一并绘制，没有 positive 时输出 `hands=0`。该目录不进入训练、评估或 CVAT。全局开关为 `visualization.original_image_enabled`，Train/Eval 单次覆盖为 `ORIGINAL_VISUALIZATION=true|false`，已有 draft 可用 `make autolabel-visualize-original ...` 重建；执行记录写入 `qc/<proposal_variant>/original_image_visualization_report.json`。
 
 ## 模型版本契约
 
