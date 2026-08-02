@@ -181,7 +181,7 @@ make train-autolabel \
   PROPOSAL_VARIANT=eos-1.0
 ```
 
-仅本次临时启用可视化时，在同一命令末尾增加：
+仅**本次临时启用可视化时**，在同一命令末尾增加：
 
 ```bash
 VISUALIZATION=true
@@ -193,9 +193,9 @@ VISUALIZATION=true
 
 输入：来源 `images/`、`configs/autolabel.yaml`、`paths.palm_model_onnx` 指向的 Palm ONNX 模型，以及 `mediapipe.model_asset_path` 指向的 MediaPipe task 文件。
 
-处理：该高层命令依次执行来源检查、Palm 推理、稳定 proposal slot 分配、canonical ROI 裁剪、MediaPipe ROI 推理、质量门控和 Train 来源发布。来源检查、Palm 推理、ROI 裁剪和 MediaPipe 推理都会显示 tqdm 进度、处理速度与预计剩余时间。Palm 结果从产生到发布都不经过人工修改。
+处理：该高层命令依次执行**来源检查**、**Palm 推理**、**稳定 proposal slot 分配**、**canonical ROI 裁剪**、**MediaPipe ROI 推理**、**质量门控**和 **Train 来源发布**。来源检查、Palm 推理、ROI 裁剪和 MediaPipe 推理都会显示 tqdm 进度、处理速度与预计剩余时间。Palm 结果从产生到发布都不经过人工修改。
 
-启用可视化时，程序按稳定的 ROI manifest 顺序做等距索引抽样，覆盖首尾并尽量均匀地分布在整份来源中；最多输出 `visualization.train_max_samples` 张，默认 200 张。每张审核图直接以 canonical Hand ROI 为底图，叠加 MediaPipe 21 点、骨架连线、presence 和 handedness。该目录只用于快速人工抽查，不替代标签 JSONL，也不进入 CVAT。
+启用可视化时，**程序按稳定的 ROI manifest 顺序做等距索引抽样**，覆盖首尾并**尽量均匀地分布在整份来源中**；最多输出 `visualization.train_max_samples` 张，默认 200 张。每张审核图直接以 canonical Hand ROI 为底图，叠加 MediaPipe 21 点、骨架连线、presence 和 handedness。该目录只用于快速人工抽查，不替代标签 JSONL，也不进入 CVAT。
 
 启用原图可视化时，程序直接读取 draft 中已经还原好的 `landmarks_image_px`，将同一原图关联的全部 positive ROI 关键点绘制在来源 TIFF 上。该分支始终输出来源 `images/` 中的全部原图；没有有效关键点的图片也会生成并标记 `hands=0`。输出文件名（含 `.tif`/`.tiff` 扩展名）与原图完全相同，因此不同变体目录可以按同名文件直接对比。
 
