@@ -14,7 +14,7 @@ python -m pip install -r requirements.txt
 python -m pip check
 ```
 
-Ubuntu 服务器缺少 OpenCV/MediaPipe 所需系统动态库时，一次性安装：
+**Ubuntu 服务器缺少 OpenCV/MediaPipe 所需系统动态库时**，一次性安装：
 
 ```bash
 apt-get update
@@ -49,7 +49,7 @@ export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
 cd /path/to/HandLandmarkerFab
 ```
 
-每条来源命令都需要四个身份参数：
+**每条来源命令都需要四个身份参数**：
 
 - `DATASET_SCOPE`：`pretrain` 或 `eval`。
 - `DATASET_ID`：一次数据发布的逻辑 ID。
@@ -83,7 +83,7 @@ Val/Test 来源放在：
 HAND_DATASET_ROOT/EValSource/<dataset_id>/<capture_source_id>/images/
 ```
 
-`images/` 必须平铺，只能放 `.tif` 或 `.tiff`。不要在里面再建立子目录。
+`images/` **必须平铺**，只能放 `.tif` 或 `.tiff`。不要在里面再建立子目录。
 
 每个来源的派生产物按 proposal 变体隔离：
 
@@ -147,8 +147,8 @@ EValSource/<dataset_id>/<capture_source_id>/images/*.tif[f]
 处理：
 
 1. 检查目录、来源 ID、split 和 TIFF 解码。
-2. `720×1280` TIFF 顺时针无损旋转一次为 `1280×720`；已经是 `1280×720` 时直接通过，重复运行不会再次旋转。
-3. 拒绝其他尺寸、非 TIFF 和解码失败文件。
+2. `720×1280` **TIFF 顺时针无损旋转一次**为 `1280×720`；已经是 `1280×720` 时直接通过，重复运行不会再次旋转。
+3. **拒绝其他尺寸**、非 TIFF 和解码失败文件。
 4. 首次验证时建立并持久化 `raw_image_id`。
 5. 记录文件大小、尺寸、像素 CRC32 和 dHash64 等轻量指纹，并写入 SQLite registry。不会反复计算图片 SHA-256。
 
@@ -220,9 +220,9 @@ make eval-autolabel \
 
 输入：Val/Test 来源的 `images/`、Palm 模型、MediaPipe 模型和 `autolabel.yaml`。
 
-处理：与 Train 一样运行来源检查、Palm、程序化 ROI 和 MediaPipe，但只保留 Palm Detector 实际产生的 runtime ROI，并强制关闭低分候选负样本。这里不会补 Palm 漏检，也不会从原图人工补 ROI。
+处理：与 Train 一样运行来源检查、Palm、程序化 ROI 和 MediaPipe，但只保留 Palm Detector 实际产生的 runtime ROI，并**强制关闭低分候选负样本**。这里**不会补 Palm 漏检**，也**不会从原图人工补 ROI**。
 
-输出：Palm、ROI、MediaPipe draft 和 QC 文件与 Train 的路径相同，但此时不发布最终评估标签。命令返回的下一步是 CVAT 导出。
+输出：Palm、ROI、MediaPipe draft 和 QC 文件与 Train 的路径相同，但**此时不发布最终评估标签**。命令返回的下一步是 CVAT 导出。
 
 限制：每个 Val/Test split 最多 2000 张原图、3000 个实际生成 ROI；最终在来源发布阶段根据 dataset manifest 统一检查。
 
@@ -267,7 +267,12 @@ configs/cvat_label.json
 - `no_hand`：该固定 Hand ROI 内没有手。
 - `ignore_for_training`：目标手或关键点无法可靠判定，本条不进入训练或评估。
 
-复核规则：教师点正确则不动；明确错误时只修正错误点；teacher abstain 且能可靠判断时删除 `no_hand`、补齐完整 skeleton 和 handedness；无手时只保留 `no_hand`；无法可靠决定时使用 `ignore_for_training`。不得绘制、调整或替换 ROI。
+复核规则：
+1. 教师点正确则不动；
+2. **明确错误时只修正错误点**；
+3. teacher abstain 且**能可靠判断时删除** `no_hand`、补齐完整 skeleton 和 handedness；
+4. 无手时只保留 `no_hand`；
+5. 无法可靠决定时使用 `ignore_for_training`。不得绘制、调整或替换 ROI。
 
 ## 8. 阶段五：导入 CVAT 复核结果
 
@@ -301,7 +306,12 @@ make hand-cvat-import \
 <source>/qc/<variant>/cvat_import_report.json
 ```
 
-provenance 规则：未修改教师点为 `mediapipe/mediapipe_v1`；人工修正教师点为 `mediapipe_human_corrected/project_consensus_v1`；teacher abstain 后人工完整补标为 `human/project_consensus_v1`。所有复核记录同时保存 `human_reviewed` 和 `human_modified_landmark_ids`。存在阻断错误时不会生成可发布结果，应根据导入报告修复 CVAT XML 后重试。
+provenance 规则：
+- 未修改教师点为 `mediapipe/mediapipe_v1`；
+- 人工修正教师点为 `mediapipe_human_corrected/project_consensus_v1`；
+- teacher abstain 后人工完整补标为 `human/project_consensus_v1`。
+
+所有复核记录同时保存 `human_reviewed` 和 `human_modified_landmark_ids`。存在阻断错误时不会生成可发布结果，应根据导入报告修复 CVAT XML 后重试。
 
 ## 9. 阶段六：发布 Val/Test 来源
 
@@ -355,10 +365,10 @@ make negative-review \
 HAND_DATASET_ROOT/GoldSource/NegativeSamples/<negative_dataset_id>/review/images/<capture_source_id>/
 ```
 
-硬链接只用于服务器同一文件系统内节省空间：不同路径指向同一份文件数据，删除审核树中的一个硬链接不会删除 PretrainSource 原始 ROI。普通 zip/7z 压缩、网盘上传和下载不会保留硬链接关系，但本流程允许离线复核产生普通文件副本。推荐操作如下：
+硬链接只用于服务器同一文件系统内节省空间：**不同路径指向同一份文件数据**，**删除审核树中的一个硬链接不会删除 PretrainSource 原始 ROI**。普通 zip/7z 压缩、网盘上传和下载不会保留硬链接关系，但**本流程允许离线复核产生普通文件副本**。推荐操作如下：
 
 1. 只压缩并下载本批次的 `review/images/`；服务器上的 `candidate_manifest.jsonl` 和 `README.json` 保持不动。
-2. 在本地只删除不合格图片，不重编码、不改名、不移动相对路径，也不新增图片。
+2. 在**本地只删除不合格图片，不重编码、不改名、不移动相对路径，也不新增图片**。
 3. 复核完成后压缩 `images/`，上传网盘并传回服务器。
 4. 核对目标确实是当前 `negative_dataset_id` 后，只删除服务器上的该批次 `review/images/`，再原路径解压复核后的 `images/`。不得删除整个 `review/`、PretrainSource 原始 ROI、Registry 或任何 `published/`。
 5. 重新上传的普通文件与硬链接文件均可执行 `negative-publish`；该阶段允许发生一次性数据拷贝。
@@ -378,7 +388,7 @@ GoldSource/NegativeSamples/<id>/published/manifest.json
 GoldSource/NegativeSamples/<id>/published/review_report.json
 ```
 
-如果全程在服务器内复核，发布图片继续通过同文件系统硬链接生成，不重复占用图片数据块；如果审核图片经过网盘往返成为普通文件，发布结果保留这一份人工确认后的文件副本，这是人工复核阶段允许的数据拷贝例外。成功后临时 `review/` 被移除；SQLite 将 `negative_dataset_id` 和 `roi_id` 锁定，已使用或作废的 ID 不可复用。
+如果全程在服务器内复核，发布图片继续通过同文件系统硬链接生成，不重复占用图片数据块；如果审核图片经过网盘往返成为普通文件，**发布结果保留这一份人工确认后的文件副本**，这是**人工复核阶段允许的数据拷贝例外**。**成功后临时 `review/` 被移除**；SQLite 将 `negative_dataset_id` 和 `roi_id` 锁定，**已使用或作废的 ID 不可复用**。
 
 ## 11. 阶段八：困难正样本复核与零拷贝发布
 
@@ -401,9 +411,9 @@ make hard-review \
 HAND_DATASET_ROOT/Selections/<selection_id>/review/images/<capture_source_id>/
 ```
 
-人工只删除 MediaPipe 21 点明显错误的 ROI，不重新标点，也不修改 Palm/ROI。
+**人工只删除 MediaPipe 21 点明显错误的 ROI，不重新标点，也不修改 Palm/ROI。**
 
-困难正样本支持与真负样本相同的压缩包/网盘/本地删除式复核。只替换当前 `selection_id` 的 `review/images/`，保留服务器上的 `request_manifest.jsonl` 和 `README.json`；图片相对路径与文件名必须保持不变。重新上传的图片可以是普通文件，不要求保留硬链接。发布时这些审核图片只用于判断哪些 ROI 被保留，最终 `selection.jsonl` 仍零拷贝引用 PretrainSource 原始 ROI。
+困难正样本支持与真负样本相同的压缩包/网盘/本地删除式复核。只替换当前 `selection_id` 的 `review/images/`，保留服务器上的 `request_manifest.jsonl` 和 `README.json`；图片相对路径与文件名必须保持不变。重新上传的图片可以是普通文件，不要求保留硬链接。发布时这些审核图片**只用于判断哪些 ROI 被保留**，最终 `selection.jsonl` 仍零拷贝引用 PretrainSource 原始 ROI。
 
 发布命令：
 
@@ -418,7 +428,7 @@ Selections/<selection_id>/published/selection.jsonl
 Selections/<selection_id>/published/manifest.json
 ```
 
-selection 继续引用 PretrainSource 原 ROI，不发布图片副本；`manifest.json` 记录保留量、删除量和 `zero_copy_reference_pretrain_roi` 策略。
+**selection 继续引用 PretrainSource 原 ROI，不发布图片副本**；`manifest.json` 记录保留量、删除量和 `zero_copy_reference_pretrain_roi` 策略。
 
 ## 12. 阶段九：Registry、配置和代码检查
 
@@ -447,7 +457,7 @@ make help
 
 ### 13.1 路径与图像契约
 
-- `paths.palm_model_onnx`：Eos（Palm Detector）ONNX，相对路径按 HLMF 仓库根目录解析；当前值为 `models/palm_detector/eos-1.0/model_opt.onnx`。后续模型放入对应的 `models/palm_detector/eos-*/` 目录。更换模型或改变会影响 proposal/ROI 的配置时，必须同时使用新的 `PROPOSAL_VARIANT`，防止不同结果写入同一版本目录。
+- `paths.palm_model_onnx`：Eos（Palm Detector）ONNX，相对路径按 HLMF 仓库根目录解析；当前值为 `models/palm_detector/eos-1.0/model_opt.onnx`。后续模型放入对应的 `models/palm_detector/eos-*/` 目录。**更换模型或改变会影响 proposal/ROI 的配置时，必须同时使用新的 `PROPOSAL_VARIANT`，防止不同结果写入同一版本目录**。
 - `image.width/height/channels`：规范化原图契约，当前固定为 `1280/720/1`，不可在已有数据中随意修改。
 - `image.accepted_extensions`：当前只允许 TIFF；增加有损格式会破坏来源质量假设，不建议修改。
 
@@ -455,10 +465,10 @@ make help
 
 - `palm.backend`：`aethersign_onnx` 使用 `palm_model_onnx`；`mediapipe_official` 用于受支持的官方 Palm 后端。切换后端应使用新 proposal variant。
 - `input_size`：Palm 网络输入尺寸，必须与模型一致。
-- `score_threshold`：runtime proposal 的最低分。提高会减少实际 ROI，降低会增加 ROI；这不是人工修框入口。
-- `nms_iou_threshold`、`cross_head_suppress_iou`：控制同一检测头和跨检测头的重复 proposal 抑制。修改会改变 proposal slot 和 ROI 集合，应发布为新 variant。
+- `score_threshold`：**runtime proposal 的最低分。提高会减少实际 ROI**，降低会增加 ROI；这不是人工修框入口。
+- `nms_iou_threshold`、`cross_head_suppress_iou`：**控制同一检测头和跨检测头的重复 proposal 抑制**。修改会改变 proposal slot 和 ROI 集合，应发布为新 variant。
 - `max_detections`：每张原图最多保留的 runtime proposal 数，当前最多双手。
-- `keep_low_score_candidates_for_negatives` 和 `negative_candidate_threshold`：仅影响 Train 候选负样本。Val/Test 会由程序强制关闭候选负样本。
+- `keep_low_score_candidates_for_negatives` 和 `negative_candidate_threshold`：**仅影响 Train 候选负样本。Val/Test 会由程序强制关闭候选负样本。**
 - `compatible_bbox_expand`、官方 tile 参数：只在对应 Palm backend 中生效；任何几何/搜索范围变化都需要新 variant。
 
 ### 13.3 Hand ROI
@@ -473,7 +483,7 @@ make help
 
 - `model_asset_path`：Hand Landmarker `.task` 文件路径。
 - `num_hands`：每个 Palm ROI 只标目标手，当前为 1。
-- `min_hand_detection_confidence`、`min_hand_presence_confidence`、`min_tracking_confidence`：教师确认门限。提高会增加 teacher abstain，降低会增加自动 positive 及潜在误标。调整前应通过 QC 报告抽查，且不得把 abstain 自动当真负样本。
+- `min_hand_detection_confidence`、`min_hand_presence_confidence`、`min_tracking_confidence`：教师确认门限。**提高会增加 teacher abstain，降低会增加自动 positive 及潜在误标**。调整前应通过 QC 报告抽查，且不得把 abstain 自动当真负样本。
 
 ### 13.5 质量门控
 
@@ -482,20 +492,20 @@ make help
 
 ## 14. `configs/review.yaml` 与 `configs/cvat_label.json`
 
-`review.yaml` 只包含 Hand ROI CVAT 导入导出的语义映射和人工复核门控；不包含 Palm、ROI 几何或 MediaPipe 参数。`cvat_label.json` 是创建 CVAT 项目/任务时使用的标签 schema。
+`review.yaml` 只包含 Hand ROI CVAT **导入导出的语义映射和人工复核门控**；不包含 Palm、ROI 几何或 MediaPipe 参数。`cvat_label.json` 是创建 CVAT 项目/任务时使用的标签 schema。
 
 ### 14.1 CVAT 与人工复核参数
 
 - `cvat.label_name`：必须与 `cvat_label.json` 的 `hand_landmarks` 一致。
 - `*_label_name`：必须与五个 tag 的大小写完全一致；当前分别是 `no_hand`、`Left`、`Right`、`unknown_handedness`、`ignore_for_training`。
 - `skeleton_point_labels`：固定为字符串 `1..21`。
-- `review.require_explicit_presence_decision`：要求每个 ROI 明确为 skeleton 或 `no_hand`。
-- `review.require_explicit_handedness_decision`：有 skeleton 时要求 Left/Right/unknown 决策。
+- `review.require_explicit_presence_decision`：**要求每个 ROI 明确为 skeleton 或 `no_hand`**。
+- `review.require_explicit_handedness_decision`：**有 skeleton 时要求 Left/Right/unknown 决策**。
 - `review.manual_roi_editing`：必须保持 `false`。
 
 ## 15. `configs/datasets.yaml`
 
-`datasets.yaml` 是 operator-owned 发布集合目录：`pretrain.dataset_ids`、`evaluation.val_dataset_ids/test_dataset_ids` 记录采用的数据集 ID，`proposal_variants` 记录各数据集选择的 Palm 变体。单来源命令仍通过 Make 参数接收这些 ID；该文件不用于手工拼路径或存图片。
+`datasets.yaml` 是 operator-owned 发布集合目录：`pretrain.dataset_ids`、`evaluation.val_dataset_ids/test_dataset_ids` **记录采用的数据集 ID**，`proposal_variants` 记录各数据集**选择的 Palm 变体**。单来源命令仍通过 Make 参数接收这些 ID；该文件不用于手工拼路径或存图片。
 
 `policies.capture_source_split` 和 `one_proposal_variant_per_capture_source` 应保持 `fail`；`performer_cross_split` 默认 `warn`，需要严格人员隔离时可升级为 `fail`。`evaluation_limits.max_raw_images_per_split` 和 `max_rois_per_split` 是 Val/Test 发布硬上限，默认分别为 2000 和 3000。
 
