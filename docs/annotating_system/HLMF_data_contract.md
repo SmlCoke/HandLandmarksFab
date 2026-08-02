@@ -21,6 +21,10 @@ HAND_DATASET_ROOT/
 qc/<proposal_variant>/
 ```
 
+## 模型版本契约
+
+Palm Detector 的产品名为 **Eos**。当前冻结模型为 `eos-1.0`，仓库相对路径是 `models/palm_detector/eos-1.0/model_opt.onnx`，对应的 `proposal_variant` 为 `eos-1.0`。后续模型文件放入 `models/palm_detector/eos-*/model_opt.onnx`；更换 Eos 版本或修改会改变 proposal/ROI 的参数时，必须使用新的唯一 `proposal_variant`，不得覆盖已有派生产物。
+
 ## 稳定身份
 
 - `capture_source_id`：`<background>-<distance>-<lighting>-<condition>-<split>-<session>-<performer>`。

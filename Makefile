@@ -5,7 +5,7 @@ HAND_DATASET_ROOT ?= /root/autodl-tmp/DatesetFab
 DATASET_SCOPE ?= pretrain
 DATASET_ID ?=
 CAPTURE_SOURCE_ID ?=
-PROPOSAL_VARIANT ?= p01
+PROPOSAL_VARIANT ?= eos-1.0
 AUTOLABEL_CONFIG ?= configs/autolabel.yaml
 REVIEW_CONFIG ?= configs/review.yaml
 DATASETS_CONFIG ?= configs/datasets.yaml
@@ -25,7 +25,7 @@ SOURCE_ARGS = --dataset-root "$(HAND_DATASET_ROOT)" --scope "$(DATASET_SCOPE)" -
 help:
 	@echo HLMF 3.0 - Palm proposals to versioned Hand ROI datasets
 	@echo Configs: autolabel.yaml=automatic labels, review.yaml=Hand CVAT, datasets.yaml=publication, cvat_label.json=CVAT schema
-	@echo   make source-check DATASET_SCOPE=pretrain/eval DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=p01
+	@echo   make source-check DATASET_SCOPE=pretrain/eval DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-1.0
 	@echo   make train-autolabel ...          Validate, Palm, ROI, MediaPipe and publish Train
 	@echo   make eval-autolabel ...           Validate, Palm, ROI and MediaPipe for Val/Test
 	@echo   make hand-cvat-export ...         Export Hand ROI CVAT XML only

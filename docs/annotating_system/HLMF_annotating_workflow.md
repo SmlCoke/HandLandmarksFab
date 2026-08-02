@@ -30,7 +30,15 @@ ldconfig
 
 ## 1. 系统边界
 
-HLMF 从既有 Palm Detector 模型开始工作。程序在原图上运行 Palm Detector，原样使用模型给出的 bbox、p0 和 p9，随后自动生成 `256×256` canonical Hand ROI，再在 ROI 内运行 MediaPipe Hand Landmarker。
+项目中的三级模型功能名与产品名固定对应如下：
+
+- Palm Detector：**Eos**。如第一缕微光划破黑暗，模型首先从灰度画面中发现并定位手掌，为后续链路指明方向。
+- Hand Landmarker：**Iris**。模型连接离散关键点，将像素编织成完整、可解释的手部几何结构。
+- Gloss Translator：**Muse**。模型为物理动作赋予语言与语义，将骨骼序列转化为人类可读的 Gloss。
+
+HLMF 从既有 Palm Detector 模型 Eos 开始工作。当前冻结版本为 `eos-1.0`，文件位于 `models/palm_detector/eos-1.0/model_opt.onnx`。程序在原图上运行 Eos，原样使用模型给出的 bbox、p0 和 p9，随后自动生成 `256×256` canonical Hand ROI，再在 ROI 内运行 MediaPipe Hand Landmarker。这里的 MediaPipe 模型是 HLMF 的自动标注工具，不是产品链路中的 Iris 部署模型。
+
+后续 Eos 模型统一放入 `models/palm_detector/eos-*/model_opt.onnx`。切换模型版本时必须同步修改 `configs/autolabel.yaml` 中的模型路径，并使用新的 `PROPOSAL_VARIANT` 隔离派生产物。
 
 HLMF 不制作 Palm Detector 训练数据，不导出或导入 Palm CVAT 标注，也不允许人工修改 bbox、p0、p9 或手工划分 Hand ROI。唯一的人工复核对象是程序已经生成的 Hand ROI，复核内容仅包括 21 个关键点、handedness 和 Hand ROI 内的状态标签。
 
@@ -46,7 +54,7 @@ cd /path/to/HandLandmarkerFab
 - `DATASET_SCOPE`：`pretrain` 或 `eval`。
 - `DATASET_ID`：一次数据发布的逻辑 ID。
 - `CAPTURE_SOURCE_ID`：一次拍摄来源的固定七段 ID。
-- `PROPOSAL_VARIANT`：Palm 模型和 proposal 配置的版本 ID，例如 `palm-v1`。
+- `PROPOSAL_VARIANT`：Palm 模型和 proposal 配置的版本 ID；当前版本使用 `eos-1.0`。
 
 ## 2. 来源命名与目录
 
@@ -119,7 +127,7 @@ make source-check \
   DATASET_SCOPE=pretrain \
   DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=palm-v1
+  PROPOSAL_VARIANT=eos-1.0
 ```
 
 Val/Test 将 `DATASET_SCOPE` 改为 `eval`，并在 ID 的第 5 段使用 `val` 或 `test`。
@@ -167,7 +175,7 @@ make train-autolabel \
   DATASET_SCOPE=pretrain \
   DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=palm-v1
+  PROPOSAL_VARIANT=eos-1.0
 ```
 
 输入：来源 `images/`、`configs/autolabel.yaml`、`paths.palm_model_onnx` 指向的 Palm ONNX 模型，以及 `mediapipe.model_asset_path` 指向的 MediaPipe task 文件。
@@ -207,7 +215,7 @@ make eval-autolabel \
   DATASET_SCOPE=eval \
   DATASET_ID=national-eval-0801 \
   CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice \
-  PROPOSAL_VARIANT=palm-v1
+  PROPOSAL_VARIANT=eos-1.0
 ```
 
 输入：Val/Test 来源的 `images/`、Palm 模型、MediaPipe 模型和 `autolabel.yaml`。
@@ -230,7 +238,7 @@ make hand-cvat-export \
   DATASET_SCOPE=eval \
   DATASET_ID=national-eval-0801 \
   CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice \
-  PROPOSAL_VARIANT=palm-v1
+  PROPOSAL_VARIANT=eos-1.0
 ```
 
 输入：
@@ -279,7 +287,7 @@ make hand-cvat-import \
   DATASET_SCOPE=eval \
   DATASET_ID=national-eval-0801 \
   CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice \
-  PROPOSAL_VARIANT=palm-v1
+  PROPOSAL_VARIANT=eos-1.0
 ```
 
 输入：reviewed XML、原始 MediaPipe draft 和 ROI manifest。
@@ -307,7 +315,7 @@ make source-publish \
   DATASET_SCOPE=eval \
   DATASET_ID=national-eval-0801 \
   CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice \
-  PROPOSAL_VARIANT=palm-v1
+  PROPOSAL_VARIANT=eos-1.0
 ```
 
 输入：`hand_landmarks_reviewed.jsonl`、ROI manifest、raw manifest 和 registry。
@@ -336,7 +344,7 @@ EValSource/<dataset_id>/dataset_manifest.json
 make negative-review \
   HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   NEGATIVE_DATASET_ID=background-neg-0801 \
-  NEGATIVE_CANDIDATE_LABELS="$HAND_DATASET_ROOT/PretrainSource/FullEnhance0801/<capture_source_id>/05_labels/palm-v1/candidate_negatives.jsonl"
+  NEGATIVE_CANDIDATE_LABELS="$HAND_DATASET_ROOT/PretrainSource/FullEnhance0801/<capture_source_id>/05_labels/eos-1.0/candidate_negatives.jsonl"
 ```
 
 输入：一个 Train 来源的 `candidate_negatives.jsonl`。需要合并多个来源时可直接调用 CLI 并重复传入 `--candidate-labels`；公共 Make 入口一次接收一个文件。
@@ -439,7 +447,7 @@ make help
 
 ### 13.1 路径与图像契约
 
-- `paths.palm_model_onnx`：Palm Detector ONNX，相对路径按 HLMF 仓库根目录解析。更换模型时必须同时更换 `PROPOSAL_VARIANT`，防止不同模型结果写入同一版本目录。
+- `paths.palm_model_onnx`：Eos（Palm Detector）ONNX，相对路径按 HLMF 仓库根目录解析；当前值为 `models/palm_detector/eos-1.0/model_opt.onnx`。后续模型放入对应的 `models/palm_detector/eos-*/` 目录。更换模型或改变会影响 proposal/ROI 的配置时，必须同时使用新的 `PROPOSAL_VARIANT`，防止不同结果写入同一版本目录。
 - `image.width/height/channels`：规范化原图契约，当前固定为 `1280/720/1`，不可在已有数据中随意修改。
 - `image.accepted_extensions`：当前只允许 TIFF；增加有损格式会破坏来源质量假设，不建议修改。
 

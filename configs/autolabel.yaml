@@ -7,12 +7,12 @@ dataset:
 paths:
   # Source-local output paths are injected by scripts/hlmf.py.
   images_dir: data/images
-  palm_outputs_dir: data/01_palm/p01
-  roi_crops_dir: data/02_roi_crops/p01
-  reviewed_dir: data/03_reviewed/p01
-  labels_dir: data/05_labels/p01
-  qc_dir: data/qc/p01
-  palm_model_onnx: materials/preminilary/palm/model_opt.onnx
+  palm_outputs_dir: data/01_palm/eos-1.0
+  roi_crops_dir: data/02_roi_crops/eos-1.0
+  reviewed_dir: data/03_reviewed/eos-1.0
+  labels_dir: data/05_labels/eos-1.0
+  qc_dir: data/qc/eos-1.0
+  palm_model_onnx: models/palm_detector/eos-1.0/model_opt.onnx
 
 image:
   width: 1280

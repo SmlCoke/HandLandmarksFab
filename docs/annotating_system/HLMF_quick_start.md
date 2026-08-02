@@ -36,20 +36,22 @@ cd /path/to/HandLandmarkerFab
 
 四个公共配置各自只有一种职责：`configs/autolabel.yaml` 管 Palm/ROI/MediaPipe，`configs/review.yaml` 管 Hand ROI CVAT 规则，`configs/datasets.yaml` 管发布集合和数据上限，`configs/cvat_label.json` 是 CVAT label schema。
 
+当前 Palm Detector 产品版本为 Eos `eos-1.0`。运行前确认 `models/palm_detector/eos-1.0/model_opt.onnx` 存在；本页命令统一使用 `PROPOSAL_VARIANT=eos-1.0`。
+
 ## 1. 来源检查（Source Check）
 
 输入：Train 或 Eval 来源的 TIFF 原图。处理：校验/幂等旋转、建立稳定 raw ID 和 registry。输出：来源下的 `raw_images.jsonl`、`source.json` 和 `qc/image_validation_report.json`。
 
 ```bash
-make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=palm-v1
+make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0
 ```
 
 ## 2A. Train 自动标注与发布（Train Autolabel）
 
-输入：已放好的 Train TIFF、Palm ONNX、MediaPipe task 和 `configs/autolabel.yaml`。处理：Palm → 程序化 Hand ROI → MediaPipe → 质量分流 → 发布。输出位于来源的 `01_palm/palm-v1/`、`02_roi_crops/palm-v1/`、`05_labels/palm-v1/` 和 `qc/palm-v1/`。
+输入：已放好的 Train TIFF、Eos ONNX、MediaPipe task 和 `configs/autolabel.yaml`。处理：Eos → 程序化 Hand ROI → MediaPipe → 质量分流 → 发布。输出位于来源的 `01_palm/eos-1.0/`、`02_roi_crops/eos-1.0/`、`05_labels/eos-1.0/` 和 `qc/eos-1.0/`。
 
 ```bash
-make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=palm-v1
+make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0
 ```
 
 `hand_training_labels.jsonl` 是通过门控的 positive；`candidate_negatives.jsonl` 只能进入后续删除式复核，不能直接训练。
@@ -59,33 +61,33 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretra
 输入：Eval TIFF 和两个模型。处理：只对 Palm 实际检测到的 proposal 自动生成 ROI 和 MediaPipe draft；不保留低分候选负样本。输出位于来源的 `01_palm/`、`02_roi_crops/` 和 `qc/`，此时尚未发布评估标签。
 
 ```bash
-make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=palm-v1
+make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
 ```
 
 ## 3. 导出 Hand ROI CVAT（Hand CVAT Export）
 
-输入：`02_roi_crops/palm-v1/images/`、ROI manifest 和 MediaPipe draft。输出：`03_reviewed/palm-v1/cvat_autolabel.xml`。
+输入：`02_roi_crops/eos-1.0/images/`、ROI manifest 和 MediaPipe draft。输出：`03_reviewed/eos-1.0/cvat_autolabel.xml`。
 
 ```bash
-make hand-cvat-export HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=palm-v1
+make hand-cvat-export HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
 ```
 
 在 CVAT 中只复核程序生成的 Hand ROI。完整标签为 `no_hand`、`Left`、`Right`、`unknown_handedness`、`ignore_for_training` 和 21 点 `hand_landmarks` skeleton。不要绘制或调整 ROI，也不要修改 Palm bbox/p0/p9。
 
 ## 4. 导入 CVAT（Hand CVAT Import）
 
-从 CVAT 导出 Images 1.1 XML，放到 `03_reviewed/palm-v1/cvat_reviewed.xml`。输入为该 XML、原 draft 和 ROI manifest；输出为 `hand_landmarks_reviewed.jsonl` 与 `qc/palm-v1/cvat_import_report.json`。
+从 CVAT 导出 Images 1.1 XML，放到 `03_reviewed/eos-1.0/cvat_reviewed.xml`。输入为该 XML、原 draft 和 ROI manifest；输出为 `hand_landmarks_reviewed.jsonl` 与 `qc/eos-1.0/cvat_import_report.json`。
 
 ```bash
-make hand-cvat-import HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=palm-v1
+make hand-cvat-import HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
 ```
 
 ## 5. 发布 Val/Test 来源（Source Publish）
 
-输入：已通过检查的 reviewed JSONL。处理：发布固定 ROI 标签并更新 dataset manifest。输出：`05_labels/palm-v1/hand_evaluation_labels.jsonl`、发布报告和 `EValSource/<dataset_id>/dataset_manifest.json`。
+输入：已通过检查的 reviewed JSONL。处理：发布固定 ROI 标签并更新 dataset manifest。输出：`05_labels/eos-1.0/hand_evaluation_labels.jsonl`、发布报告和 `EValSource/<dataset_id>/dataset_manifest.json`。
 
 ```bash
-make source-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=palm-v1
+make source-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
 ```
 
 ## 6. 真负样本复核与发布（Negative Review）
@@ -93,7 +95,7 @@ make source-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DA
 输入：Train 的 `candidate_negatives.jsonl`。输出：`GoldSource/NegativeSamples/<id>/review/images/` 删除式审核树。
 
 ```bash
-make negative-review HAND_DATASET_ROOT="$HAND_DATASET_ROOT" NEGATIVE_DATASET_ID=background-neg-0801 NEGATIVE_CANDIDATE_LABELS="$HAND_DATASET_ROOT/PretrainSource/FullEnhance0801/<capture_source_id>/05_labels/palm-v1/candidate_negatives.jsonl"
+make negative-review HAND_DATASET_ROOT="$HAND_DATASET_ROOT" NEGATIVE_DATASET_ID=background-neg-0801 NEGATIVE_CANDIDATE_LABELS="$HAND_DATASET_ROOT/PretrainSource/FullEnhance0801/<capture_source_id>/05_labels/eos-1.0/candidate_negatives.jsonl"
 ```
 
 人工删除所有含手、模糊或无法确认的 ROI，再发布剩余真背景。输出到 `GoldSource/NegativeSamples/<id>/published/`。审核树初始为硬链接；允许只把 `review/images/` 经压缩包和网盘带到本地复核，再用保持原相对路径和文件名的普通文件替换服务器上的 `review/images/`。保留 manifest/README，不删除整个 `review/`。
