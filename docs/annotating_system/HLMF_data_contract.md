@@ -16,10 +16,16 @@ HAND_DATASET_ROOT/
 ```text
 01_palm/<proposal_variant>/
 02_roi_crops/<proposal_variant>/
+  images/<roi_id>.png
+  hand_roi_crops_manifest.jsonl
+  hand_landmarks_autolabel_draft.jsonl
+  hand_landmarks_visualization/<roi_id>.png  # 可选审核图
 03_reviewed/<proposal_variant>/
 05_labels/<proposal_variant>/
 qc/<proposal_variant>/
 ```
+
+`hand_landmarks_visualization/` 是可删除、可重建的自动标注审核派生物，不是训练或评估输入。启用时 Train 只包含按 manifest 顺序等距抽取的最多 `visualization.train_max_samples` 张 ROI；Val/Test 包含该来源的全部实际 ROI。对应的 resolved 开关、选择策略、可用/选择/保存数量和输出路径记录在 `qc/<proposal_variant>/autolabel_visualization_report.json`。CVAT 导出与导入不写入该目录。
 
 ## 模型版本契约
 

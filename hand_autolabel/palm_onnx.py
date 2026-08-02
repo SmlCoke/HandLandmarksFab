@@ -9,6 +9,7 @@ import numpy as np
 from .formats import make_palm_det_id, normalize_detection_schema
 from .image_io import read_image, to_uint8_gray
 from .palm_decode import candidate_to_schema, decode_onnx_outputs
+from .progress import track_progress
 
 
 def _load_onnxruntime():
@@ -27,7 +28,13 @@ def preprocess_for_onnx(image: np.ndarray, input_size: int, input_type: str = "t
     return (resized.astype(np.float32) / 255.0)[np.newaxis, np.newaxis, :, :]
 
 
-def run_onnx_palm_detector(image_paths: Iterable[Path], cfg: Mapping[str, Any], model_path: Path) -> List[Dict[str, Any]]:
+def run_onnx_palm_detector(
+    image_paths: Iterable[Path],
+    cfg: Mapping[str, Any],
+    model_path: Path,
+    *,
+    show_progress: bool = False,
+) -> List[Dict[str, Any]]:
     ort = _load_onnxruntime()
     if not Path(model_path).exists():
         raise FileNotFoundError(f"Palm ONNX model not found: {model_path}")
@@ -40,7 +47,12 @@ def run_onnx_palm_detector(image_paths: Iterable[Path], cfg: Mapping[str, Any], 
     width = int(image_cfg["width"])
     height = int(image_cfg["height"])
     rows: List[Dict[str, Any]] = []
-    for image_path in image_paths:
+    for image_path in track_progress(
+        image_paths,
+        enabled=show_progress,
+        description="Palm inference",
+        unit="image",
+    ):
         img = read_image(image_path)
         if img is None:
             rows.append({"image": image_path.name, "width": width, "height": height, "detections": [], "negative_candidates": [], "error": "unreadable_image"})

@@ -9,6 +9,7 @@ import numpy as np
 from .formats import clamp01, make_palm_det_id, normalize_detection_schema
 from .image_io import gray_to_rgb, read_image
 from .nms import nms_indices
+from .progress import track_progress
 
 
 PALM_BBOX_LANDMARK_IDS = (0, 1, 5, 9, 13, 17)
@@ -161,7 +162,12 @@ def create_mediapipe_detector(cfg: Mapping[str, Any], num_hands: int):
         ) from exc
 
 
-def run_mediapipe_palm_detector(image_paths: Iterable[Path], cfg: Mapping[str, Any]) -> tuple[List[Dict[str, Any]], str]:
+def run_mediapipe_palm_detector(
+    image_paths: Iterable[Path],
+    cfg: Mapping[str, Any],
+    *,
+    show_progress: bool = False,
+) -> tuple[List[Dict[str, Any]], str]:
     try:
         import mediapipe  # noqa: F401
     except Exception as exc:  # pragma: no cover - depends on user environment.
@@ -175,7 +181,12 @@ def run_mediapipe_palm_detector(image_paths: Iterable[Path], cfg: Mapping[str, A
     rows: List[Dict[str, Any]] = []
     tiled_mode: Optional[str] = None
     try:
-        for image_path in image_paths:
+        for image_path in track_progress(
+            image_paths,
+            enabled=show_progress,
+            description="Palm inference",
+            unit="image",
+        ):
             img = read_image(image_path)
             if img is None:
                 rows.append({"image": image_path.name, "width": width, "height": height, "detections": [], "negative_candidates": [], "error": "unreadable_image"})

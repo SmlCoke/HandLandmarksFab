@@ -33,8 +33,13 @@ from hand_autolabel.dataset_v3 import (
 from hand_autolabel.formats import load_yaml_config, read_jsonl, resolve_path, write_json, write_jsonl
 from hand_autolabel.image_io import read_image, write_image
 from hand_autolabel.mediapipe_roi_labeler import label_roi_manifest
+from hand_autolabel.mediapipe_roi_visualization import (
+    TrainingRoiVisualizationError,
+    render_autolabel_visualizations,
+)
 from hand_autolabel.palm_mediapipe import run_mediapipe_palm_detector
 from hand_autolabel.palm_onnx import run_onnx_palm_detector
+from hand_autolabel.progress import track_progress
 from hand_autolabel.quality_checks import label_issues, palm_record_issues, roi_manifest_issues, summarize_label_rows
 from hand_autolabel.roi_geometry import build_roi_rect_from_palm, crop_image_by_roi
 
@@ -64,6 +69,13 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--dataset-id", required=True)
         command.add_argument("--capture-source-id", required=True)
         command.add_argument("--proposal-variant", required=True)
+        if name in {"autolabel-train", "autolabel-eval"}:
+            command.add_argument(
+                "--visualization",
+                choices=("true", "false"),
+                default=None,
+                help="Override visualization.enabled for this autolabel run.",
+            )
     prepare_negative = sub.add_parser("prepare-negative-review")
     prepare_negative.add_argument("--dataset-root", required=True)
     prepare_negative.add_argument("--negative-dataset-id", required=True)
@@ -96,6 +108,9 @@ def _load_public_configs(args: argparse.Namespace) -> Dict[str, Any]:
     cfg = load_yaml_config(resolve_path(ROOT, args.autolabel_config))
     _merge_config(cfg, load_yaml_config(resolve_path(ROOT, args.review_config)))
     _merge_config(cfg, load_yaml_config(resolve_path(ROOT, args.datasets_config)))
+    visualization_override = getattr(args, "visualization", None)
+    if visualization_override is not None:
+        cfg.setdefault("visualization", {})["enabled"] = visualization_override == "true"
     return cfg
 
 
@@ -122,13 +137,26 @@ def _source_context(args: argparse.Namespace, cfg: Dict[str, Any]) -> tuple[Path
     return root, paths
 
 
-def _run_validate(args: argparse.Namespace) -> Dict[str, Any]:
+def _run_validate(
+    args: argparse.Namespace,
+    *,
+    show_progress: bool = True,
+) -> Dict[str, Any]:
     return validate_and_normalize_source(
-        Path(args.dataset_root), args.scope, args.dataset_id, args.capture_source_id
+        Path(args.dataset_root),
+        args.scope,
+        args.dataset_id,
+        args.capture_source_id,
+        show_progress=show_progress,
     )
 
 
-def _run_palm(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _run_palm(
+    args: argparse.Namespace,
+    cfg: Dict[str, Any],
+    *,
+    show_progress: bool = True,
+) -> Dict[str, Any]:
     source, paths = _source_context(args, cfg)
     raw_rows = read_jsonl(source / "raw_images.jsonl")
     if not raw_rows:
@@ -137,10 +165,14 @@ def _run_palm(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
     backend = str(cfg["palm"].get("backend", "aethersign_onnx"))
     if backend == "aethersign_onnx":
         model = resolve_path(ROOT, cfg["paths"]["palm_model_onnx"])
-        rows = run_onnx_palm_detector(images, cfg, model)
+        rows = run_onnx_palm_detector(images, cfg, model, show_progress=show_progress)
         backend_mode = "onnx"
     elif backend == "mediapipe_official":
-        rows, backend_mode = run_mediapipe_palm_detector(images, cfg)
+        rows, backend_mode = run_mediapipe_palm_detector(
+            images,
+            cfg,
+            show_progress=show_progress,
+        )
     else:
         raise DatasetContractError(f"unsupported Palm backend: {backend}")
     rows = enrich_palm_rows(raw_rows, rows, args.proposal_variant)
@@ -172,7 +204,12 @@ def _run_palm(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
     return report
 
 
-def _run_build_roi(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _run_build_roi(
+    args: argparse.Namespace,
+    cfg: Dict[str, Any],
+    *,
+    show_progress: bool = True,
+) -> Dict[str, Any]:
     source, paths = _source_context(args, cfg)
     palm_rows = read_jsonl(paths["palm"] / "palm_detections.jsonl")
     if not palm_rows:
@@ -181,7 +218,12 @@ def _run_build_roi(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, A
     crop_images.mkdir(parents=True, exist_ok=True)
     manifest: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
-    for parent in palm_rows:
+    for parent in track_progress(
+        palm_rows,
+        enabled=show_progress,
+        description="ROI crops",
+        unit="image",
+    ):
         image = read_image(paths["images"] / str(parent["image"]))
         if image is None:
             failures.append({"raw_image_id": parent["raw_image_id"], "error": "unreadable_source"})
@@ -294,7 +336,12 @@ def _attach_manifest_fields(
     return output
 
 
-def _run_mediapipe(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _run_mediapipe(
+    args: argparse.Namespace,
+    cfg: Dict[str, Any],
+    *,
+    show_progress: bool = True,
+) -> Dict[str, Any]:
     _, paths = _source_context(args, cfg)
     manifest = read_jsonl(paths["roi"] / "hand_roi_crops_manifest.jsonl")
     if not manifest:
@@ -304,11 +351,52 @@ def _run_mediapipe(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, A
         item = dict(row)
         item["crop_path"] = str(Path(args.dataset_root).resolve() / row["crop_relpath"])
         runtime_manifest.append(item)
-    rows, mode = label_roi_manifest(runtime_manifest, cfg, ROOT)
+    rows, mode = label_roi_manifest(
+        runtime_manifest,
+        cfg,
+        ROOT,
+        show_progress=show_progress,
+    )
     rows = _attach_manifest_fields(rows, manifest)
     rows = apply_label_provenance(rows, human_reviewed=False)
     draft_path = paths["roi"] / "hand_landmarks_autolabel_draft.jsonl"
     write_jsonl(draft_path, rows)
+    split = parse_capture_source_id(args.capture_source_id)["split"]
+    visualization_cfg = cfg.get("visualization") or {}
+    visualization_enabled = visualization_cfg.get("enabled", False)
+    if not isinstance(visualization_enabled, bool):
+        raise DatasetContractError("visualization.enabled must be true or false")
+    try:
+        train_max_samples = int(visualization_cfg.get("train_max_samples", 200))
+    except (TypeError, ValueError) as exc:
+        raise DatasetContractError("visualization.train_max_samples must be an integer") from exc
+    if train_max_samples < 1:
+        raise DatasetContractError("visualization.train_max_samples must be >= 1")
+
+    visualization_report: Dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "enabled": visualization_enabled,
+        "split": split,
+        "output_relpath": str(
+            (paths["roi"] / "hand_landmarks_visualization")
+            .relative_to(Path(args.dataset_root).resolve())
+        ).replace("\\", "/"),
+    }
+    if visualization_enabled:
+        try:
+            visualization_report.update(
+                render_autolabel_visualizations(
+                    rows,
+                    paths["roi"] / "images",
+                    paths["roi"] / "hand_landmarks_visualization",
+                    split=split,
+                    train_max_samples=train_max_samples,
+                    show_progress=show_progress,
+                )
+            )
+        except TrainingRoiVisualizationError as exc:
+            raise DatasetContractError(str(exc)) from exc
+    write_json(paths["qc"] / "autolabel_visualization_report.json", visualization_report)
     stats = summarize_label_rows(rows, cfg)
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -317,6 +405,7 @@ def _run_mediapipe(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, A
         "positive": stats["positive"],
         "teacher_abstain": stats["negative"],
         "label_origin": "mediapipe",
+        "visualization": visualization_report,
     }
     write_json(paths["qc"] / "mediapipe_report.json", report)
     return report
@@ -469,10 +558,14 @@ def _run_source_pipeline(args: argparse.Namespace, cfg: Dict[str, Any], evaluati
     split = parse_capture_source_id(args.capture_source_id)["split"]
     if evaluation != (split in {"val", "test"}):
         raise DatasetContractError("autolabel-train/eval does not match capture source split")
-    _run_validate(args)
-    _run_palm(args, cfg)
-    _run_build_roi(args, cfg)
-    result = _run_mediapipe(args, cfg)
+    print("[1/4] Source check", file=sys.stderr, flush=True)
+    _run_validate(args, show_progress=True)
+    print("[2/4] Palm inference", file=sys.stderr, flush=True)
+    _run_palm(args, cfg, show_progress=True)
+    print("[3/4] ROI crops", file=sys.stderr, flush=True)
+    _run_build_roi(args, cfg, show_progress=True)
+    print("[4/4] Hand landmark autolabel", file=sys.stderr, flush=True)
+    result = _run_mediapipe(args, cfg, show_progress=True)
     if evaluation:
         result["next_step"] = "export-cvat, then place cvat_reviewed.xml and run import-cvat + publish-source"
     else:

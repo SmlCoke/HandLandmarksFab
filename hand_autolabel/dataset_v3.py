@@ -22,6 +22,7 @@ import cv2
 import numpy as np
 
 from .formats import read_jsonl, write_json, write_jsonl
+from .progress import track_progress
 
 
 SCHEMA_VERSION = "hlmf_dataset_v1"
@@ -172,6 +173,8 @@ def validate_and_normalize_source(
     scope: str,
     dataset_id: str,
     capture_source_id: str,
+    *,
+    show_progress: bool = False,
 ) -> Dict[str, Any]:
     """Normalize TIFF orientation and freeze stable raw image identities."""
 
@@ -227,7 +230,12 @@ def validate_and_normalize_source(
     rotations = 0
     reused_after_rename = 0
     assigned_ids: set[str] = set()
-    for path in image_paths:
+    for path in track_progress(
+        image_paths,
+        enabled=show_progress,
+        description="Source check",
+        unit="image",
+    ):
         try:
             image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
             if image is None:

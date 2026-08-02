@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -26,7 +27,12 @@ from hand_autolabel.dataset_v3 import (
 )
 from hand_autolabel.formats import read_jsonl
 from hand_autolabel.formats import load_yaml_config
-from scripts.hlmf import _partition_labels
+from hand_autolabel.mediapipe_roi_visualization import (
+    evenly_spaced_sample,
+    render_autolabel_visualizations,
+)
+from hand_autolabel.progress import track_progress
+from scripts.hlmf import _load_public_configs, _parser, _partition_labels
 from tools.downsample import downsample
 
 
@@ -304,6 +310,107 @@ class DatasetV3Tests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             downsample(source, 2, output)
 
+    def test_progress_wrapper_enables_tqdm_with_known_total(self) -> None:
+        with patch("hand_autolabel.progress.tqdm", return_value=iter([1, 2, 3])) as mocked:
+            self.assertEqual(
+                [1, 2, 3],
+                list(
+                    track_progress(
+                        [1, 2, 3],
+                        enabled=True,
+                        description="test stage",
+                        unit="item",
+                    )
+                ),
+            )
+        self.assertEqual(3, mocked.call_args.kwargs["total"])
+        self.assertEqual("test stage", mocked.call_args.kwargs["desc"])
+
+    def test_autolabel_visualization_samples_train_and_renders_all_eval(self) -> None:
+        roi_images = self.root / "roi_images"
+        roi_images.mkdir(parents=True)
+        rows = []
+        for index in range(10):
+            crop_name = f"roi_{index:02d}.png"
+            image = np.zeros((256, 256), dtype=np.uint8)
+            self.assertTrue(cv2.imwrite(str(roi_images / crop_name), image))
+            points = [
+                {"id": landmark_id, "x": 20 + landmark_id * 8, "y": 30 + landmark_id * 5}
+                for landmark_id in range(21)
+            ]
+            rows.append(
+                {
+                    "crop_path": crop_name,
+                    "hand_presence": {"present": True},
+                    "handedness": {"label": "Right", "score": 0.9},
+                    "landmarks_crop_px": points,
+                }
+            )
+
+        sampled = evenly_spaced_sample(rows, 4)
+        self.assertEqual(
+            ["roi_00.png", "roi_03.png", "roi_06.png", "roi_09.png"],
+            [row["crop_path"] for row in sampled],
+        )
+
+        train_output = self.root / "train_visualization"
+        train_output.mkdir(parents=True)
+        self.assertTrue(cv2.imwrite(str(train_output / "stale.png"), np.zeros((8, 8), dtype=np.uint8)))
+        train_stats = render_autolabel_visualizations(
+            rows,
+            roi_images,
+            train_output,
+            split="train",
+            train_max_samples=4,
+        )
+        self.assertEqual("evenly_spaced", train_stats["selection"])
+        self.assertEqual(4, train_stats["saved"])
+        self.assertEqual(1, train_stats["stale_removed"])
+        self.assertEqual(
+            {"roi_00.png", "roi_03.png", "roi_06.png", "roi_09.png"},
+            {path.name for path in train_output.glob("*.png")},
+        )
+        rendered = cv2.imread(str(train_output / "roi_00.png"), cv2.IMREAD_COLOR)
+        self.assertIsNotNone(rendered)
+        self.assertGreater(int(rendered.max()), 0)
+
+        eval_output = self.root / "eval_visualization"
+        eval_stats = render_autolabel_visualizations(
+            rows,
+            roi_images,
+            eval_output,
+            split="val",
+            train_max_samples=4,
+        )
+        self.assertEqual("all", eval_stats["selection"])
+        self.assertEqual(10, eval_stats["saved"])
+        self.assertEqual(10, len(list(eval_output.glob("*.png"))))
+
+    def test_cli_visualization_override_has_priority_over_config(self) -> None:
+        args = _parser().parse_args(
+            [
+                "autolabel-train",
+                "--dataset-root",
+                str(self.root),
+                "--scope",
+                "pretrain",
+                "--dataset-id",
+                "national-r1",
+                "--capture-source-id",
+                CAPTURE_TRAIN,
+                "--proposal-variant",
+                "p01",
+                "--visualization",
+                "false",
+            ]
+        )
+        with patch.dict(
+            os.environ,
+            {"AUTOLABEL_OVERRIDES": '{"visualization":{"enabled":true}}'},
+        ):
+            cfg = _load_public_configs(args)
+        self.assertFalse(cfg["visualization"]["enabled"])
+
     def test_public_makefile_has_no_palm_review_or_manual_roi_interface(self) -> None:
         root = Path(__file__).resolve().parents[1]
         makefile = (root / "Makefile").read_text(encoding="utf-8")
@@ -320,6 +427,10 @@ class DatasetV3Tests(unittest.TestCase):
         review = load_yaml_config(root / "configs" / "review.yaml")
         datasets = load_yaml_config(root / "configs" / "datasets.yaml")
         self.assertIn("palm", autolabel)
+        self.assertEqual(
+            {"enabled": False, "train_max_samples": 200},
+            autolabel["visualization"],
+        )
         self.assertNotIn("cvat", autolabel)
         self.assertIn("cvat", review)
         self.assertNotIn("palm", review)

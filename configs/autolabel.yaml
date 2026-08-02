@@ -53,3 +53,9 @@ mediapipe:
 quality:
   handedness_review_threshold: 0.7
   high_palm_score_review_threshold: 0.8
+
+visualization:
+  # Global default. Override one high-level run with VISUALIZATION=true/false.
+  enabled: false
+  # Train uses a deterministic, evenly spaced sample; Val/Test always render all ROIs.
+  train_max_samples: 200

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 import cv2
 
 from .image_io import ensure_bgr, read_image, write_image
 from .formats import load_yaml_config, read_jsonl, resolve_path
+from .progress import track_progress
 
 
 HAND_CONNECTIONS = (
@@ -83,6 +84,8 @@ def render_mediapipe_roi_draft_overlays(
     label_rows: Iterable[Mapping[str, Any]],
     roi_images_dir: Path,
     output_dir: Path,
+    *,
+    show_progress: bool = False,
 ) -> Dict[str, int]:
     """Render draft landmarks without reading original images, Palm data, or manifests."""
     roi_images_dir = Path(roi_images_dir)
@@ -100,7 +103,12 @@ def render_mediapipe_roi_draft_overlays(
         "missing_crop_image": 0,
         "write_failures": 0,
     }
-    for row in label_rows:
+    for row in track_progress(
+        label_rows,
+        enabled=show_progress,
+        description="Visualize ROIs",
+        unit="roi",
+    ):
         stats["rows"] += 1
         recorded_crop_path = row.get("crop_path")
         crop_name = Path(str(recorded_crop_path)).name if recorded_crop_path else ""
@@ -167,6 +175,78 @@ def render_mediapipe_roi_draft_overlays(
             stats["write_failures"] += 1
 
     return stats
+
+
+def evenly_spaced_sample(
+    rows: Sequence[Mapping[str, Any]],
+    max_samples: int,
+) -> List[Mapping[str, Any]]:
+    """Select a deterministic sample spread uniformly across ordered ROI rows."""
+    if max_samples < 1:
+        raise ValueError("visualization.train_max_samples must be >= 1")
+    count = len(rows)
+    if count <= max_samples:
+        return list(rows)
+    if max_samples == 1:
+        return [rows[count // 2]]
+    indices = [
+        round(index * (count - 1) / (max_samples - 1))
+        for index in range(max_samples)
+    ]
+    return [rows[index] for index in indices]
+
+
+def render_autolabel_visualizations(
+    label_rows: Sequence[Mapping[str, Any]],
+    roi_images_dir: Path,
+    output_dir: Path,
+    *,
+    split: str,
+    train_max_samples: int,
+    show_progress: bool = False,
+) -> Dict[str, Any]:
+    """Render sampled Train overlays or every Val/Test overlay."""
+    if split == "train":
+        selected = evenly_spaced_sample(label_rows, train_max_samples)
+        selection = "evenly_spaced"
+    elif split in {"val", "test"}:
+        selected = list(label_rows)
+        selection = "all"
+    else:
+        raise ValueError(f"unsupported visualization split: {split}")
+
+    stats = render_mediapipe_roi_draft_overlays(
+        selected,
+        roi_images_dir,
+        output_dir,
+        show_progress=show_progress,
+    )
+    if stats["saved"] != len(selected):
+        raise TrainingRoiVisualizationError(
+            "Autolabel ROI visualization is incomplete: "
+            f"saved={stats['saved']} expected={len(selected)}"
+        )
+
+    expected_names = {
+        Path(str(row.get("crop_path", ""))).name
+        for row in selected
+        if row.get("crop_path")
+    }
+    stale_removed = 0
+    for path in Path(output_dir).glob("*.png"):
+        if path.name not in expected_names:
+            path.unlink()
+            stale_removed += 1
+
+    return {
+        **stats,
+        "selection": selection,
+        "available_rows": len(label_rows),
+        "selected_rows": len(selected),
+        "train_max_samples": int(train_max_samples) if split == "train" else None,
+        "stale_removed": stale_removed,
+        "output_dir": str(Path(output_dir).resolve()),
+    }
 
 
 def _safe_directory_name(value: str) -> str:

@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 from .formats import make_hand_id, merge_label_with_manifest, resolve_path
 from .image_io import gray_to_rgb, read_image
 from .palm_mediapipe import _category_label_and_score, create_mediapipe_detector
+from .progress import track_progress
 from .projection import landmark_dicts_from_norm
 
 
@@ -64,7 +65,13 @@ def label_one_roi(manifest: Mapping[str, Any], image, detector, cfg: Mapping[str
     return merge_label_with_manifest(row, manifest, cfg)
 
 
-def label_roi_manifest(manifest_rows: Iterable[Mapping[str, Any]], cfg: Mapping[str, Any], root: Path) -> tuple[List[Dict[str, Any]], str]:
+def label_roi_manifest(
+    manifest_rows: Iterable[Mapping[str, Any]],
+    cfg: Mapping[str, Any],
+    root: Path,
+    *,
+    show_progress: bool = False,
+) -> tuple[List[Dict[str, Any]], str]:
     try:
         import mediapipe  # noqa: F401
     except Exception as exc:  # pragma: no cover - depends on user environment.
@@ -73,7 +80,12 @@ def label_roi_manifest(manifest_rows: Iterable[Mapping[str, Any]], cfg: Mapping[
     detector, mode = create_mediapipe_detector(cfg, num_hands=int(cfg["mediapipe"].get("num_hands", 1)))
     rows: List[Dict[str, Any]] = []
     try:
-        for manifest in manifest_rows:
+        for manifest in track_progress(
+            manifest_rows,
+            enabled=show_progress,
+            description="Hand landmarks",
+            unit="roi",
+        ):
             crop_path = resolve_path(root, manifest["crop_path"])
             img = read_image(crop_path)
             if img is None:

@@ -92,6 +92,7 @@ HAND_DATASET_ROOT/EValSource/<dataset_id>/<capture_source_id>/images/
   images/
   01_palm/<proposal_variant>/
   02_roi_crops/<proposal_variant>/
+    hand_landmarks_visualization/  # 可选自动标注审核图
   03_reviewed/<proposal_variant>/
   05_labels/<proposal_variant>/
   qc/<proposal_variant>/
@@ -178,9 +179,19 @@ make train-autolabel \
   PROPOSAL_VARIANT=eos-1.0
 ```
 
+仅本次临时启用可视化时，在同一命令末尾增加：
+
+```bash
+VISUALIZATION=true
+```
+
+例如 `make train-autolabel ... VISUALIZATION=true`。`VISUALIZATION=false` 可在全局配置已启用时仅关闭本次生成；命令行临时值优先于 `autolabel.yaml`。
+
 输入：来源 `images/`、`configs/autolabel.yaml`、`paths.palm_model_onnx` 指向的 Palm ONNX 模型，以及 `mediapipe.model_asset_path` 指向的 MediaPipe task 文件。
 
-处理：该高层命令依次执行来源检查、Palm 推理、稳定 proposal slot 分配、canonical ROI 裁剪、MediaPipe ROI 推理、质量门控和 Train 来源发布。Palm 结果从产生到发布都不经过人工修改。
+处理：该高层命令依次执行来源检查、Palm 推理、稳定 proposal slot 分配、canonical ROI 裁剪、MediaPipe ROI 推理、质量门控和 Train 来源发布。来源检查、Palm 推理、ROI 裁剪和 MediaPipe 推理都会显示 tqdm 进度、处理速度与预计剩余时间。Palm 结果从产生到发布都不经过人工修改。
+
+启用可视化时，程序按稳定的 ROI manifest 顺序做等距索引抽样，覆盖首尾并尽量均匀地分布在整份来源中；最多输出 `visualization.train_max_samples` 张，默认 200 张。每张审核图直接以 canonical Hand ROI 为底图，叠加 MediaPipe 21 点、骨架连线、presence 和 handedness。该目录只用于快速人工抽查，不替代标签 JSONL，也不进入 CVAT。
 
 输出按步骤写入：
 
@@ -189,10 +200,12 @@ make train-autolabel \
 <source>/02_roi_crops/<variant>/images/<roi_id>.png
 <source>/02_roi_crops/<variant>/hand_roi_crops_manifest.jsonl
 <source>/02_roi_crops/<variant>/hand_landmarks_autolabel_draft.jsonl
+<source>/02_roi_crops/<variant>/hand_landmarks_visualization/<roi_id>.png  # 启用时，Train 抽样
 <source>/05_labels/<variant>/hand_training_labels.jsonl
 <source>/05_labels/<variant>/candidate_negatives.jsonl
 <source>/05_labels/<variant>/ignored.jsonl
 <source>/qc/<variant>/*_report.json
+<source>/qc/<variant>/autolabel_visualization_report.json
 <dataset>/dataset_manifest.json
 ```
 
@@ -218,11 +231,13 @@ make eval-autolabel \
   PROPOSAL_VARIANT=eos-1.0
 ```
 
+仅本次临时启用或关闭可视化时，同样使用 `VISUALIZATION=true` 或 `VISUALIZATION=false`。
+
 输入：Val/Test 来源的 `images/`、Palm 模型、MediaPipe 模型和 `autolabel.yaml`。
 
-处理：与 Train 一样运行来源检查、Palm、程序化 ROI 和 MediaPipe，但只保留 Palm Detector 实际产生的 runtime ROI，并**强制关闭低分候选负样本**。这里**不会补 Palm 漏检**，也**不会从原图人工补 ROI**。
+处理：与 Train 一样运行来源检查、Palm、程序化 ROI 和 MediaPipe，并在四个耗时环节显示 tqdm 进度；但只保留 Palm Detector 实际产生的 runtime ROI，并**强制关闭低分候选负样本**。这里**不会补 Palm 漏检**，也**不会从原图人工补 ROI**。启用可视化时，对该来源的全部实际 Hand ROI 生成关键点叠加图，不做抽样。
 
-输出：Palm、ROI、MediaPipe draft 和 QC 文件与 Train 的路径相同，但**此时不发布最终评估标签**。命令返回的下一步是 CVAT 导出。
+输出：Palm、ROI、MediaPipe draft 和 QC 文件与 Train 的路径相同；启用时额外生成完整的 `<source>/02_roi_crops/<variant>/hand_landmarks_visualization/`。此时**不发布最终评估标签**。命令返回的下一步是 CVAT 导出；后续 CVAT 导出和导入不重复生成可视化。
 
 限制：每个 Val/Test split 最多 2000 张原图、3000 个实际生成 ROI；最终在来源发布阶段根据 dataset manifest 统一检查。
 
@@ -489,6 +504,13 @@ make help
 
 - `quality.handedness_review_threshold`：低于此分数时进入质量复核/忽略判断；调高会减少自动可用 positive。
 - `quality.high_palm_score_review_threshold`：帮助报告高 Palm 分但无手的可疑项，不会授权修改 Palm 输出。
+
+### 13.6 自动标注可视化
+
+- `visualization.enabled`：全局开关，默认 `false`。只控制 Train/Eval 自动标注后的 Hand ROI 审核图，不改变 Palm、ROI、标签、质量门控或发布结果。
+- `visualization.train_max_samples`：Train 单来源最多生成的等距抽样审核图数量，默认 200，必须至少为 1；来源 ROI 不超过该值时全部生成。Val/Test 始终生成全部实际 ROI，该参数对其无效。
+- 临时覆盖：`make train-autolabel ... VISUALIZATION=true|false` 或 `make eval-autolabel ... VISUALIZATION=true|false`。临时值优先于 `autolabel.yaml`；未传时使用全局值。
+- 输出目录固定为 `<source>/02_roi_crops/<variant>/hand_landmarks_visualization/`，执行报告固定为 `<source>/qc/<variant>/autolabel_visualization_report.json`。同一来源和变体再次启用可视化时，程序会清除不属于当前选择结果的旧 PNG，避免抽样配置变化后残留过期审核图。
 
 ## 14. `configs/review.yaml` 与 `configs/cvat_label.json`
 

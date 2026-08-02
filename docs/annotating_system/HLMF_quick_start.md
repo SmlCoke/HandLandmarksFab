@@ -54,6 +54,14 @@ make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain 
 make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0
 ```
 
+四个耗时阶段会显示 tqdm 进度。临时启用 Train 等距抽样可视化（默认最多 200 张）时执行：
+
+```bash
+make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0 VISUALIZATION=true
+```
+
+审核图输出到 `02_roi_crops/eos-1.0/hand_landmarks_visualization/`。
+
 `hand_training_labels.jsonl` 是通过门控的 positive；`candidate_negatives.jsonl` 只能进入后续删除式复核，不能直接训练。
 
 ## 2B. Val/Test 自动标注（Eval Autolabel）
@@ -63,6 +71,14 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretra
 ```bash
 make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
 ```
+
+临时启用全部 Eval ROI 可视化时执行：
+
+```bash
+make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0 VISUALIZATION=true
+```
+
+全局开关为 `configs/autolabel.yaml` 的 `visualization.enabled`；命令中的 `VISUALIZATION=true|false` 优先。CVAT 导出和导入不生成审核图。
 
 ## 3. 导出 Hand ROI CVAT（Hand CVAT Export）
 

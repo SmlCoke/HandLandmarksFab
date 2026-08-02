@@ -9,6 +9,7 @@ PROPOSAL_VARIANT ?= eos-1.0
 AUTOLABEL_CONFIG ?= configs/autolabel.yaml
 REVIEW_CONFIG ?= configs/review.yaml
 DATASETS_CONFIG ?= configs/datasets.yaml
+VISUALIZATION ?=
 
 NEGATIVE_DATASET_ID ?=
 NEGATIVE_CANDIDATE_LABELS ?=
@@ -17,6 +18,7 @@ MINING_REQUEST ?=
 
 CLI = $(PYTHON) -B scripts/hlmf.py --autolabel-config "$(AUTOLABEL_CONFIG)" --review-config "$(REVIEW_CONFIG)" --datasets-config "$(DATASETS_CONFIG)"
 SOURCE_ARGS = --dataset-root "$(HAND_DATASET_ROOT)" --scope "$(DATASET_SCOPE)" --dataset-id "$(DATASET_ID)" --capture-source-id "$(CAPTURE_SOURCE_ID)" --proposal-variant "$(PROPOSAL_VARIANT)"
+AUTOLABEL_ARGS = $(if $(strip $(VISUALIZATION)),--visualization "$(VISUALIZATION)",)
 
 .PHONY: help paths source-check train-autolabel eval-autolabel hand-cvat-export \
 	hand-cvat-import source-publish negative-review negative-publish hard-review \
@@ -26,8 +28,8 @@ help:
 	@echo HLMF 3.0 - Palm proposals to versioned Hand ROI datasets
 	@echo Configs: autolabel.yaml=automatic labels, review.yaml=Hand CVAT, datasets.yaml=publication, cvat_label.json=CVAT schema
 	@echo   make source-check DATASET_SCOPE=pretrain/eval DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-1.0
-	@echo   make train-autolabel ...          Validate, Palm, ROI, MediaPipe and publish Train
-	@echo   make eval-autolabel ...           Validate, Palm, ROI and MediaPipe for Val/Test
+	@echo   make train-autolabel ... [VISUALIZATION=true/false]  Validate, Palm, ROI, MediaPipe and publish Train
+	@echo   make eval-autolabel ... [VISUALIZATION=true/false]   Validate, Palm, ROI and MediaPipe for Val/Test
 	@echo   make hand-cvat-export ...         Export Hand ROI CVAT XML only
 	@echo   make hand-cvat-import ...         Import reviewed Hand ROI XML
 	@echo   make source-publish ...           Publish reviewed Val/Test labels
@@ -49,10 +51,10 @@ source-check:
 	$(CLI) validate-source $(SOURCE_ARGS)
 
 train-autolabel:
-	$(CLI) autolabel-train $(SOURCE_ARGS)
+	$(CLI) autolabel-train $(SOURCE_ARGS) $(AUTOLABEL_ARGS)
 
 eval-autolabel:
-	$(CLI) autolabel-eval $(SOURCE_ARGS)
+	$(CLI) autolabel-eval $(SOURCE_ARGS) $(AUTOLABEL_ARGS)
 
 hand-cvat-export:
 	$(CLI) export-cvat $(SOURCE_ARGS)
