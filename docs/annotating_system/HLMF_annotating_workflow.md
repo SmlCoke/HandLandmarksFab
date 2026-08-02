@@ -241,6 +241,27 @@ make eval-autolabel \
 
 限制：每个 Val/Test split 最多 2000 张原图、3000 个实际生成 ROI；最终在来源发布阶段根据 dataset manifest 统一检查。
 
+### 6.1 自动标注后补生成可视化
+
+若执行 Train 或 Eval Autolabel 时没有启用可视化，后续可直接运行：
+
+```bash
+make autolabel-visualize \
+  HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=pretrain \
+  DATASET_ID=FullEnhance0801 \
+  CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak \
+  PROPOSAL_VARIANT=eos-1.0
+```
+
+Val/Test 将 `DATASET_SCOPE` 改为 `eval`，并使用对应的来源 ID。
+
+输入：已经存在的 `<source>/02_roi_crops/<variant>/images/` 与 `hand_landmarks_autolabel_draft.jsonl`。
+
+处理：只读取已有 MediaPipe 自动标注结果并绘制审核图；不重新执行来源检查、Palm 推理、ROI 裁剪、MediaPipe 推理、质量门控或发布，也不受 `visualization.enabled` 当前值影响。Train 使用 `visualization.train_max_samples` 进行等距抽样，Val/Test 绘制全部已有 ROI。
+
+输出：`<source>/02_roi_crops/<variant>/hand_landmarks_visualization/` 和更新后的 `<source>/qc/<variant>/autolabel_visualization_report.json`。
+
 ## 7. 阶段四：导出 Hand ROI CVAT 任务
 
 阶段名：Hand CVAT Export。
@@ -510,6 +531,7 @@ make help
 - `visualization.enabled`：全局开关，默认 `false`。只控制 Train/Eval 自动标注后的 Hand ROI 审核图，不改变 Palm、ROI、标签、质量门控或发布结果。
 - `visualization.train_max_samples`：Train 单来源最多生成的等距抽样审核图数量，默认 200，必须至少为 1；来源 ROI 不超过该值时全部生成。Val/Test 始终生成全部实际 ROI，该参数对其无效。
 - 临时覆盖：`make train-autolabel ... VISUALIZATION=true|false` 或 `make eval-autolabel ... VISUALIZATION=true|false`。临时值优先于 `autolabel.yaml`；未传时使用全局值。
+- 补生成：已有自动标注 draft 时执行 `make autolabel-visualize ...`。该命令本身即表示启用，不读取 `visualization.enabled`，但 Train 仍使用 `train_max_samples`。
 - 输出目录固定为 `<source>/02_roi_crops/<variant>/hand_landmarks_visualization/`，执行报告固定为 `<source>/qc/<variant>/autolabel_visualization_report.json`。同一来源和变体再次启用可视化时，程序会清除不属于当前选择结果的旧 PNG，避免抽样配置变化后残留过期审核图。
 
 ## 14. `configs/review.yaml` 与 `configs/cvat_label.json`

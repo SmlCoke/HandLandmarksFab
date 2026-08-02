@@ -25,7 +25,7 @@ HAND_DATASET_ROOT/
 qc/<proposal_variant>/
 ```
 
-`hand_landmarks_visualization/` 是可删除、可重建的自动标注审核派生物，不是训练或评估输入。启用时 Train 只包含按 manifest 顺序等距抽取的最多 `visualization.train_max_samples` 张 ROI；Val/Test 包含该来源的全部实际 ROI。对应的 resolved 开关、选择策略、可用/选择/保存数量和输出路径记录在 `qc/<proposal_variant>/autolabel_visualization_report.json`。CVAT 导出与导入不写入该目录。
+`hand_landmarks_visualization/` 是可删除、可重建的自动标注审核派生物，不是训练或评估输入。启用时 Train 只包含按 manifest 顺序等距抽取的最多 `visualization.train_max_samples` 张 ROI；Val/Test 包含该来源的全部实际 ROI。对应的 resolved 开关、触发方式、选择策略、可用/选择/保存数量和输出路径记录在 `qc/<proposal_variant>/autolabel_visualization_report.json`。已有 draft 可通过 `make autolabel-visualize ...` 重建该目录；该操作只读取 `images/` 和 `hand_landmarks_autolabel_draft.jsonl`。CVAT 导出与导入不写入该目录。
 
 ## 模型版本契约
 

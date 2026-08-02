@@ -61,6 +61,7 @@ def _parser() -> argparse.ArgumentParser:
         "publish-source",
         "autolabel-train",
         "autolabel-eval",
+        "autolabel-visualize",
     )
     for name in source_commands:
         command = sub.add_parser(name)
@@ -342,7 +343,14 @@ def _run_mediapipe(
     *,
     show_progress: bool = True,
 ) -> Dict[str, Any]:
-    _, paths = _source_context(args, cfg)
+    dataset_root = Path(args.dataset_root).resolve()
+    root = source_root(
+        dataset_root,
+        args.scope,
+        args.dataset_id,
+        args.capture_source_id,
+    )
+    paths = proposal_paths(root, args.proposal_variant)
     manifest = read_jsonl(paths["roi"] / "hand_roi_crops_manifest.jsonl")
     if not manifest:
         raise DatasetContractError("ROI manifest is missing or empty")
@@ -361,10 +369,42 @@ def _run_mediapipe(
     rows = apply_label_provenance(rows, human_reviewed=False)
     draft_path = paths["roi"] / "hand_landmarks_autolabel_draft.jsonl"
     write_jsonl(draft_path, rows)
+    visualization_report = _run_autolabel_visualization(
+        args,
+        cfg,
+        rows,
+        paths,
+        enabled=(cfg.get("visualization") or {}).get("enabled", False),
+        trigger="autolabel",
+        show_progress=show_progress,
+    )
+    stats = summarize_label_rows(rows, cfg)
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "mediapipe_mode": mode,
+        "total": stats["total"],
+        "positive": stats["positive"],
+        "teacher_abstain": stats["negative"],
+        "label_origin": "mediapipe",
+        "visualization": visualization_report,
+    }
+    write_json(paths["qc"] / "mediapipe_report.json", report)
+    return report
+
+
+def _run_autolabel_visualization(
+    args: argparse.Namespace,
+    cfg: Dict[str, Any],
+    rows: List[Dict[str, Any]],
+    paths: Dict[str, Path],
+    *,
+    enabled: Any,
+    trigger: str,
+    show_progress: bool,
+) -> Dict[str, Any]:
     split = parse_capture_source_id(args.capture_source_id)["split"]
     visualization_cfg = cfg.get("visualization") or {}
-    visualization_enabled = visualization_cfg.get("enabled", False)
-    if not isinstance(visualization_enabled, bool):
+    if not isinstance(enabled, bool):
         raise DatasetContractError("visualization.enabled must be true or false")
     try:
         train_max_samples = int(visualization_cfg.get("train_max_samples", 200))
@@ -375,14 +415,15 @@ def _run_mediapipe(
 
     visualization_report: Dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "enabled": visualization_enabled,
+        "enabled": enabled,
         "split": split,
+        "trigger": trigger,
         "output_relpath": str(
             (paths["roi"] / "hand_landmarks_visualization")
             .relative_to(Path(args.dataset_root).resolve())
         ).replace("\\", "/"),
     }
-    if visualization_enabled:
+    if enabled:
         try:
             visualization_report.update(
                 render_autolabel_visualizations(
@@ -397,18 +438,31 @@ def _run_mediapipe(
         except TrainingRoiVisualizationError as exc:
             raise DatasetContractError(str(exc)) from exc
     write_json(paths["qc"] / "autolabel_visualization_report.json", visualization_report)
-    stats = summarize_label_rows(rows, cfg)
-    report = {
-        "schema_version": SCHEMA_VERSION,
-        "mediapipe_mode": mode,
-        "total": stats["total"],
-        "positive": stats["positive"],
-        "teacher_abstain": stats["negative"],
-        "label_origin": "mediapipe",
-        "visualization": visualization_report,
-    }
-    write_json(paths["qc"] / "mediapipe_report.json", report)
-    return report
+    return visualization_report
+
+
+def _run_existing_autolabel_visualization(
+    args: argparse.Namespace,
+    cfg: Dict[str, Any],
+    *,
+    show_progress: bool = True,
+) -> Dict[str, Any]:
+    _, paths = _source_context(args, cfg)
+    draft_path = paths["roi"] / "hand_landmarks_autolabel_draft.jsonl"
+    rows = read_jsonl(draft_path)
+    if not rows:
+        raise DatasetContractError(
+            f"MediaPipe autolabel draft is missing or empty: {draft_path}"
+        )
+    return _run_autolabel_visualization(
+        args,
+        cfg,
+        rows,
+        paths,
+        enabled=True,
+        trigger="standalone",
+        show_progress=show_progress,
+    )
 
 
 def _run_export_cvat(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -596,6 +650,8 @@ def main() -> None:
             result = _run_source_pipeline(args, cfg, evaluation=False)
         elif args.command == "autolabel-eval":
             result = _run_source_pipeline(args, cfg, evaluation=True)
+        elif args.command == "autolabel-visualize":
+            result = _run_existing_autolabel_visualization(args, cfg)
         elif args.command == "prepare-negative-review":
             rows = [row for path in args.candidate_labels for row in read_jsonl(Path(path))]
             result = prepare_negative_review(Path(args.dataset_root), args.negative_dataset_id, rows)

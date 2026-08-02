@@ -20,7 +20,7 @@ CLI = $(PYTHON) -B scripts/hlmf.py --autolabel-config "$(AUTOLABEL_CONFIG)" --re
 SOURCE_ARGS = --dataset-root "$(HAND_DATASET_ROOT)" --scope "$(DATASET_SCOPE)" --dataset-id "$(DATASET_ID)" --capture-source-id "$(CAPTURE_SOURCE_ID)" --proposal-variant "$(PROPOSAL_VARIANT)"
 AUTOLABEL_ARGS = $(if $(strip $(VISUALIZATION)),--visualization "$(VISUALIZATION)",)
 
-.PHONY: help paths source-check train-autolabel eval-autolabel hand-cvat-export \
+.PHONY: help paths source-check train-autolabel eval-autolabel autolabel-visualize hand-cvat-export \
 	hand-cvat-import source-publish negative-review negative-publish hard-review \
 	hard-publish registry-check compile test
 
@@ -30,6 +30,7 @@ help:
 	@echo   make source-check DATASET_SCOPE=pretrain/eval DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-1.0
 	@echo   make train-autolabel ... [VISUALIZATION=true/false]  Validate, Palm, ROI, MediaPipe and publish Train
 	@echo   make eval-autolabel ... [VISUALIZATION=true/false]   Validate, Palm, ROI and MediaPipe for Val/Test
+	@echo   make autolabel-visualize ...     Render existing MediaPipe draft without rerunning autolabel
 	@echo   make hand-cvat-export ...         Export Hand ROI CVAT XML only
 	@echo   make hand-cvat-import ...         Import reviewed Hand ROI XML
 	@echo   make source-publish ...           Publish reviewed Val/Test labels
@@ -55,6 +56,9 @@ train-autolabel:
 
 eval-autolabel:
 	$(CLI) autolabel-eval $(SOURCE_ARGS) $(AUTOLABEL_ARGS)
+
+autolabel-visualize:
+	$(CLI) autolabel-visualize $(SOURCE_ARGS)
 
 hand-cvat-export:
 	$(CLI) export-cvat $(SOURCE_ARGS)

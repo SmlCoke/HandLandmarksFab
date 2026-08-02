@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import cv2
@@ -20,19 +21,24 @@ from hand_autolabel.dataset_v3 import (
     parse_capture_source_id,
     prepare_negative_review,
     prepare_selection_review,
+    proposal_paths,
     publish_negative_review,
     publish_selection_review,
     source_root,
     validate_and_normalize_source,
 )
-from hand_autolabel.formats import read_jsonl
-from hand_autolabel.formats import load_yaml_config
+from hand_autolabel.formats import load_yaml_config, read_jsonl, write_jsonl
 from hand_autolabel.mediapipe_roi_visualization import (
     evenly_spaced_sample,
     render_autolabel_visualizations,
 )
 from hand_autolabel.progress import track_progress
-from scripts.hlmf import _load_public_configs, _parser, _partition_labels
+from scripts.hlmf import (
+    _load_public_configs,
+    _parser,
+    _partition_labels,
+    _run_existing_autolabel_visualization,
+)
 from tools.downsample import downsample
 
 
@@ -411,12 +417,61 @@ class DatasetV3Tests(unittest.TestCase):
             cfg = _load_public_configs(args)
         self.assertFalse(cfg["visualization"]["enabled"])
 
+    def test_standalone_visualization_reuses_existing_autolabel_draft(self) -> None:
+        source = source_root(self.root, "pretrain", "national-r1", CAPTURE_TRAIN)
+        paths = proposal_paths(source, "p01")
+        crop_dir = paths["roi"] / "images"
+        crop_dir.mkdir(parents=True)
+        rows = []
+        for index in range(3):
+            crop_name = f"standalone_{index}.png"
+            self.assertTrue(
+                cv2.imwrite(str(crop_dir / crop_name), np.zeros((256, 256), dtype=np.uint8))
+            )
+            rows.append(
+                {
+                    "crop_path": f"ignored/parent/{crop_name}",
+                    "hand_presence": {"present": False},
+                    "handedness": {"label": "unknown", "score": None},
+                    "landmarks_crop_px": [],
+                }
+            )
+        write_jsonl(paths["roi"] / "hand_landmarks_autolabel_draft.jsonl", rows)
+
+        args = SimpleNamespace(
+            dataset_root=str(self.root),
+            scope="pretrain",
+            dataset_id="national-r1",
+            capture_source_id=CAPTURE_TRAIN,
+            proposal_variant="p01",
+        )
+        cfg = {
+            "dataset": {},
+            "paths": {},
+            "palm": {"keep_low_score_candidates_for_negatives": True},
+            "visualization": {"enabled": False, "train_max_samples": 2},
+        }
+        report = _run_existing_autolabel_visualization(
+            args,
+            cfg,
+            show_progress=False,
+        )
+        self.assertTrue(report["enabled"])
+        self.assertEqual("standalone", report["trigger"])
+        self.assertEqual("evenly_spaced", report["selection"])
+        self.assertEqual(2, report["saved"])
+        self.assertEqual(
+            2,
+            len(list((paths["roi"] / "hand_landmarks_visualization").glob("*.png"))),
+        )
+
     def test_public_makefile_has_no_palm_review_or_manual_roi_interface(self) -> None:
         root = Path(__file__).resolve().parents[1]
         makefile = (root / "Makefile").read_text(encoding="utf-8")
         self.assertNotIn("palm-cvat", makefile)
         self.assertNotIn("import_palm", makefile)
         self.assertIn("Hand ROIs are always program-generated", makefile)
+        self.assertIn("autolabel-visualize:", makefile)
         self.assertEqual({"hlmf.py"}, {path.name for path in (root / "scripts").glob("*.py")})
         self.assertEqual(
             {"autolabel.yaml", "review.yaml", "datasets.yaml", "cvat_label.json"},

@@ -80,6 +80,16 @@ make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DA
 
 全局开关为 `configs/autolabel.yaml` 的 `visualization.enabled`；命令中的 `VISUALIZATION=true|false` 优先。CVAT 导出和导入不生成审核图。
 
+## 2C. 自动标注后补生成可视化
+
+输入：已有的 ROI 图片和 `hand_landmarks_autolabel_draft.jsonl`。处理：只绘制已有自动标注，不重跑 autolabel。输出：`02_roi_crops/<variant>/hand_landmarks_visualization/`。
+
+```bash
+make autolabel-visualize HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0
+```
+
+Val/Test 使用 `DATASET_SCOPE=eval` 和对应来源 ID。该命令无视全局可视化开关并直接生成；Train 等距抽样，Val/Test 全量输出。
+
 ## 3. 导出 Hand ROI CVAT（Hand CVAT Export）
 
 输入：`02_roi_crops/eos-1.0/images/`、ROI manifest 和 MediaPipe draft。输出：`03_reviewed/eos-1.0/cvat_autolabel.xml`。
