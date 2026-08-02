@@ -188,6 +188,77 @@ def _parse_cvat_points(text: str) -> List[Tuple[float, float]]:
     return points
 
 
+def _ordered_export_rows(
+    manifest_rows: Sequence[Mapping[str, Any]],
+    label_rows: Sequence[Mapping[str, Any]],
+) -> tuple[List[Mapping[str, Any]], Dict[str, Mapping[str, Any]], int]:
+    """Bind labels one-to-one and order frames like a lexicographical CVAT upload."""
+    manifest_by_crop: Dict[str, Mapping[str, Any]] = {}
+    crop_names: set[str] = set()
+    for row in manifest_rows:
+        crop_id = str(row.get("crop_id") or "")
+        crop_name = Path(str(row.get("crop_path") or "")).name
+        if not crop_id or not crop_name:
+            raise ValueError("CVAT export manifest row is missing crop_id or crop_path")
+        if crop_id in manifest_by_crop:
+            raise ValueError(f"CVAT export has duplicate manifest crop_id: {crop_id}")
+        if crop_name in crop_names:
+            raise ValueError(f"CVAT export has duplicate crop filename: {crop_name}")
+        manifest_by_crop[crop_id] = row
+        crop_names.add(crop_name)
+
+    label_by_crop: Dict[str, Mapping[str, Any]] = {}
+    for row in label_rows:
+        crop_id = str(row.get("crop_id") or "")
+        if not crop_id:
+            raise ValueError("CVAT export label row is missing crop_id")
+        if crop_id in label_by_crop:
+            raise ValueError(f"CVAT export has duplicate label crop_id: {crop_id}")
+        label_by_crop[crop_id] = row
+
+    manifest_ids = set(manifest_by_crop)
+    label_ids = set(label_by_crop)
+    missing = sorted(manifest_ids - label_ids)
+    unexpected = sorted(label_ids - manifest_ids)
+    if missing or unexpected:
+        raise ValueError(
+            "CVAT export requires one label per manifest ROI: "
+            f"missing={len(missing)} unexpected={len(unexpected)}"
+        )
+
+    ordered = sorted(
+        manifest_rows,
+        key=lambda row: Path(str(row["crop_path"])).name,
+    )
+    input_names = [Path(str(row["crop_path"])).name for row in manifest_rows]
+    ordered_names = [Path(str(row["crop_path"])).name for row in ordered]
+    reordered = sum(left != right for left, right in zip(input_names, ordered_names))
+    return ordered, label_by_crop, reordered
+
+
+def _ordered_landmarks_for_cvat(
+    label: Mapping[str, Any],
+    crop_id: str,
+) -> List[Mapping[str, Any]]:
+    by_id: Dict[int, Mapping[str, Any]] = {}
+    for position, point in enumerate(label.get("landmarks_crop_px") or []):
+        try:
+            landmark_id = int(point.get("id", position))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"CVAT export has invalid landmark id for {crop_id}") from exc
+        if landmark_id in by_id:
+            raise ValueError(
+                f"CVAT export has duplicate landmark id {landmark_id} for {crop_id}"
+            )
+        by_id[landmark_id] = point
+    expected = set(range(21))
+    if set(by_id) != expected:
+        raise ValueError(
+            f"CVAT export positive ROI must contain landmark ids 0..20: {crop_id}"
+        )
+    return [by_id[landmark_id] for landmark_id in range(21)]
+
+
 def export_cvat_xml(
     manifest_rows: List[Mapping[str, Any]],
     label_rows: List[Mapping[str, Any]],
@@ -195,7 +266,10 @@ def export_cvat_xml(
     xml_path: Path,
     cfg: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    label_by_crop = index_by(label_rows, "crop_id")
+    ordered_manifest, label_by_crop, reordered_images = _ordered_export_rows(
+        manifest_rows,
+        label_rows,
+    )
     label_name = str(cfg["cvat"].get("label_name", "hand_landmarks"))
     no_hand_label = str(cfg["cvat"].get("no_hand_label_name", "no_hand"))
     ignore_label = _cvat_ignore_label(cfg)
@@ -210,7 +284,7 @@ def export_cvat_xml(
     task = ET.SubElement(meta, "task")
     ET.SubElement(task, "id").text = "0"
     ET.SubElement(task, "name").text = "hand_landmarker_autolabel"
-    ET.SubElement(task, "size").text = str(len(manifest_rows))
+    ET.SubElement(task, "size").text = str(len(ordered_manifest))
     ET.SubElement(task, "mode").text = "annotation"
     ET.SubElement(task, "overlap").text = "0"
     ET.SubElement(task, "bugtracker").text = ""
@@ -234,13 +308,15 @@ def export_cvat_xml(
     positives = 0
     negatives = 0
     handedness_tags = {"Left": 0, "Right": 0, "unknown": 0}
-    for idx, manifest in enumerate(manifest_rows):
+    for idx, manifest in enumerate(ordered_manifest):
         crop_name = Path(str(manifest["crop_path"])).name
         image_el = ET.SubElement(annotations, "image", id=str(idx), name=crop_name, width=str(width), height=str(height))
-        label = label_by_crop.get(str(manifest["crop_id"]))
-        if label and bool((label.get("hand_presence") or {}).get("present", False)) and len(label.get("landmarks_crop_px") or []) == 21:
+        crop_id = str(manifest["crop_id"])
+        label = label_by_crop[crop_id]
+        if bool((label.get("hand_presence") or {}).get("present", False)):
+            landmarks = _ordered_landmarks_for_cvat(label, crop_id)
             skeleton_el = ET.SubElement(image_el, "skeleton", label=label_name, source="auto", z_order="0")
-            for point_label, point in zip(point_labels, label["landmarks_crop_px"]):
+            for point_label, point in zip(point_labels, landmarks):
                 ET.SubElement(
                     skeleton_el,
                     "points",
@@ -252,11 +328,7 @@ def export_cvat_xml(
                 )
             handedness_label = _normalize_handedness_label((label.get("handedness") or {}).get("label"))
             handedness_tag = _cvat_handedness_tag_for_label(handedness_label, handedness_labels)
-            if (
-                not strip_teacher_handedness
-                and handedness_label in {"Left", "Right"}
-                and handedness_tag is not None
-            ):
+            if not strip_teacher_handedness and handedness_tag is not None:
                 ET.SubElement(image_el, "tag", label=handedness_tag, source="auto")
                 handedness_tags[handedness_label] += 1
             else:
@@ -270,9 +342,11 @@ def export_cvat_xml(
     xml_path.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(annotations).write(xml_path, encoding="utf-8", xml_declaration=True)
     return {
-        "images": len(manifest_rows),
+        "images": len(ordered_manifest),
         "copied_images": 0,
         "copy_policy": "disabled_use_roi_crops_images_directly",
+        "image_order": "crop_filename_lexicographic",
+        "reordered_from_manifest_input": reordered_images,
         "upload_images_dir": str(cfg["paths"].get("roi_crops_dir", "data/02_roi_crops")).rstrip("/") + "/images",
         "positive_shape_type": "skeleton",
         "skeleton_point_labels": point_labels,

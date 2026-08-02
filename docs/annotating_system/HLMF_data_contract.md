@@ -44,6 +44,10 @@ Palm Detector 的产品名为 **Eos**。当前冻结模型为 `eos-1.0`，仓库
 
 Val/Test 的 `no_hand` 是固定 ROI 上的真值 negative，不是 Palm 漏检；`ignore_for_training` 不进入训练或评估标签。
 
+## CVAT frame 对齐契约
+
+`cvat_autolabel.xml` 的 `<image id>` 从 0 开始，严格按照 `02_roi_crops/<proposal_variant>/images/` 的 crop 文件名字典序排列；CVAT Images 任务必须使用 `Lexicographical` Sorting method。每个 manifest `crop_id` 必须恰好对应一条 draft，positive 必须完整包含 landmark ID `0..20`，并按 ID 映射为 CVAT skeleton 子点 `1..21`。`cvat_export_report.json` 记录 `image_order=crop_filename_lexicographic` 和相对 manifest 输入顺序发生重排的数量。
+
 ## 发布契约
 
 - Train：positive 与 candidate negative 分文件；candidate negative 未经删除式审核不得训练。

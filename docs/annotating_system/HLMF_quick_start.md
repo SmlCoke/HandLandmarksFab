@@ -100,6 +100,8 @@ make hand-cvat-export HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval 
 
 在 CVAT 中只复核程序生成的 Hand ROI。完整标签为 `no_hand`、`Left`、`Right`、`unknown_handedness`、`ignore_for_training` 和 21 点 `hand_landmarks` skeleton。不要绘制或调整 ROI，也不要修改 Palm bbox/p0/p9。
 
+创建 CVAT Images 任务并上传 `02_roi_crops/eos-1.0/images/` 时，Sorting method 必须选择 `Lexicographical`，再导入 `cvat_autolabel.xml`。
+
 ## 4. 导入 CVAT（Hand CVAT Import）
 
 从 CVAT 导出 Images 1.1 XML，放到 `03_reviewed/eos-1.0/cvat_reviewed.xml`。输入为该 XML、原 draft 和 ROI manifest；输出为 `hand_landmarks_reviewed.jsonl` 与 `qc/eos-1.0/cvat_import_report.json`。

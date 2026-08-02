@@ -286,7 +286,7 @@ make hand-cvat-export \
 configs/cvat_label.json
 ```
 
-处理：为该来源全部实际 ROI 生成 CVAT for images 1.1 XML。Train split 会被拒绝。导出内容只描述 Hand ROI 内的 skeleton 和 tag，不存在 Palm shape。
+处理：为该来源全部实际 ROI 生成 CVAT for images 1.1 XML。Train split 会被拒绝。导出前要求 manifest 与 MediaPipe draft 的 `crop_id` 一一对应；缺失、重复或 positive 关键点 ID 不完整时直接失败，不会静默导出为 `no_hand`。XML 的 `<image id>` 严格按照 ROI 文件名字典序编号，positive 的 21 点按照 landmark ID `0..20` 对应到 CVAT 子点名 `1..21`。导出内容只描述 Hand ROI 内的 skeleton 和 tag，不存在 Palm shape。
 
 输出：
 
@@ -295,7 +295,7 @@ configs/cvat_label.json
 <source>/qc/<variant>/cvat_export_report.json
 ```
 
-在 CVAT 中创建 Images 任务时，上传 `02_roi_crops/<variant>/images/` 下的 ROI 图片并导入 `cvat_autolabel.xml`。标签契约的实际名称保持为：
+`cvat_export_report.json` 中的 `image_order` 必须为 `crop_filename_lexicographic`。在 CVAT 中创建 Images 任务时，上传 `02_roi_crops/<variant>/images/` 下的 ROI 图片，**Sorting method 必须选择 `Lexicographical`**，然后导入 `cvat_autolabel.xml`。CVAT XML 使用 frame ID 绑定任务图片；若任务采用其他排序方式，标注会被应用到错误 ROI。标签契约的实际名称保持为：
 
 - `hand_landmarks`：21 点 skeleton，子点名为 `1` 到 `21`，对应模型 landmark ID `0` 到 `20`。
 - `Left`、`Right`：目标手 handedness；有可靠 skeleton 时二选一。
