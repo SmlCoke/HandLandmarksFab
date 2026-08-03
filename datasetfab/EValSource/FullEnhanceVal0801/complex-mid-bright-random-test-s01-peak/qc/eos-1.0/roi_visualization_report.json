@@ -1,0 +1,22 @@
+{
+  "schema_version": "hlmf_dataset_v1",
+  "enabled": true,
+  "split": "test",
+  "trigger": "autolabel",
+  "output_relpath": "EValSource/FullEnhanceVal0801/complex-mid-bright-random-test-s01-peak/02_roi_crops/eos-1.0/hand_landmarks_roi_visualization",
+  "rows": 606,
+  "saved": 606,
+  "positive": 606,
+  "negative": 0,
+  "invalid_landmark_count": 0,
+  "out_of_bounds_landmarks": 0,
+  "missing_crop_path": 0,
+  "missing_crop_image": 0,
+  "write_failures": 0,
+  "selection": "all",
+  "available_rows": 606,
+  "selected_rows": 606,
+  "train_max_samples": null,
+  "stale_removed": 0,
+  "output_dir": "D:\\CICIEC\\datasets\\HandLandmarkerFab\\datasetfab\\EValSource\\FullEnhanceVal0801\\complex-mid-bright-random-test-s01-peak\\02_roi_crops\\eos-1.0\\hand_landmarks_roi_visualization"
+}

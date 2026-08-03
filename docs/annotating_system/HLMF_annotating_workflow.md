@@ -36,7 +36,7 @@ ldconfig
 - Hand Landmarker：**Iris**。模型连接离散关键点，将像素编织成完整、可解释的手部几何结构。
 - Gloss Translator：**Muse**。模型为物理动作赋予语言与语义，将骨骼序列转化为人类可读的 Gloss。
 
-HLMF 从既有 Palm Detector 模型 Eos 开始工作。当前冻结版本为 `eos-1.0`，文件位于 `models/palm_detector/eos-1.0/model_opt.onnx`。程序在原图上运行 Eos，原样使用模型给出的 bbox、p0 和 p9，随后自动生成 `256×256` canonical Hand ROI，再在 ROI 内运行 MediaPipe Hand Landmarker。这里的 MediaPipe 模型是 HLMF 的自动标注工具，不是产品链路中的 Iris 部署模型。
+HLMF 从既有 Palm Detector 模型 Eos 开始工作。当前冻结版本为 `eos-1.0`，文件位于 `models/palm_detector/eos-1.0/model_opt.onnx`。程序在原图上运行 Eos，原样使用模型给出的 bbox、p0 和 p9，随后自动生成 `256×256` canonical Hand ROI，再在 ROI 内运行所选 Hand landmark 教师。MediaPipe Tasks 与 RTMPose 都只是 HLMF 的自动标注工具，不是产品链路中的 Iris 部署模型。
 
 后续 Eos 模型统一放入 `models/palm_detector/eos-*/model_opt.onnx`。切换模型版本时必须同步修改 `configs/autolabel.yaml` 中的模型路径，并使用新的 `PROPOSAL_VARIANT` 隔离派生产物。
 
@@ -191,11 +191,11 @@ ROI_VISUALIZATION=true
 
 若要把关键点还原到完整原图上，在同一命令末尾增加 `ORIGINAL_VISUALIZATION=true`；使用 `false` 可只关闭本次原图可视化。该开关与 `ROI_VISUALIZATION` 相互独立。
 
-输入：来源 `images/`、`configs/autolabel.yaml`、`paths.palm_model_onnx` 指向的 Palm ONNX 模型，以及 `mediapipe.model_asset_path` 指向的 MediaPipe task 文件。
+输入：来源 `images/`、`configs/autolabel.yaml`、`paths.palm_model_onnx` 指向的 Palm ONNX 模型，以及当前 `hand_landmark.backend` 对应的教师模型。`mediapipe_tasks` 使用 `mediapipe.model_asset_path`，`rtmpose_onnx` 使用 `rtmpose.model_onnx_path`。
 
-处理：该高层命令依次执行**来源检查**、**Palm 推理**、**稳定 proposal slot 分配**、**canonical ROI 裁剪**、**MediaPipe ROI 推理**、**质量门控**和 **Train 来源发布**。来源检查、Palm 推理、ROI 裁剪和 MediaPipe 推理都会显示 tqdm 进度、处理速度与预计剩余时间。Palm 结果从产生到发布都不经过人工修改。
+处理：该高层命令依次执行**来源检查**、**Palm 推理**、**稳定 proposal slot 分配**、**canonical ROI 裁剪**、**所选 Hand landmark 后端推理**、**质量门控**和 **Train 来源发布**。四个耗时阶段都会显示 tqdm 进度、处理速度与预计剩余时间。Palm 结果从产生到发布都不经过人工修改。未传临时参数时服从 `autolabel.yaml`；单次切换可在 Make 命令末尾追加 `HAND_LANDMARK_BACKEND=mediapipe_tasks|rtmpose_onnx`，CLI 等价参数为 `--hand-landmark-backend`。
 
-启用 Hand ROI 可视化时，**程序按稳定的 ROI manifest 顺序做等距索引抽样**，覆盖首尾并**尽量均匀地分布在整份来源中**；最多输出 `visualization.train_max_samples` 张，默认 200 张。每张审核图直接以 canonical Hand ROI 为底图，叠加 MediaPipe 21 点、骨架连线、presence 和 handedness。该目录只用于快速人工抽查，不替代标签 JSONL，也不进入 CVAT。
+启用 Hand ROI 可视化时，**程序按稳定的 ROI manifest 顺序做等距索引抽样**，覆盖首尾并**尽量均匀地分布在整份来源中**；最多输出 `visualization.train_max_samples` 张，默认 200 张。每张审核图直接以 canonical Hand ROI 为底图，叠加教师的 21 点、骨架连线、presence 和 handedness。该目录只用于快速人工抽查，不替代标签 JSONL，也不进入 CVAT。
 
 启用原图可视化时，程序直接读取 draft 中已经还原好的 `landmarks_image_px`，将同一原图关联的全部 positive ROI 关键点绘制在来源 TIFF 上。该分支始终输出来源 `images/` 中的全部原图；没有有效关键点的图片也会生成并标记 `hands=0`。输出统一保存为 PNG，文件名 stem 与原图完全相同，例如 `frame.tiff → frame.png`，因此不同变体目录可以按同名 PNG 直接对比。PNG 固定使用压缩级别 3，在减小体积的同时避免最高压缩级别造成过长编码时间。
 
@@ -219,10 +219,13 @@ ROI_VISUALIZATION=true
 
 分流规则：
 
-- MediaPipe 确认有手且通过质量门控：发布为 positive，`label_origin=mediapipe`。
-- MediaPipe 未确认有手：只进入 `candidate_negatives.jsonl`，不能直接参与训练。
-- MediaPipe positive 未通过质量门控：进入 `ignored.jsonl`。
+- MediaPipe 确认有手且通过质量门控：发布为 positive，`label_origin=mediapipe`；MediaPipe abstain 只进入 `candidate_negatives.jsonl`。
+- RTMPose 只处理 Eos runtime ROI，每个有效 ROI 必须得到 21 个有限坐标并发布为 geometry positive，`label_origin=rtmpose`。它不使用 SimCC 分数、骨长、presence 或 handedness 做门控。
+- Eos 低分候选不运行 RTMPose，保持空关键点，以 `unresolved/unlabeled_v1` 进入 `candidate_negatives.jsonl`，不能直接参与训练。
+- 自动 positive 未通过通用结构质量检查时进入 `ignored.jsonl`。
 - 常规 Train positive 不逐张进入 CVAT。
+
+RTMPose 的 `hand_presence.present=true` 仅用于复用上述发布路由，不是真实 presence 标签；其 `handedness` 固定为 `unknown/null`。这些行只适合 Iris geometry pretrain，HLML 必须屏蔽 presence/handedness loss。后续多任务训练与正式评估必须使用独立分类器或人工确认标签。
 
 ## 6. 阶段三：Val/Test 自动标注
 
@@ -241,11 +244,11 @@ make eval-autolabel \
 
 仅本次临时启用或关闭 Hand ROI 可视化时，同样使用 `ROI_VISUALIZATION=true` 或 `ROI_VISUALIZATION=false`；原图可视化使用 `ORIGINAL_VISUALIZATION=true` 或 `ORIGINAL_VISUALIZATION=false`。
 
-输入：Val/Test 来源的 `images/`、Palm 模型、MediaPipe 模型和 `autolabel.yaml`。
+输入：Val/Test 来源的 `images/`、Palm 模型、所选 Hand landmark 教师模型和 `autolabel.yaml`。
 
-处理：与 Train 一样运行来源检查、Palm、程序化 ROI 和 MediaPipe，并在四个耗时环节显示 tqdm 进度；但只保留 Palm Detector 实际产生的 runtime ROI，并**强制关闭低分候选负样本**。这里**不会补 Palm 漏检**，也**不会从原图人工补 ROI**。启用 Hand ROI 可视化时，对该来源的全部实际 Hand ROI 生成关键点叠加图，不做抽样；启用原图可视化时，对来源的全部原图生成同名叠加图。
+处理：与 Train 一样运行来源检查、Palm、程序化 ROI 和所选 Hand landmark 后端，并在四个耗时环节显示 tqdm 进度；但只保留 Palm Detector 实际产生的 runtime ROI，并**强制关闭低分候选负样本**。这里**不会补 Palm 漏检**，也**不会从原图人工补 ROI**。启用 Hand ROI 可视化时，对该来源的全部实际 Hand ROI 生成关键点叠加图，不做抽样；启用原图可视化时，对来源的全部原图生成同名叠加图。
 
-输出：Palm、ROI、MediaPipe draft 和 QC 文件与 Train 的路径相同；对应开关启用时额外生成 `<source>/02_roi_crops/<variant>/hand_landmarks_roi_visualization/` 或 `<source>/visualizations/original_image_landmarks/<variant>/`。此时**不发布最终评估标签**。命令返回的下一步是 CVAT 导出；后续 CVAT 导出和导入不重复生成可视化。
+输出：Palm、ROI、Hand landmark draft 和 QC 文件与 Train 的路径相同；对应开关启用时额外生成 `<source>/02_roi_crops/<variant>/hand_landmarks_roi_visualization/` 或 `<source>/visualizations/original_image_landmarks/<variant>/`。`qc/<variant>/mediapipe_report.json` 路径为兼容现有链路而保留，报告中的 `hand_landmark_backend` 和 `execution_provider` 记录实际后端/provider。此时**不发布最终评估标签**。命令返回的下一步是 CVAT 导出；后续 CVAT 导出和导入不重复生成可视化。
 
 限制：每个 Val/Test split 最多 2000 张原图、3000 个实际生成 ROI；最终在来源发布阶段根据 dataset manifest 统一检查。
 
@@ -266,13 +269,13 @@ Val/Test 将 `DATASET_SCOPE` 改为 `eval`，并使用对应的来源 ID。
 
 输入：已经存在的 `<source>/02_roi_crops/<variant>/images/` 与 `hand_landmarks_autolabel_draft.jsonl`。
 
-处理：只读取已有 MediaPipe 自动标注结果并绘制审核图；不重新执行来源检查、Palm 推理、ROI 裁剪、MediaPipe 推理、质量门控或发布，也不受 `visualization.roi_enabled` 当前值影响。Train 使用 `visualization.train_max_samples` 进行等距抽样，Val/Test 绘制全部已有 ROI。
+处理：只读取已有 Hand landmark 自动标注结果并绘制审核图；不重新执行来源检查、Palm 推理、ROI 裁剪、教师推理、质量门控或发布，也不受 `visualization.roi_enabled` 当前值影响。Train 使用 `visualization.train_max_samples` 进行等距抽样，Val/Test 绘制全部已有 ROI。
 
 输出：`<source>/02_roi_crops/<variant>/hand_landmarks_roi_visualization/` 和更新后的 `<source>/qc/<variant>/roi_visualization_report.json`。
 
 ### 6.2 自动标注后补生成原图可视化
 
-若已有 MediaPipe draft，但当次自动标注没有启用原图可视化，直接运行：
+若已有 Hand landmark draft，但当次自动标注没有启用原图可视化，直接运行：
 
 ```bash
 make autolabel-visualize-original \
@@ -285,7 +288,7 @@ make autolabel-visualize-original \
 
 输入：来源的平铺 `images/` 与对应 `<source>/02_roi_crops/<variant>/hand_landmarks_autolabel_draft.jsonl`。
 
-处理：只读取已有 draft 的 `landmarks_image_px` 并绘制，不重新运行来源检查、Palm、ROI、MediaPipe、质量门控或发布，也不受 `visualization.original_image_enabled` 当前值影响。同一原图若对应多个 positive ROI，会全部绘制；没有 positive 的原图仍输出 `hands=0` 图。
+处理：只读取已有 draft 的 `landmarks_image_px` 并绘制，不重新运行来源检查、Palm、ROI、教师推理、质量门控或发布，也不受 `visualization.original_image_enabled` 当前值影响。同一原图若对应多个 positive ROI，会全部绘制；没有 positive 的原图仍输出 `hands=0` 图。
 
 输出：`<source>/visualizations/original_image_landmarks/<variant>/`。目录为来源的每张原图输出一张同 stem PNG；报告写入 `<source>/qc/<variant>/original_image_visualization_report.json`。重复执行会清除该变体目录中不属于当前来源 stem 集合的旧 PNG，以及旧版本遗留的 TIFF 可视化。
 
@@ -313,7 +316,7 @@ make hand-cvat-export \
 configs/cvat_label.json
 ```
 
-处理：为该来源全部实际 ROI 生成 CVAT for images 1.1 XML。Train split 会被拒绝。导出前要求 manifest 与 MediaPipe draft 的 `crop_id` 一一对应；缺失、重复或 positive 关键点 ID 不完整时直接失败，不会静默导出为 `no_hand`。XML 的 `<image id>` 严格按照 ROI 文件名字典序编号，positive 的 21 点按照 landmark ID `0..20` 对应到 CVAT 子点名 `1..21`。导出内容只描述 Hand ROI 内的 skeleton 和 tag，不存在 Palm shape。
+处理：为该来源全部实际 ROI 生成 CVAT for images 1.1 XML。Train split 会被拒绝。导出前要求 manifest 与 Hand landmark draft 的 `crop_id` 一一对应；缺失、重复或 positive 关键点 ID 不完整时直接失败，不会静默导出为 `no_hand`。XML 的 `<image id>` 严格按照 ROI 文件名字典序编号，positive 的 21 点按照 landmark ID `0..20` 对应到 CVAT 子点名 `1..21`。导出内容只描述 Hand ROI 内的 skeleton 和 tag，不存在 Palm shape。
 
 输出：
 
@@ -358,7 +361,7 @@ make hand-cvat-import \
   PROPOSAL_VARIANT=eos-1.0
 ```
 
-输入：reviewed XML、原始 MediaPipe draft 和 ROI manifest。
+输入：reviewed XML、原始 Hand landmark draft 和 ROI manifest。
 
 处理：检查每个 ROI 的 presence、handedness、skeleton 完整性和冲突 tag，并比较教师点与复核点，记录人工实际修改的 landmark ID。
 
@@ -372,6 +375,8 @@ make hand-cvat-import \
 provenance 规则：
 - 未修改教师点为 `mediapipe/mediapipe_v1`；
 - 人工修正教师点为 `mediapipe_human_corrected/project_consensus_v1`；
+- 未修改 RTMPose 教师点为 `rtmpose/rtmpose_m_hand5_v1`；人工修正为 `rtmpose_human_corrected/project_consensus_v1`；
+- 未推理的 Eos 低分候选为 `unresolved/unlabeled_v1`，`teacher_model_id=null`；
 - teacher abstain 后人工完整补标为 `human/project_consensus_v1`。
 
 所有复核记录同时保存 `human_reviewed` 和 `human_modified_landmark_ids`。存在阻断错误时不会生成可发布结果，应根据导入报告修复 CVAT XML 后重试。
@@ -474,7 +479,7 @@ make hard-review \
 HAND_DATASET_ROOT/Selections/<selection_id>/review/images/<capture_source_id>/
 ```
 
-**人工只删除 MediaPipe 21 点明显错误的 ROI，不重新标点，也不修改 Palm/ROI。**
+**人工只删除教师 21 点明显错误的 ROI，不重新标点，也不修改 Palm/ROI。**
 
 困难正样本支持与真负样本相同的压缩包/网盘/本地删除式复核。只替换当前 `selection_id` 的 `review/images/`，保留服务器上的 `request_manifest.jsonl` 和 `README.json`；图片相对路径与文件名必须保持不变。重新上传的图片可以是普通文件，不要求保留硬链接。发布时这些审核图片**只用于判断哪些 ROI 被保留**，最终 `selection.jsonl` 仍零拷贝引用 PretrainSource 原始 ROI。
 
@@ -542,11 +547,21 @@ make help
 
 这些参数改变程序生成的 ROI 几何，因此修改时必须新建 `PROPOSAL_VARIANT`；不能在 CVAT 中手工补偿。
 
-### 13.4 MediaPipe
+### 13.4 Hand landmark 后端
+
+- `hand_landmark.backend`：默认 `mediapipe_tasks`；可选 `rtmpose_onnx`。未知值立即报错，不会静默回退。Make 的 `HAND_LANDMARK_BACKEND` 默认留空，因此未传时真正服从 YAML；单次非空值优先。
+
+MediaPipe 参数：
 
 - `model_asset_path`：Hand Landmarker `.task` 文件路径。
 - `num_hands`：每个 Palm ROI 只标目标手，当前为 1。
 - `min_hand_detection_confidence`、`min_hand_presence_confidence`、`min_tracking_confidence`：教师确认门限。**提高会增加 teacher abstain，降低会增加自动 positive 及潜在误标**。调整前应通过 QC 报告抽查，且不得把 abstain 自动当真负样本。
+
+RTMPose 参数与原理：
+
+- `model_onnx_path`：独立 RTMPose-m Hand5 ONNX 文件，接口固定为输入 `input [N,3,256,256]`，输出 `simcc_x/simcc_y [N,21,512]`。ONNX 元数据允许动态/符号 batch 或 keypoint 维，但每次实际输出必须严格为 `[1,21,512]`。运行时优先 CUDA provider，不可用时使用 CPU，并把实际 provider 写入 QC。
+- `simcc_split_ratio`：与模型训练配置绑定，固定为 `2.0`，不得调整。预处理将灰度复制为 RGB，使用 MMPose 官方 mean/std；解码直接对原始 SimCC logits 取 argmax 后除以 `2.0`，分数为 x/y 峰值较小者，不执行 softmax。
+- 每个 runtime ROI 都必须输出 21 点；输出接口、形状、有限数值或 runtime ROI 读取异常会阻断任务。低分候选在读图与推理前跳过，继续人工负样本审核链路。
 
 ### 13.5 质量门控
 
@@ -567,7 +582,7 @@ make help
 
 ## 14. `configs/review.yaml` 与 `configs/cvat_label.json`
 
-`review.yaml` 只包含 Hand ROI CVAT **导入导出的语义映射和人工复核门控**；不包含 Palm、ROI 几何或 MediaPipe 参数。`cvat_label.json` 是创建 CVAT 项目/任务时使用的标签 schema。
+`review.yaml` 只包含 Hand ROI CVAT **导入导出的语义映射和人工复核门控**；不包含 Palm、ROI 几何或 Hand landmark 后端参数。`cvat_label.json` 是创建 CVAT 项目/任务时使用的标签 schema。
 
 ### 14.1 CVAT 与人工复核参数
 

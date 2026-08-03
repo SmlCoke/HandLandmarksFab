@@ -242,6 +242,38 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(changed["human_modified_landmark_ids"], [4])
         self.assertEqual(abstain["label_origin"], "human")
 
+        rtmpose_draft = dict(draft, source="rtmpose_m_hand5_onnx")
+        rtmpose_unchanged = apply_label_provenance(
+            [rtmpose_draft], {"roi_1": rtmpose_draft}, True
+        )[0]
+        rtmpose_corrected = dict(
+            rtmpose_draft,
+            landmarks_crop_norm=[dict(point) for point in points],
+        )
+        rtmpose_corrected["landmarks_crop_norm"][8]["y"] += 0.1
+        rtmpose_changed = apply_label_provenance(
+            [rtmpose_corrected], {"roi_1": rtmpose_draft}, True
+        )[0]
+        unresolved = apply_label_provenance(
+            [
+                {
+                    "crop_id": "roi_candidate",
+                    "hand_presence": {"present": False},
+                    "source": "eos_negative_candidate_unassessed",
+                }
+            ],
+            human_reviewed=False,
+        )[0]
+        self.assertEqual("rtmpose", rtmpose_unchanged["label_origin"])
+        self.assertEqual("rtmpose_m_hand5_v1", rtmpose_unchanged["annotation_style"])
+        self.assertEqual(
+            "rtmpose-m_hand5_256x256_onnx", rtmpose_unchanged["teacher_model_id"]
+        )
+        self.assertEqual("rtmpose_human_corrected", rtmpose_changed["label_origin"])
+        self.assertEqual("unresolved", unresolved["label_origin"])
+        self.assertEqual("unlabeled_v1", unresolved["annotation_style"])
+        self.assertIsNone(unresolved["teacher_model_id"])
+
     def test_train_positive_candidate_negative_and_quality_gate_partition(self) -> None:
         cfg = load_yaml_config(Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml")
         points_norm = [
@@ -427,6 +459,27 @@ class DatasetV3Tests(unittest.TestCase):
             cfg = _load_public_configs(args)
         self.assertFalse(cfg["visualization"]["roi_enabled"])
         self.assertFalse(cfg["visualization"]["original_image_enabled"])
+
+    def test_hand_landmark_backend_global_default_and_cli_override(self) -> None:
+        common = [
+            "autolabel-train",
+            "--dataset-root",
+            str(self.root),
+            "--scope",
+            "pretrain",
+            "--dataset-id",
+            "national-r1",
+            "--capture-source-id",
+            CAPTURE_TRAIN,
+            "--proposal-variant",
+            "p01",
+        ]
+        global_cfg = _load_public_configs(_parser().parse_args(common))
+        self.assertEqual("mediapipe_tasks", global_cfg["hand_landmark"]["backend"])
+        override_cfg = _load_public_configs(
+            _parser().parse_args(common + ["--hand-landmark-backend", "rtmpose_onnx"])
+        )
+        self.assertEqual("rtmpose_onnx", override_cfg["hand_landmark"]["backend"])
 
     def test_standalone_roi_visualization_reuses_existing_draft(self) -> None:
         source = source_root(self.root, "pretrain", "national-r1", CAPTURE_TRAIN)

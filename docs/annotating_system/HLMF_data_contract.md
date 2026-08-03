@@ -35,6 +35,8 @@ visualizations/original_image_landmarks/<proposal_variant>/
 
 Palm Detector 的产品名为 **Eos**。当前冻结模型为 `eos-1.0`，仓库相对路径是 `models/palm_detector/eos-1.0/model_opt.onnx`，对应的 `proposal_variant` 为 `eos-1.0`。后续模型文件放入 `models/palm_detector/eos-*/model_opt.onnx`；更换 Eos 版本或修改会改变 proposal/ROI 的参数时，必须使用新的唯一 `proposal_variant`，不得覆盖已有派生产物。
 
+Hand landmark 教师由 `hand_landmark.backend` 选择：`mediapipe_tasks` 对应 `mediapipe/mediapipe_v1` 和 `mediapipe_hand_landmarker_task`；`rtmpose_onnx` 对应 `rtmpose/rtmpose_m_hand5_v1` 和 `rtmpose-m_hand5_256x256_onnx`。切换教师只重写同一来源/`proposal_variant` 的 draft 与发布标签，不新增 teacher variant 目录，也不改变 Palm、ROI、路径或字段集合。实际后端和 ONNX provider 记录在 `qc/<proposal_variant>/mediapipe_report.json`。
+
 ## 稳定身份
 
 - `capture_source_id`：`<background>-<distance>-<lighting>-<condition>-<split>-<session>-<performer>`。
@@ -46,6 +48,10 @@ Palm Detector 的产品名为 **Eos**。当前冻结模型为 `eos-1.0`，仓库
 
 每条发布记录至少包含：schema、dataset/source/split、`raw_image_id`、`roi_id`、`proposal_variant`、proposal slot/kind、仓库相对 crop 路径、Palm score、presence、handedness、21 点、`label_origin`、`annotation_style`、`human_reviewed` 和 `human_modified_landmark_ids`。
 
+自动标签 provenance 值固定如下：MediaPipe 为 `mediapipe/mediapipe_v1`；RTMPose 为 `rtmpose/rtmpose_m_hand5_v1`；人工修点后分别为 `mediapipe_human_corrected/project_consensus_v1` 与 `rtmpose_human_corrected/project_consensus_v1`。未送入教师的 Eos 低分候选为 `unresolved/unlabeled_v1` 且 `teacher_model_id=null`，不得标成教师标签。
+
+RTMPose runtime ROI 的 `hand_presence.present=true` 是发布路由哨兵，不构成 presence 真值；`handedness` 固定为 `{"label":"unknown","score":null}`。这些记录只可用于 Iris geometry pretrain，训练方必须忽略 presence 和 handedness；多任务训练及正式评估必须使用独立分类器或人工确认字段。
+
 Val/Test 的 `no_hand` 是固定 ROI 上的真值 negative，不是 Palm 漏检；`ignore_for_training` 不进入训练或评估标签。
 
 ## CVAT frame 对齐契约
@@ -54,7 +60,7 @@ Val/Test 的 `no_hand` 是固定 ROI 上的真值 negative，不是 Palm 漏检�
 
 ## 发布契约
 
-- Train：positive 与 candidate negative 分文件；candidate negative 未经删除式审核不得训练。
+- Train：positive 与 candidate negative 分文件；RTMPose 只处理 runtime ROI，candidate negative 保持未标注，未经删除式审核不得训练。
 - Val/Test：只发布实际生成且经过 CVAT 决策的固定 ROI，不保留 candidate negative。
 - 真负样本：published 图片必须与审核树中保留文件一一对应，并带 manifest 与审核报告。服务器内直接复核时使用硬链接节省空间；审核树经过压缩包/网盘/本地复核后可以是普通文件，允许发布这一份人工确认后的图片副本。
 - 困难正样本：selection 只保存零拷贝引用，不生成图片副本。

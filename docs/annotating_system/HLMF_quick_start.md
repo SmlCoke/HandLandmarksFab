@@ -34,7 +34,7 @@ export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
 cd /path/to/HandLandmarkerFab
 ```
 
-四个公共配置各自只有一种职责：`configs/autolabel.yaml` 管 Palm/ROI/MediaPipe，`configs/review.yaml` 管 Hand ROI CVAT 规则，`configs/datasets.yaml` 管发布集合和数据上限，`configs/cvat_label.json` 是 CVAT label schema。
+四个公共配置各自只有一种职责：`configs/autolabel.yaml` 管 Palm/ROI/Hand landmark 后端，`configs/review.yaml` 管 Hand ROI CVAT 规则，`configs/datasets.yaml` 管发布集合和数据上限，`configs/cvat_label.json` 是 CVAT label schema。
 
 当前 Palm Detector 产品版本为 Eos `eos-1.0`。运行前确认 `models/palm_detector/eos-1.0/model_opt.onnx` 存在；本页命令统一使用 `PROPOSAL_VARIANT=eos-1.0`。
 
@@ -48,11 +48,19 @@ make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain 
 
 ## 2A. Train 自动标注与发布（Train Autolabel）
 
-输入：已放好的 Train TIFF、Eos ONNX、MediaPipe task 和 `configs/autolabel.yaml`。处理：Eos → 程序化 Hand ROI → MediaPipe → 质量分流 → 发布。输出位于来源的 `01_palm/eos-1.0/`、`02_roi_crops/eos-1.0/`、`05_labels/eos-1.0/` 和 `qc/eos-1.0/`。
+输入：已放好的 Train TIFF、Eos ONNX、所选 Hand landmark 模型和 `configs/autolabel.yaml`。处理：Eos → 程序化 Hand ROI → MediaPipe（默认）或 RTMPose → 质量分流 → 发布。输出位于来源的 `01_palm/eos-1.0/`、`02_roi_crops/eos-1.0/`、`05_labels/eos-1.0/` 和 `qc/eos-1.0/`。
 
 ```bash
 make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0
 ```
+
+仅本次改用 RTMPose：
+
+```bash
+make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
+```
+
+RTMPose 只推理 Eos runtime ROI；低分候选保持未标注并进入 `candidate_negatives.jsonl`。RTMPose 的 presence 是发布路由值、handedness 为 unknown，HLML geometry pretrain 必须忽略这两个监督分支。
 
 四个耗时阶段会显示 tqdm 进度。临时启用 Train 等距抽样可视化（默认最多 200 张）时执行：
 
@@ -68,7 +76,7 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretra
 
 ## 2B. Val/Test 自动标注（Eval Autolabel）
 
-输入：Eval TIFF 和两个模型。处理：只对 Palm 实际检测到的 proposal 自动生成 ROI 和 MediaPipe draft；不保留低分候选负样本。输出位于来源的 `01_palm/`、`02_roi_crops/` 和 `qc/`，此时尚未发布评估标签。
+输入：Eval TIFF、Eos 和所选 Hand landmark 模型。处理：只对 Palm 实际检测到的 proposal 自动生成 ROI 和教师 draft；不保留低分候选负样本。输出位于来源的 `01_palm/`、`02_roi_crops/` 和 `qc/`，此时尚未发布评估标签。临时切换同样追加 `HAND_LANDMARK_BACKEND=rtmpose_onnx`。
 
 ```bash
 make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
@@ -104,7 +112,7 @@ make autolabel-visualize-original HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET
 
 ## 3. 导出 Hand ROI CVAT（Hand CVAT Export）
 
-输入：`02_roi_crops/eos-1.0/images/`、ROI manifest 和 MediaPipe draft。输出：`03_reviewed/eos-1.0/cvat_autolabel.xml`。
+输入：`02_roi_crops/eos-1.0/images/`、ROI manifest 和 Hand landmark draft。输出：`03_reviewed/eos-1.0/cvat_autolabel.xml`。
 
 ```bash
 make hand-cvat-export HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0
@@ -152,7 +160,7 @@ make negative-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" NEGATIVE_DATASET_ID
 make hard-review HAND_DATASET_ROOT="$HAND_DATASET_ROOT" SELECTION_ID=hard-positive-0801 MINING_REQUEST=/root/autodl-tmp/TrainFab/HLML-4.0/mining/v4-r1/hlmf_review_request.jsonl
 ```
 
-人工只删除 MediaPipe 点明显错误的 ROI，不重标点。允许采用与负样本相同的压缩包/网盘/本地复核方式，只替换 `review/images/` 并保留 request manifest。发布输出为 `Selections/<id>/published/selection.jsonl` 和 `manifest.json`，继续零拷贝引用原 ROI。
+人工只删除教师点明显错误的 ROI，不重标点。允许采用与负样本相同的压缩包/网盘/本地复核方式，只替换 `review/images/` 并保留 request manifest。发布输出为 `Selections/<id>/published/selection.jsonl` 和 `manifest.json`，继续零拷贝引用原 ROI。
 
 ```bash
 make hard-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" SELECTION_ID=hard-positive-0801

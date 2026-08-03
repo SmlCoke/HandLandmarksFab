@@ -32,7 +32,7 @@ from hand_autolabel.dataset_v3 import (
 )
 from hand_autolabel.formats import load_yaml_config, read_jsonl, resolve_path, write_json, write_jsonl
 from hand_autolabel.image_io import read_image, write_image
-from hand_autolabel.mediapipe_roi_labeler import label_roi_manifest
+from hand_autolabel.hand_landmark_labeler import label_hand_landmark_manifest
 from hand_autolabel.mediapipe_roi_visualization import (
     TrainingRoiVisualizationError,
     render_autolabel_roi_visualizations,
@@ -72,6 +72,13 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--dataset-id", required=True)
         command.add_argument("--capture-source-id", required=True)
         command.add_argument("--proposal-variant", required=True)
+        if name in {"mediapipe", "autolabel-train", "autolabel-eval"}:
+            command.add_argument(
+                "--hand-landmark-backend",
+                choices=("mediapipe_tasks", "rtmpose_onnx"),
+                default=None,
+                help="Override hand_landmark.backend for this run.",
+            )
         if name in {"autolabel-train", "autolabel-eval"}:
             command.add_argument(
                 "--roi-visualization",
@@ -127,6 +134,9 @@ def _load_public_configs(args: argparse.Namespace) -> Dict[str, Any]:
         cfg.setdefault("visualization", {})["original_image_enabled"] = (
             original_visualization_override == "true"
         )
+    hand_landmark_backend = getattr(args, "hand_landmark_backend", None)
+    if hand_landmark_backend is not None:
+        cfg.setdefault("hand_landmark", {})["backend"] = hand_landmark_backend
     return cfg
 
 
@@ -374,7 +384,7 @@ def _run_mediapipe(
         item = dict(row)
         item["crop_path"] = str(Path(args.dataset_root).resolve() / row["crop_relpath"])
         runtime_manifest.append(item)
-    rows, mode = label_roi_manifest(
+    rows, backend_info = label_hand_landmark_manifest(
         runtime_manifest,
         cfg,
         ROOT,
@@ -403,13 +413,20 @@ def _run_mediapipe(
         show_progress=show_progress,
     )
     stats = summarize_label_rows(rows, cfg)
+    backend = str(backend_info["backend"])
     report = {
         "schema_version": SCHEMA_VERSION,
-        "mediapipe_mode": mode,
+        # Retained for consumers of the existing report path/schema.
+        "mediapipe_mode": backend_info["mode"] if backend == "mediapipe_tasks" else None,
+        "hand_landmark_backend": backend,
+        "hand_landmark_mode": backend_info["mode"],
+        "execution_provider": backend_info["provider"],
+        "runtime_rois_labeled": backend_info["runtime_rois_labeled"],
+        "negative_candidates_skipped": backend_info["negative_candidates_skipped"],
         "total": stats["total"],
         "positive": stats["positive"],
         "teacher_abstain": stats["negative"],
-        "label_origin": "mediapipe",
+        "label_origin": "mediapipe" if backend == "mediapipe_tasks" else "rtmpose",
         "roi_visualization": roi_visualization_report,
         "original_image_visualization": original_visualization_report,
     }
@@ -477,7 +494,7 @@ def _run_existing_roi_visualization(
     rows = read_jsonl(draft_path)
     if not rows:
         raise DatasetContractError(
-            f"MediaPipe autolabel draft is missing or empty: {draft_path}"
+            f"Hand landmark autolabel draft is missing or empty: {draft_path}"
         )
     return _run_roi_visualization(
         args,

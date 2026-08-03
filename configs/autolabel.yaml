@@ -43,12 +43,19 @@ hand_roi:
   shift_x: 0.0
   shift_y: -0.1
 
+hand_landmark:
+  backend: mediapipe_tasks
+
 mediapipe:
   model_asset_path: models/mediapipe/hand_landmarker.task
   num_hands: 1
   min_hand_detection_confidence: 0.5
   min_hand_presence_confidence: 0.5
   min_tracking_confidence: 0.5
+
+rtmpose:
+  model_onnx_path: models/rtmpose/rtmpose-m_hand5_256x256.onnx
+  simcc_split_ratio: 2.0
 
 quality:
   handedness_review_threshold: 0.7

@@ -720,6 +720,14 @@ def apply_label_provenance(
 ) -> List[Dict[str, Any]]:
     """Normalize label origin/style and record the exact human changes."""
 
+    def teacher_identity(source_row: Mapping[str, Any]) -> tuple[str, str, str | None]:
+        source = str(source_row.get("source") or "")
+        if source == "rtmpose_m_hand5_onnx":
+            return "rtmpose", "rtmpose_m_hand5_v1", "rtmpose-m_hand5_256x256_onnx"
+        if source == "eos_negative_candidate_unassessed":
+            return "unresolved", "unlabeled_v1", None
+        return "mediapipe", "mediapipe_v1", "mediapipe_hand_landmarker_task"
+
     drafts = draft_by_roi or {}
     output: List[Dict[str, Any]] = []
     for raw in rows:
@@ -730,6 +738,7 @@ def apply_label_provenance(
         draft = drafts.get(roi_id)
         present = bool((row.get("hand_presence") or {}).get("present"))
         teacher_present = bool((draft.get("hand_presence") or {}).get("present")) if draft else False
+        teacher_origin, teacher_style, teacher_model_id = teacher_identity(draft or row)
         modified: List[int] = []
         if human_reviewed and present and teacher_present:
             old = {int(point["id"]): point for point in draft.get("landmarks_crop_norm") or []}
@@ -740,13 +749,13 @@ def apply_label_provenance(
                 ) > 1e-6:
                     modified.append(int(point["id"]))
         if not human_reviewed:
-            origin = "mediapipe"
-            style = "mediapipe_v1"
+            origin = teacher_origin
+            style = teacher_style
         elif present and teacher_present and not modified:
-            origin = "mediapipe"
-            style = "mediapipe_v1"
+            origin = teacher_origin
+            style = teacher_style
         elif present and teacher_present:
-            origin = "mediapipe_human_corrected"
+            origin = f"{teacher_origin}_human_corrected"
             style = "project_consensus_v1"
         else:
             origin = "human"
@@ -756,7 +765,7 @@ def apply_label_provenance(
                 "schema_version": SCHEMA_VERSION,
                 "label_origin": origin,
                 "annotation_style": style,
-                "teacher_model_id": "mediapipe_hand_landmarker_task",
+                "teacher_model_id": teacher_model_id,
                 "teacher_detected": teacher_present if human_reviewed else present,
                 "human_reviewed": bool(human_reviewed),
                 "human_modified_landmark_ids": sorted(modified),

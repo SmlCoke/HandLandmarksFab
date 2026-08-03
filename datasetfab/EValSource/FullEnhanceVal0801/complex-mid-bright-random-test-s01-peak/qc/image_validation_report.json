@@ -1,0 +1,22 @@
+{
+  "schema_version": "hlmf_dataset_v1",
+  "dataset_id": "FullEnhanceVal0801",
+  "capture_source_id": "complex-mid-bright-random-test-s01-peak",
+  "scope": "eval",
+  "split": "test",
+  "total": 600,
+  "valid": 600,
+  "failed": 0,
+  "rotated_clockwise": 0,
+  "raw_ids_reused_after_rename": 0,
+  "errors": [],
+  "validation_policy": {
+    "accepted_input_sizes": [
+      "720x1280",
+      "1280x720"
+    ],
+    "normalized_size": "1280x720",
+    "channels": 1,
+    "content_sha256": "not_computed"
+  }
+}
