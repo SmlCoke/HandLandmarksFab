@@ -4,6 +4,7 @@ data/
 *.png
 *.jsonl
 *.xml
+datasetfab/
 
 # model weights
 *.onnx
