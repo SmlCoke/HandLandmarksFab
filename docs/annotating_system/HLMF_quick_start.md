@@ -57,12 +57,12 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretra
 四个耗时阶段会显示 tqdm 进度。临时启用 Train 等距抽样可视化（默认最多 200 张）时执行：
 
 ```bash
-make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0 VISUALIZATION=true
+make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0 ROI_VISUALIZATION=true
 ```
 
-审核图输出到 `02_roi_crops/eos-1.0/hand_landmarks_visualization/`。
+审核图输出到 `02_roi_crops/eos-1.0/hand_landmarks_roi_visualization/`。
 
-临时启用全量原图关键点可视化时，在同一命令末尾改用或追加 `ORIGINAL_VISUALIZATION=true`；输出到 `visualizations/original_image_landmarks/eos-1.0/`，文件名与原图完全相同。
+临时启用全量原图关键点可视化时，在同一命令末尾改用或追加 `ORIGINAL_VISUALIZATION=true`；输出到 `visualizations/original_image_landmarks/eos-1.0/`，每张 PNG 与原图使用相同 stem。
 
 `hand_training_labels.jsonl` 是通过门控的 positive；`candidate_negatives.jsonl` 只能进入后续删除式复核，不能直接训练。
 
@@ -77,19 +77,19 @@ make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DA
 临时启用全部 Eval ROI 可视化时执行：
 
 ```bash
-make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0 VISUALIZATION=true
+make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0 ROI_VISUALIZATION=true
 ```
 
-全局开关为 `configs/autolabel.yaml` 的 `visualization.enabled`；命令中的 `VISUALIZATION=true|false` 优先。CVAT 导出和导入不生成审核图。
+Hand ROI 全局开关为 `configs/autolabel.yaml` 的 `visualization.roi_enabled`；命令中的 `ROI_VISUALIZATION=true|false` 优先。CVAT 导出和导入不生成审核图。
 
 原图可视化的全局开关为 `visualization.original_image_enabled`（默认 `false`）；单次命令用 `ORIGINAL_VISUALIZATION=true|false` 覆盖。Train 与 Eval 都会输出全部原图，不按 ROI 抽样。
 
 ## 2C. 自动标注后补生成可视化
 
-输入：已有的 ROI 图片和 `hand_landmarks_autolabel_draft.jsonl`。处理：只绘制已有自动标注，不重跑 autolabel。输出：`02_roi_crops/<variant>/hand_landmarks_visualization/`。
+输入：已有的 ROI 图片和 `hand_landmarks_autolabel_draft.jsonl`。处理：只绘制已有自动标注，不重跑 autolabel。输出：`02_roi_crops/<variant>/hand_landmarks_roi_visualization/`。
 
 ```bash
-make autolabel-visualize HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0
+make autolabel-visualize-roi HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 CAPTURE_SOURCE_ID=white-far-bright-fist-train-s01-peak PROPOSAL_VARIANT=eos-1.0
 ```
 
 Val/Test 使用 `DATASET_SCOPE=eval` 和对应来源 ID。该命令无视全局可视化开关并直接生成；Train 等距抽样，Val/Test 全量输出。
@@ -100,7 +100,7 @@ Val/Test 使用 `DATASET_SCOPE=eval` 和对应来源 ID。该命令无视全局�
 make autolabel-visualize-original HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 CAPTURE_SOURCE_ID=complex-mid-bright-random-test-s01-peak PROPOSAL_VARIANT=eos-1.0
 ```
 
-输出为 `visualizations/original_image_landmarks/<variant>/`；每个变体包含来源全部原图的同名 TIFF，没有有效关键点的图片标记为 `hands=0`。
+输出为 `visualizations/original_image_landmarks/<variant>/`；每个变体为来源全部原图生成同 stem PNG，没有有效关键点的图片标记为 `hands=0`。
 
 ## 3. 导出 Hand ROI CVAT（Hand CVAT Export）
 

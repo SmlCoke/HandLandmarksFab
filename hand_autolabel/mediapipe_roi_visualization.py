@@ -207,7 +207,22 @@ def render_original_image_visualizations(
             f"No source TIFF images found: {source_images_dir}"
         )
 
+    output_name_by_source: Dict[str, str] = {}
+    source_by_output_key: Dict[str, str] = {}
+    for source_image in source_images:
+        output_name = f"{source_image.stem}.png"
+        output_key = output_name.casefold()
+        previous_source = source_by_output_key.get(output_key)
+        if previous_source is not None:
+            raise TrainingRoiVisualizationError(
+                "Source image stems collide after PNG conversion: "
+                f"{previous_source}, {source_image.name} -> {output_name}"
+            )
+        source_by_output_key[output_key] = source_image.name
+        output_name_by_source[source_image.name] = output_name
+
     source_names = {path.name for path in source_images}
+    expected_output_names = set(output_name_by_source.values())
     rows_by_image: Dict[str, List[Mapping[str, Any]]] = {
         name: [] for name in source_names
     }
@@ -237,6 +252,8 @@ def render_original_image_visualizations(
     stats: Dict[str, Any] = {
         "source_images": len(source_images),
         "draft_rows": len(label_rows),
+        "output_format": "png",
+        "png_compression": 3,
         "saved": 0,
         "images_with_hands": 0,
         "images_without_hands": 0,
@@ -314,7 +331,11 @@ def render_original_image_visualizations(
             scale=0.45,
         )
 
-        if write_image(output_dir / source_image.name, overlay):
+        if write_image(
+            output_dir / output_name_by_source[source_image.name],
+            overlay,
+            [int(cv2.IMWRITE_PNG_COMPRESSION), 3],
+        ):
             stats["saved"] += 1
         else:
             stats["write_failures"] += 1
@@ -323,8 +344,8 @@ def render_original_image_visualizations(
     for path in output_dir.iterdir():
         if (
             path.is_file()
-            and path.suffix.lower() in {".tif", ".tiff"}
-            and path.name not in source_names
+            and path.suffix.lower() in {".png", ".tif", ".tiff"}
+            and path.name not in expected_output_names
         ):
             path.unlink()
             stale_removed += 1
@@ -358,7 +379,7 @@ def evenly_spaced_sample(
     return [rows[index] for index in indices]
 
 
-def render_autolabel_visualizations(
+def render_autolabel_roi_visualizations(
     label_rows: Sequence[Mapping[str, Any]],
     roi_images_dir: Path,
     output_dir: Path,
@@ -514,7 +535,7 @@ def render_finalized_training_overlays(
             f"{len(preflight_errors)} error(s): {preview}{suffix}"
         )
 
-    visualization_dir = labels_dir.parent / "hand_landmarks_visualization"
+    visualization_dir = labels_dir.parent / "hand_landmarks_roi_visualization"
     source_stats: Dict[str, Dict[str, int]] = {}
     total_saved = 0
     for dataset_id, source_dir in source_dirs.items():

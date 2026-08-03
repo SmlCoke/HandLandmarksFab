@@ -55,8 +55,8 @@ quality:
   high_palm_score_review_threshold: 0.8
 
 visualization:
-  # Global default. Override one high-level run with VISUALIZATION=true/false.
-  enabled: false
+  # Global Hand ROI default. Override one high-level run with ROI_VISUALIZATION=true/false.
+  roi_enabled: false
   # Draw projected landmarks on every original image, grouped by proposal variant.
   original_image_enabled: false
   # Train uses a deterministic, evenly spaced sample; Val/Test always render all ROIs.

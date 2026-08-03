@@ -92,9 +92,9 @@ HAND_DATASET_ROOT/EValSource/<dataset_id>/<capture_source_id>/images/
   images/
   01_palm/<proposal_variant>/
   02_roi_crops/<proposal_variant>/
-    hand_landmarks_visualization/  # 可选自动标注审核图
+    hand_landmarks_roi_visualization/  # 可选 Hand ROI 自动标注审核图
   visualizations/original_image_landmarks/<proposal_variant>/
-    <original_image_name>.tif      # 可选原图关键点审核图
+    <original_image_stem>.png      # 可选原图关键点审核图
   03_reviewed/<proposal_variant>/
   05_labels/<proposal_variant>/
   qc/<proposal_variant>/
@@ -181,23 +181,23 @@ make train-autolabel \
   PROPOSAL_VARIANT=eos-1.0
 ```
 
-仅**本次临时启用可视化时**，在同一命令末尾增加：
+仅**本次临时启用 Hand ROI 可视化时**，在同一命令末尾增加：
 
 ```bash
-VISUALIZATION=true
+ROI_VISUALIZATION=true
 ```
 
-例如 `make train-autolabel ... VISUALIZATION=true`。`VISUALIZATION=false` 可在全局配置已启用时仅关闭本次生成；命令行临时值优先于 `autolabel.yaml`。
+例如 `make train-autolabel ... ROI_VISUALIZATION=true`。`ROI_VISUALIZATION=false` 可在全局配置已启用时仅关闭本次生成；命令行临时值优先于 `autolabel.yaml`。
 
-若要把关键点还原到完整原图上，在同一命令末尾增加 `ORIGINAL_VISUALIZATION=true`；使用 `false` 可只关闭本次原图可视化。该开关与 Hand ROI 的 `VISUALIZATION` 相互独立。
+若要把关键点还原到完整原图上，在同一命令末尾增加 `ORIGINAL_VISUALIZATION=true`；使用 `false` 可只关闭本次原图可视化。该开关与 `ROI_VISUALIZATION` 相互独立。
 
 输入：来源 `images/`、`configs/autolabel.yaml`、`paths.palm_model_onnx` 指向的 Palm ONNX 模型，以及 `mediapipe.model_asset_path` 指向的 MediaPipe task 文件。
 
 处理：该高层命令依次执行**来源检查**、**Palm 推理**、**稳定 proposal slot 分配**、**canonical ROI 裁剪**、**MediaPipe ROI 推理**、**质量门控**和 **Train 来源发布**。来源检查、Palm 推理、ROI 裁剪和 MediaPipe 推理都会显示 tqdm 进度、处理速度与预计剩余时间。Palm 结果从产生到发布都不经过人工修改。
 
-启用可视化时，**程序按稳定的 ROI manifest 顺序做等距索引抽样**，覆盖首尾并**尽量均匀地分布在整份来源中**；最多输出 `visualization.train_max_samples` 张，默认 200 张。每张审核图直接以 canonical Hand ROI 为底图，叠加 MediaPipe 21 点、骨架连线、presence 和 handedness。该目录只用于快速人工抽查，不替代标签 JSONL，也不进入 CVAT。
+启用 Hand ROI 可视化时，**程序按稳定的 ROI manifest 顺序做等距索引抽样**，覆盖首尾并**尽量均匀地分布在整份来源中**；最多输出 `visualization.train_max_samples` 张，默认 200 张。每张审核图直接以 canonical Hand ROI 为底图，叠加 MediaPipe 21 点、骨架连线、presence 和 handedness。该目录只用于快速人工抽查，不替代标签 JSONL，也不进入 CVAT。
 
-启用原图可视化时，程序直接读取 draft 中已经还原好的 `landmarks_image_px`，将同一原图关联的全部 positive ROI 关键点绘制在来源 TIFF 上。该分支始终输出来源 `images/` 中的全部原图；没有有效关键点的图片也会生成并标记 `hands=0`。输出文件名（含 `.tif`/`.tiff` 扩展名）与原图完全相同，因此不同变体目录可以按同名文件直接对比。
+启用原图可视化时，程序直接读取 draft 中已经还原好的 `landmarks_image_px`，将同一原图关联的全部 positive ROI 关键点绘制在来源 TIFF 上。该分支始终输出来源 `images/` 中的全部原图；没有有效关键点的图片也会生成并标记 `hands=0`。输出统一保存为 PNG，文件名 stem 与原图完全相同，例如 `frame.tiff → frame.png`，因此不同变体目录可以按同名 PNG 直接对比。PNG 固定使用压缩级别 3，在减小体积的同时避免最高压缩级别造成过长编码时间。
 
 输出按步骤写入：
 
@@ -206,13 +206,13 @@ VISUALIZATION=true
 <source>/02_roi_crops/<variant>/images/<roi_id>.png
 <source>/02_roi_crops/<variant>/hand_roi_crops_manifest.jsonl
 <source>/02_roi_crops/<variant>/hand_landmarks_autolabel_draft.jsonl
-<source>/02_roi_crops/<variant>/hand_landmarks_visualization/<roi_id>.png  # 启用时，Train 抽样
-<source>/visualizations/original_image_landmarks/<variant>/<original_image_name>.tif  # 启用时，全量原图
+<source>/02_roi_crops/<variant>/hand_landmarks_roi_visualization/<roi_id>.png  # 启用时，Train 抽样
+<source>/visualizations/original_image_landmarks/<variant>/<original_image_stem>.png  # 启用时，全量原图
 <source>/05_labels/<variant>/hand_training_labels.jsonl
 <source>/05_labels/<variant>/candidate_negatives.jsonl
 <source>/05_labels/<variant>/ignored.jsonl
 <source>/qc/<variant>/*_report.json
-<source>/qc/<variant>/autolabel_visualization_report.json
+<source>/qc/<variant>/roi_visualization_report.json
 <source>/qc/<variant>/original_image_visualization_report.json
 <dataset>/dataset_manifest.json
 ```
@@ -239,13 +239,13 @@ make eval-autolabel \
   PROPOSAL_VARIANT=eos-1.0
 ```
 
-仅本次临时启用或关闭 Hand ROI 可视化时，同样使用 `VISUALIZATION=true` 或 `VISUALIZATION=false`；原图可视化使用 `ORIGINAL_VISUALIZATION=true` 或 `ORIGINAL_VISUALIZATION=false`。
+仅本次临时启用或关闭 Hand ROI 可视化时，同样使用 `ROI_VISUALIZATION=true` 或 `ROI_VISUALIZATION=false`；原图可视化使用 `ORIGINAL_VISUALIZATION=true` 或 `ORIGINAL_VISUALIZATION=false`。
 
 输入：Val/Test 来源的 `images/`、Palm 模型、MediaPipe 模型和 `autolabel.yaml`。
 
 处理：与 Train 一样运行来源检查、Palm、程序化 ROI 和 MediaPipe，并在四个耗时环节显示 tqdm 进度；但只保留 Palm Detector 实际产生的 runtime ROI，并**强制关闭低分候选负样本**。这里**不会补 Palm 漏检**，也**不会从原图人工补 ROI**。启用 Hand ROI 可视化时，对该来源的全部实际 Hand ROI 生成关键点叠加图，不做抽样；启用原图可视化时，对来源的全部原图生成同名叠加图。
 
-输出：Palm、ROI、MediaPipe draft 和 QC 文件与 Train 的路径相同；对应开关启用时额外生成 `<source>/02_roi_crops/<variant>/hand_landmarks_visualization/` 或 `<source>/visualizations/original_image_landmarks/<variant>/`。此时**不发布最终评估标签**。命令返回的下一步是 CVAT 导出；后续 CVAT 导出和导入不重复生成可视化。
+输出：Palm、ROI、MediaPipe draft 和 QC 文件与 Train 的路径相同；对应开关启用时额外生成 `<source>/02_roi_crops/<variant>/hand_landmarks_roi_visualization/` 或 `<source>/visualizations/original_image_landmarks/<variant>/`。此时**不发布最终评估标签**。命令返回的下一步是 CVAT 导出；后续 CVAT 导出和导入不重复生成可视化。
 
 限制：每个 Val/Test split 最多 2000 张原图、3000 个实际生成 ROI；最终在来源发布阶段根据 dataset manifest 统一检查。
 
@@ -254,7 +254,7 @@ make eval-autolabel \
 若执行 Train 或 Eval Autolabel 时没有启用可视化，后续可直接运行：
 
 ```bash
-make autolabel-visualize \
+make autolabel-visualize-roi \
   HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=pretrain \
   DATASET_ID=FullEnhance0801 \
@@ -266,9 +266,9 @@ Val/Test 将 `DATASET_SCOPE` 改为 `eval`，并使用对应的来源 ID。
 
 输入：已经存在的 `<source>/02_roi_crops/<variant>/images/` 与 `hand_landmarks_autolabel_draft.jsonl`。
 
-处理：只读取已有 MediaPipe 自动标注结果并绘制审核图；不重新执行来源检查、Palm 推理、ROI 裁剪、MediaPipe 推理、质量门控或发布，也不受 `visualization.enabled` 当前值影响。Train 使用 `visualization.train_max_samples` 进行等距抽样，Val/Test 绘制全部已有 ROI。
+处理：只读取已有 MediaPipe 自动标注结果并绘制审核图；不重新执行来源检查、Palm 推理、ROI 裁剪、MediaPipe 推理、质量门控或发布，也不受 `visualization.roi_enabled` 当前值影响。Train 使用 `visualization.train_max_samples` 进行等距抽样，Val/Test 绘制全部已有 ROI。
 
-输出：`<source>/02_roi_crops/<variant>/hand_landmarks_visualization/` 和更新后的 `<source>/qc/<variant>/autolabel_visualization_report.json`。
+输出：`<source>/02_roi_crops/<variant>/hand_landmarks_roi_visualization/` 和更新后的 `<source>/qc/<variant>/roi_visualization_report.json`。
 
 ### 6.2 自动标注后补生成原图可视化
 
@@ -287,7 +287,7 @@ make autolabel-visualize-original \
 
 处理：只读取已有 draft 的 `landmarks_image_px` 并绘制，不重新运行来源检查、Palm、ROI、MediaPipe、质量门控或发布，也不受 `visualization.original_image_enabled` 当前值影响。同一原图若对应多个 positive ROI，会全部绘制；没有 positive 的原图仍输出 `hands=0` 图。
 
-输出：`<source>/visualizations/original_image_landmarks/<variant>/`。目录包含来源的全部原图，文件名与来源 `images/` 完全一致；报告写入 `<source>/qc/<variant>/original_image_visualization_report.json`。重复执行会清除该变体目录中已经不属于当前来源文件名集合的旧 TIFF。
+输出：`<source>/visualizations/original_image_landmarks/<variant>/`。目录为来源的每张原图输出一张同 stem PNG；报告写入 `<source>/qc/<variant>/original_image_visualization_report.json`。重复执行会清除该变体目录中不属于当前来源 stem 集合的旧 PNG，以及旧版本遗留的 TIFF 可视化。
 
 ## 7. 阶段四：导出 Hand ROI CVAT 任务
 
@@ -555,15 +555,15 @@ make help
 
 ### 13.6 自动标注可视化
 
-- `visualization.enabled`：全局开关，默认 `false`。只控制 Train/Eval 自动标注后的 Hand ROI 审核图，不改变 Palm、ROI、标签、质量门控或发布结果。
+- `visualization.roi_enabled`：Hand ROI 审核图全局开关，默认 `false`。不改变 Palm、ROI、标签、质量门控或发布结果。
 - `visualization.original_image_enabled`：原图关键点审核图的全局开关，默认 `false`。启用时对来源全部原图输出同名可视化，并按 proposal variant 隔离。
 - `visualization.train_max_samples`：Train 单来源最多生成的等距抽样审核图数量，默认 200，必须至少为 1；来源 ROI 不超过该值时全部生成。Val/Test 始终生成全部实际 ROI，该参数对其无效。
-- 临时覆盖：`make train-autolabel ... VISUALIZATION=true|false` 或 `make eval-autolabel ... VISUALIZATION=true|false`。临时值优先于 `autolabel.yaml`；未传时使用全局值。
+- Hand ROI 临时覆盖：`make train-autolabel ... ROI_VISUALIZATION=true|false` 或 `make eval-autolabel ... ROI_VISUALIZATION=true|false`。临时值优先于 `autolabel.yaml`；未传时使用全局值。
 - 原图临时覆盖：在 Train/Eval 命令中使用 `ORIGINAL_VISUALIZATION=true|false`，优先级高于 `visualization.original_image_enabled`。
-- 补生成：已有自动标注 draft 时执行 `make autolabel-visualize ...`。该命令本身即表示启用，不读取 `visualization.enabled`，但 Train 仍使用 `train_max_samples`。
+- 补生成 Hand ROI：已有自动标注 draft 时执行 `make autolabel-visualize-roi ...`。该命令本身即表示启用，不读取 `visualization.roi_enabled`，但 Train 仍使用 `train_max_samples`。
 - 补生成原图：执行 `make autolabel-visualize-original ...`，不读取全局原图开关，也不重跑自动标注。
-- 输出目录固定为 `<source>/02_roi_crops/<variant>/hand_landmarks_visualization/`，执行报告固定为 `<source>/qc/<variant>/autolabel_visualization_report.json`。同一来源和变体再次启用可视化时，程序会清除不属于当前选择结果的旧 PNG，避免抽样配置变化后残留过期审核图。
-- 原图输出固定为 `<source>/visualizations/original_image_landmarks/<variant>/`，报告固定为 `<source>/qc/<variant>/original_image_visualization_report.json`；每个变体目录的文件名集合与来源 `images/` 一致。
+- Hand ROI 输出目录固定为 `<source>/02_roi_crops/<variant>/hand_landmarks_roi_visualization/`，执行报告固定为 `<source>/qc/<variant>/roi_visualization_report.json`。同一来源和变体再次启用时，程序会清除不属于当前选择结果的旧 PNG。
+- 原图输出固定为 `<source>/visualizations/original_image_landmarks/<variant>/`，报告固定为 `<source>/qc/<variant>/original_image_visualization_report.json`；每个变体目录的 PNG stem 集合与来源 `images/` 一致。若来源中 `.tif` 与 `.tiff` 使用相同 stem，程序会拒绝生成以避免覆盖。
 
 ## 14. `configs/review.yaml` 与 `configs/cvat_label.json`
 

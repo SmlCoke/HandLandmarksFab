@@ -9,7 +9,7 @@ PROPOSAL_VARIANT ?= eos-1.0
 AUTOLABEL_CONFIG ?= configs/autolabel.yaml
 REVIEW_CONFIG ?= configs/review.yaml
 DATASETS_CONFIG ?= configs/datasets.yaml
-VISUALIZATION ?=
+ROI_VISUALIZATION ?=
 ORIGINAL_VISUALIZATION ?=
 
 NEGATIVE_DATASET_ID ?=
@@ -19,10 +19,10 @@ MINING_REQUEST ?=
 
 CLI = $(PYTHON) -B scripts/hlmf.py --autolabel-config "$(AUTOLABEL_CONFIG)" --review-config "$(REVIEW_CONFIG)" --datasets-config "$(DATASETS_CONFIG)"
 SOURCE_ARGS = --dataset-root "$(HAND_DATASET_ROOT)" --scope "$(DATASET_SCOPE)" --dataset-id "$(DATASET_ID)" --capture-source-id "$(CAPTURE_SOURCE_ID)" --proposal-variant "$(PROPOSAL_VARIANT)"
-AUTOLABEL_ARGS = $(if $(strip $(VISUALIZATION)),--visualization "$(VISUALIZATION)",) \
+AUTOLABEL_ARGS = $(if $(strip $(ROI_VISUALIZATION)),--roi-visualization "$(ROI_VISUALIZATION)",) \
 	$(if $(strip $(ORIGINAL_VISUALIZATION)),--original-visualization "$(ORIGINAL_VISUALIZATION)",)
 
-.PHONY: help paths source-check train-autolabel eval-autolabel autolabel-visualize \
+.PHONY: help paths source-check train-autolabel eval-autolabel autolabel-visualize-roi \
 	autolabel-visualize-original hand-cvat-export \
 	hand-cvat-import source-publish negative-review negative-publish hard-review \
 	hard-publish registry-check compile test
@@ -31,9 +31,9 @@ help:
 	@echo HLMF 3.0 - Palm proposals to versioned Hand ROI datasets
 	@echo Configs: autolabel.yaml=automatic labels, review.yaml=Hand CVAT, datasets.yaml=publication, cvat_label.json=CVAT schema
 	@echo   make source-check DATASET_SCOPE=pretrain/eval DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-1.0
-	@echo   make train-autolabel ... [VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
-	@echo   make eval-autolabel ... [VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
-	@echo   make autolabel-visualize ...     Render existing MediaPipe draft without rerunning autolabel
+	@echo   make train-autolabel ... [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
+	@echo   make eval-autolabel ... [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
+	@echo   make autolabel-visualize-roi ...  Render existing draft on Hand ROI images
 	@echo   make autolabel-visualize-original ...  Render existing draft on original images
 	@echo   make hand-cvat-export ...         Export Hand ROI CVAT XML only
 	@echo   make hand-cvat-import ...         Import reviewed Hand ROI XML
@@ -61,8 +61,8 @@ train-autolabel:
 eval-autolabel:
 	$(CLI) autolabel-eval $(SOURCE_ARGS) $(AUTOLABEL_ARGS)
 
-autolabel-visualize:
-	$(CLI) autolabel-visualize $(SOURCE_ARGS)
+autolabel-visualize-roi:
+	$(CLI) autolabel-visualize-roi $(SOURCE_ARGS)
 
 autolabel-visualize-original:
 	$(CLI) autolabel-visualize-original $(SOURCE_ARGS)

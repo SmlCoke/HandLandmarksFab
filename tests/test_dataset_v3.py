@@ -29,8 +29,9 @@ from hand_autolabel.dataset_v3 import (
 )
 from hand_autolabel.formats import load_yaml_config, read_jsonl, write_jsonl
 from hand_autolabel.mediapipe_roi_visualization import (
+    TrainingRoiVisualizationError,
     evenly_spaced_sample,
-    render_autolabel_visualizations,
+    render_autolabel_roi_visualizations,
     render_original_image_visualizations,
 )
 from hand_autolabel.progress import track_progress
@@ -38,8 +39,8 @@ from scripts.hlmf import (
     _load_public_configs,
     _parser,
     _partition_labels,
-    _run_existing_autolabel_visualization,
     _run_existing_original_image_visualization,
+    _run_existing_roi_visualization,
 )
 from tools.downsample import downsample
 
@@ -334,7 +335,7 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(3, mocked.call_args.kwargs["total"])
         self.assertEqual("test stage", mocked.call_args.kwargs["desc"])
 
-    def test_autolabel_visualization_samples_train_and_renders_all_eval(self) -> None:
+    def test_roi_visualization_samples_train_and_renders_all_eval(self) -> None:
         roi_images = self.root / "roi_images"
         roi_images.mkdir(parents=True)
         rows = []
@@ -364,7 +365,7 @@ class DatasetV3Tests(unittest.TestCase):
         train_output = self.root / "train_visualization"
         train_output.mkdir(parents=True)
         self.assertTrue(cv2.imwrite(str(train_output / "stale.png"), np.zeros((8, 8), dtype=np.uint8)))
-        train_stats = render_autolabel_visualizations(
+        train_stats = render_autolabel_roi_visualizations(
             rows,
             roi_images,
             train_output,
@@ -383,7 +384,7 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertGreater(int(rendered.max()), 0)
 
         eval_output = self.root / "eval_visualization"
-        eval_stats = render_autolabel_visualizations(
+        eval_stats = render_autolabel_roi_visualizations(
             rows,
             roi_images,
             eval_output,
@@ -408,7 +409,7 @@ class DatasetV3Tests(unittest.TestCase):
                 CAPTURE_TRAIN,
                 "--proposal-variant",
                 "p01",
-                "--visualization",
+                "--roi-visualization",
                 "false",
                 "--original-visualization",
                 "false",
@@ -418,16 +419,16 @@ class DatasetV3Tests(unittest.TestCase):
             os.environ,
             {
                 "AUTOLABEL_OVERRIDES": (
-                    '{"visualization":{"enabled":true,'
+                    '{"visualization":{"roi_enabled":true,'
                     '"original_image_enabled":true}}'
                 )
             },
         ):
             cfg = _load_public_configs(args)
-        self.assertFalse(cfg["visualization"]["enabled"])
+        self.assertFalse(cfg["visualization"]["roi_enabled"])
         self.assertFalse(cfg["visualization"]["original_image_enabled"])
 
-    def test_standalone_visualization_reuses_existing_autolabel_draft(self) -> None:
+    def test_standalone_roi_visualization_reuses_existing_draft(self) -> None:
         source = source_root(self.root, "pretrain", "national-r1", CAPTURE_TRAIN)
         paths = proposal_paths(source, "p01")
         crop_dir = paths["roi"] / "images"
@@ -459,9 +460,9 @@ class DatasetV3Tests(unittest.TestCase):
             "dataset": {},
             "paths": {},
             "palm": {"keep_low_score_candidates_for_negatives": True},
-            "visualization": {"enabled": False, "train_max_samples": 2},
+            "visualization": {"roi_enabled": False, "train_max_samples": 2},
         }
-        report = _run_existing_autolabel_visualization(
+        report = _run_existing_roi_visualization(
             args,
             cfg,
             show_progress=False,
@@ -472,10 +473,16 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(2, report["saved"])
         self.assertEqual(
             2,
-            len(list((paths["roi"] / "hand_landmarks_visualization").glob("*.png"))),
+            len(
+                list(
+                    (paths["roi"] / "hand_landmarks_roi_visualization").glob("*.png")
+                )
+            ),
         )
+        self.assertTrue((paths["qc"] / "roi_visualization_report.json").is_file())
+        self.assertFalse((paths["qc"] / "autolabel_visualization_report.json").exists())
 
-    def test_original_image_visualization_preserves_every_source_filename(self) -> None:
+    def test_original_image_visualization_preserves_source_stems_as_png(self) -> None:
         source_images = self.root / "source_images"
         write_tiff(source_images / "frame_alpha.tif", shape=(96, 128), value=31)
         write_tiff(source_images / "frame_beta.tiff", shape=(96, 128), value=47)
@@ -510,7 +517,7 @@ class DatasetV3Tests(unittest.TestCase):
             proposal_variant="p01",
         )
 
-        expected_names = {"frame_alpha.tif", "frame_beta.tiff"}
+        expected_names = {"frame_alpha.png", "frame_beta.png"}
         self.assertEqual(expected_names, {path.name for path in output.iterdir()})
         self.assertEqual(2, stats["saved"])
         self.assertEqual(1, stats["images_with_hands"])
@@ -518,7 +525,9 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(1, stats["positive_hands"])
         self.assertEqual(1, stats["teacher_abstain_rois"])
         self.assertEqual(1, stats["stale_removed"])
-        rendered = cv2.imread(str(output / "frame_alpha.tif"), cv2.IMREAD_UNCHANGED)
+        self.assertEqual("png", stats["output_format"])
+        self.assertEqual(3, stats["png_compression"])
+        rendered = cv2.imread(str(output / "frame_alpha.png"), cv2.IMREAD_UNCHANGED)
         self.assertIsNotNone(rendered)
         self.assertEqual(3, rendered.ndim)
         self.assertGreater(int(rendered.max()), 31)
@@ -531,6 +540,20 @@ class DatasetV3Tests(unittest.TestCase):
             proposal_variant="p02",
         )
         self.assertEqual(expected_names, {path.name for path in second_output.iterdir()})
+
+        collision_images = self.root / "collision_images"
+        write_tiff(collision_images / "duplicate.tif", shape=(8, 8), value=0)
+        write_tiff(collision_images / "duplicate.tiff", shape=(8, 8), value=0)
+        with self.assertRaisesRegex(
+            TrainingRoiVisualizationError,
+            "stems collide after PNG conversion",
+        ):
+            render_original_image_visualizations(
+                [],
+                collision_images,
+                self.root / "collision_output",
+                proposal_variant="p01",
+            )
 
     def test_standalone_original_visualization_reuses_existing_draft(self) -> None:
         source = source_root(self.root, "eval", "national-r1", CAPTURE_VAL)
@@ -567,7 +590,7 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertTrue(report["enabled"])
         self.assertEqual("standalone", report["trigger"])
         self.assertEqual(1, report["saved"])
-        self.assertEqual({"original_001.tiff"}, {path.name for path in output.iterdir()})
+        self.assertEqual({"original_001.png"}, {path.name for path in output.iterdir()})
         self.assertTrue(
             (paths["qc"] / "original_image_visualization_report.json").is_file()
         )
@@ -578,7 +601,9 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertNotIn("palm-cvat", makefile)
         self.assertNotIn("import_palm", makefile)
         self.assertIn("Hand ROIs are always program-generated", makefile)
-        self.assertIn("autolabel-visualize:", makefile)
+        self.assertIn("autolabel-visualize-roi:", makefile)
+        self.assertNotIn("\nautolabel-visualize:", makefile)
+        self.assertNotIn("\nVISUALIZATION ?=", makefile)
         self.assertIn("autolabel-visualize-original:", makefile)
         self.assertEqual({"hlmf.py"}, {path.name for path in (root / "scripts").glob("*.py")})
         self.assertEqual(
@@ -592,7 +617,7 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertIn("palm", autolabel)
         self.assertEqual(
             {
-                "enabled": False,
+                "roi_enabled": False,
                 "original_image_enabled": False,
                 "train_max_samples": 200,
             },

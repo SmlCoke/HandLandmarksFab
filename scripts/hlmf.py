@@ -35,7 +35,7 @@ from hand_autolabel.image_io import read_image, write_image
 from hand_autolabel.mediapipe_roi_labeler import label_roi_manifest
 from hand_autolabel.mediapipe_roi_visualization import (
     TrainingRoiVisualizationError,
-    render_autolabel_visualizations,
+    render_autolabel_roi_visualizations,
     render_original_image_visualizations,
 )
 from hand_autolabel.palm_mediapipe import run_mediapipe_palm_detector
@@ -62,7 +62,7 @@ def _parser() -> argparse.ArgumentParser:
         "publish-source",
         "autolabel-train",
         "autolabel-eval",
-        "autolabel-visualize",
+        "autolabel-visualize-roi",
         "autolabel-visualize-original",
     )
     for name in source_commands:
@@ -74,10 +74,10 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--proposal-variant", required=True)
         if name in {"autolabel-train", "autolabel-eval"}:
             command.add_argument(
-                "--visualization",
+                "--roi-visualization",
                 choices=("true", "false"),
                 default=None,
-                help="Override visualization.enabled for this autolabel run.",
+                help="Override visualization.roi_enabled for this autolabel run.",
             )
             command.add_argument(
                 "--original-visualization",
@@ -117,9 +117,11 @@ def _load_public_configs(args: argparse.Namespace) -> Dict[str, Any]:
     cfg = load_yaml_config(resolve_path(ROOT, args.autolabel_config))
     _merge_config(cfg, load_yaml_config(resolve_path(ROOT, args.review_config)))
     _merge_config(cfg, load_yaml_config(resolve_path(ROOT, args.datasets_config)))
-    visualization_override = getattr(args, "visualization", None)
-    if visualization_override is not None:
-        cfg.setdefault("visualization", {})["enabled"] = visualization_override == "true"
+    roi_visualization_override = getattr(args, "roi_visualization", None)
+    if roi_visualization_override is not None:
+        cfg.setdefault("visualization", {})["roi_enabled"] = (
+            roi_visualization_override == "true"
+        )
     original_visualization_override = getattr(args, "original_visualization", None)
     if original_visualization_override is not None:
         cfg.setdefault("visualization", {})["original_image_enabled"] = (
@@ -382,12 +384,12 @@ def _run_mediapipe(
     rows = apply_label_provenance(rows, human_reviewed=False)
     draft_path = paths["roi"] / "hand_landmarks_autolabel_draft.jsonl"
     write_jsonl(draft_path, rows)
-    visualization_report = _run_autolabel_visualization(
+    roi_visualization_report = _run_roi_visualization(
         args,
         cfg,
         rows,
         paths,
-        enabled=(cfg.get("visualization") or {}).get("enabled", False),
+        enabled=(cfg.get("visualization") or {}).get("roi_enabled", False),
         trigger="autolabel",
         show_progress=show_progress,
     )
@@ -408,14 +410,14 @@ def _run_mediapipe(
         "positive": stats["positive"],
         "teacher_abstain": stats["negative"],
         "label_origin": "mediapipe",
-        "visualization": visualization_report,
+        "roi_visualization": roi_visualization_report,
         "original_image_visualization": original_visualization_report,
     }
     write_json(paths["qc"] / "mediapipe_report.json", report)
     return report
 
 
-def _run_autolabel_visualization(
+def _run_roi_visualization(
     args: argparse.Namespace,
     cfg: Dict[str, Any],
     rows: List[Dict[str, Any]],
@@ -428,7 +430,7 @@ def _run_autolabel_visualization(
     split = parse_capture_source_id(args.capture_source_id)["split"]
     visualization_cfg = cfg.get("visualization") or {}
     if not isinstance(enabled, bool):
-        raise DatasetContractError("visualization.enabled must be true or false")
+        raise DatasetContractError("visualization.roi_enabled must be true or false")
     try:
         train_max_samples = int(visualization_cfg.get("train_max_samples", 200))
     except (TypeError, ValueError) as exc:
@@ -436,23 +438,23 @@ def _run_autolabel_visualization(
     if train_max_samples < 1:
         raise DatasetContractError("visualization.train_max_samples must be >= 1")
 
-    visualization_report: Dict[str, Any] = {
+    roi_report: Dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "enabled": enabled,
         "split": split,
         "trigger": trigger,
         "output_relpath": str(
-            (paths["roi"] / "hand_landmarks_visualization")
+            (paths["roi"] / "hand_landmarks_roi_visualization")
             .relative_to(Path(args.dataset_root).resolve())
         ).replace("\\", "/"),
     }
     if enabled:
         try:
-            visualization_report.update(
-                render_autolabel_visualizations(
+            roi_report.update(
+                render_autolabel_roi_visualizations(
                     rows,
                     paths["roi"] / "images",
-                    paths["roi"] / "hand_landmarks_visualization",
+                    paths["roi"] / "hand_landmarks_roi_visualization",
                     split=split,
                     train_max_samples=train_max_samples,
                     show_progress=show_progress,
@@ -460,11 +462,11 @@ def _run_autolabel_visualization(
             )
         except TrainingRoiVisualizationError as exc:
             raise DatasetContractError(str(exc)) from exc
-    write_json(paths["qc"] / "autolabel_visualization_report.json", visualization_report)
-    return visualization_report
+    write_json(paths["qc"] / "roi_visualization_report.json", roi_report)
+    return roi_report
 
 
-def _run_existing_autolabel_visualization(
+def _run_existing_roi_visualization(
     args: argparse.Namespace,
     cfg: Dict[str, Any],
     *,
@@ -477,7 +479,7 @@ def _run_existing_autolabel_visualization(
         raise DatasetContractError(
             f"MediaPipe autolabel draft is missing or empty: {draft_path}"
         )
-    return _run_autolabel_visualization(
+    return _run_roi_visualization(
         args,
         cfg,
         rows,
@@ -743,8 +745,8 @@ def main() -> None:
             result = _run_source_pipeline(args, cfg, evaluation=False)
         elif args.command == "autolabel-eval":
             result = _run_source_pipeline(args, cfg, evaluation=True)
-        elif args.command == "autolabel-visualize":
-            result = _run_existing_autolabel_visualization(args, cfg)
+        elif args.command == "autolabel-visualize-roi":
+            result = _run_existing_roi_visualization(args, cfg)
         elif args.command == "autolabel-visualize-original":
             result = _run_existing_original_image_visualization(args)
         elif args.command == "prepare-negative-review":
