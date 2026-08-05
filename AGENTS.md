@@ -74,3 +74,7 @@ These four documents serve as the primary interface documentation for the curren
 ### 4.3 Principle of `HAND_DATASET_ROOT`
 
 1. `HAND_DATASET_ROOT` serves as the directory for the persistent storage of training datasets, and all annotation activities within the system are conducted here. An annotated dataset must not be tied to a specific training run ID; instead, it should be reusable and compatible with multiple repositories. Therefore, when modifying this repository, you are prohibited from embedding markers such as "training batch" or "training run ID" into the annotation workflow.
+
+### 4.4 Principle of Environment Dependency
+
+- Whenever you modify the code or add a new model, remember to check if the repository's environment dependencies have changed. If they have, update `requirements.txt` and remind me to update the `anfab` environment.
