@@ -6,6 +6,10 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 import cv2
 import numpy as np
 
+from .handedness_classifier import (
+    HAND_CLASSIFIER_MODEL_ID,
+    HandednessONNXClassifier,
+)
 from .formats import make_hand_id, merge_label_with_manifest, resolve_path
 from .image_io import read_image, to_uint8_gray
 from .progress import track_progress
@@ -151,6 +155,8 @@ def _unassessed_candidate_label(manifest: Mapping[str, Any]) -> Dict[str, Any]:
         "hand_id": None,
         "hand_presence": {"present": False},
         "handedness": {"label": "unknown", "score": None},
+        "handedness_teacher_model_id": None,
+        "human_modified_handedness": False,
         "landmarks_crop_norm": [],
         "landmarks_crop_px": [],
         "landmarks_image_px": [],
@@ -162,6 +168,7 @@ def label_one_roi_rtmpose(
     manifest: Mapping[str, Any],
     image: np.ndarray,
     detector: Any,
+    handedness_classifier: Any,
     cfg: Mapping[str, Any],
 ) -> Dict[str, Any]:
     if _is_negative_candidate(manifest):
@@ -180,6 +187,7 @@ def label_one_roi_rtmpose(
     coordinates, _scores = detector.detect(image)
     if coordinates.shape != (RTMPOSE_KEYPOINTS, 2):
         raise ValueError(f"RTMPose must return 21 keypoints, got {coordinates.shape}")
+    handedness = handedness_classifier.classify(image)
     crop_px = [
         {"id": idx, "x": float(point[0]), "y": float(point[1])}
         for idx, point in enumerate(coordinates)
@@ -200,7 +208,9 @@ def label_one_roi_rtmpose(
         "hand_id": make_hand_id(str(manifest["crop_id"])),
         # Routing sentinel only. It is not a supervised presence label.
         "hand_presence": {"present": True},
-        "handedness": {"label": "unknown", "score": None},
+        "handedness": handedness,
+        "handedness_teacher_model_id": HAND_CLASSIFIER_MODEL_ID,
+        "human_modified_handedness": False,
         "landmarks_crop_norm": crop_norm,
         "landmarks_crop_px": crop_px,
         "landmarks_image_px": image_px,
@@ -224,7 +234,10 @@ def label_roi_manifest_rtmpose(
     if split_ratio != 2.0:
         raise ValueError("rtmpose.simcc_split_ratio is fixed at 2.0 for this model")
     model_path = resolve_path(root, rtmpose_cfg.get("model_onnx_path", ""))
+    classifier_cfg = cfg.get("hand_classifier") or {}
+    classifier_model_path = resolve_path(root, classifier_cfg.get("model_onnx_path", ""))
     detector: RTMPoseONNXHandLabeler | None = None
+    handedness_classifier: HandednessONNXClassifier | None = None
     rows: List[Dict[str, Any]] = []
     runtime_labeled = 0
     candidates_skipped = 0
@@ -242,16 +255,28 @@ def label_roi_manifest_rtmpose(
             continue
         if detector is None:
             detector = RTMPoseONNXHandLabeler(model_path, split_ratio)
+            handedness_classifier = HandednessONNXClassifier(classifier_model_path)
         crop_path = resolve_path(root, manifest["crop_path"])
         image = read_image(crop_path)
         if image is None:
             raise RuntimeError(f"unreadable runtime Hand ROI for RTMPose: {crop_path}")
-        rows.append(label_one_roi_rtmpose(manifest, image, detector, cfg))
+        if handedness_classifier is None:
+            raise RuntimeError("Hand classifier was not initialized for a runtime ROI")
+        rows.append(
+            label_one_roi_rtmpose(manifest, image, detector, handedness_classifier, cfg)
+        )
         runtime_labeled += 1
     return rows, {
         "backend": "rtmpose_onnx",
         "mode": "rtmpose_onnx",
         "provider": detector.provider if detector is not None else None,
+        "handedness_classifier_provider": (
+            handedness_classifier.provider if handedness_classifier is not None else None
+        ),
+        "handedness_classifier_model_id": (
+            handedness_classifier.model_id if handedness_classifier is not None else None
+        ),
+        "handedness_runtime_rois_labeled": runtime_labeled,
         "runtime_rois_labeled": runtime_labeled,
         "negative_candidates_skipped": candidates_skipped,
     }

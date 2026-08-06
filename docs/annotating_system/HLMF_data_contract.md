@@ -1,73 +1,213 @@
 # HLMF 3.0 数据契约
 
-## 长期目录
+## 1. 仓库根目录
 
 ```text
 HAND_DATASET_ROOT/
   PretrainSource/<dataset_id>/<capture_source_id>/
   EValSource/<dataset_id>/<capture_source_id>/
-  GoldSource/NegativeSamples/<negative_dataset_id>/published/
-  Selections/<selection_id>/published/
+  GoldSource/NegativeSamples/<negative_dataset_id>/
+  Selections/<selection_id>/
   Registry/registry.sqlite3
 ```
 
-每个来源包含平铺 `images/`，派生产物按 proposal 变体隔离：
+train 来源只能位于 `PretrainSource`，val/test 来源只能位于 `EValSource`。`capture_source_id` 固定为：
 
 ```text
-01_palm/<proposal_variant>/
-02_roi_crops/<proposal_variant>/
-  images/<roi_id>.png
-  hand_roi_crops_manifest.jsonl
-  hand_landmarks_autolabel_draft.jsonl
-  hand_landmarks_roi_visualization/<roi_id>.png  # 可选 Hand ROI 审核图
-03_reviewed/<proposal_variant>/
-05_labels/<proposal_variant>/
-qc/<proposal_variant>/
-visualizations/original_image_landmarks/<proposal_variant>/
-  <original_image_stem>.png
+<background>-<distance>-<lighting>-<condition>-<split>-<session>-<performer>
 ```
 
-`hand_landmarks_roi_visualization/` 是可删除、可重建的 Hand ROI 自动标注审核派生物，不是训练或评估输入。启用时 Train 只包含按 manifest 顺序等距抽取的最多 `visualization.train_max_samples` 张 ROI；Val/Test 包含该来源的全部实际 ROI。对应的 resolved 开关、触发方式、选择策略、可用/选择/保存数量和输出路径记录在 `qc/<proposal_variant>/roi_visualization_report.json`。已有 draft 可通过 `make autolabel-visualize-roi ...` 重建该目录；该操作只读取 ROI `images/` 和 `hand_landmarks_autolabel_draft.jsonl`。CVAT 导出与导入不写入该目录。
+split 在来源注册阶段写入所有 manifest，不在发布阶段随机生成。
 
-`visualizations/original_image_landmarks/<proposal_variant>/` 是按变体隔离、可删除重建的原图审核派生物。每个变体目录必须为来源平铺 `images/` 中的每一张 TIFF 输出一张同 stem PNG，例如 `frame.tiff → frame.png`；同一原图关联的所有 positive ROI 使用 draft 的 `landmarks_image_px` 一并绘制，没有 positive 时输出 `hands=0`。同一来源不得存在会映射到相同 PNG 名称的 `.tif/.tiff` stem。PNG 压缩级别固定为 3，并在报告中记录 `output_format=png`、`png_compression=3`。该目录不进入训练、评估或 CVAT。全局开关为 `visualization.original_image_enabled`，Train/Eval 单次覆盖为 `ORIGINAL_VISUALIZATION=true|false`，已有 draft 可用 `make autolabel-visualize-original ...` 重建；执行记录写入 `qc/<proposal_variant>/original_image_visualization_report.json`。
+## 2. Capture source 目录
 
-## 模型版本契约
+```text
+<source>/
+  images/*.tif[f]
+  source.json
+  raw_images.jsonl
+  01_palm/<proposal_variant>/
+    palm_detections.jsonl
+  02_roi_crops/<proposal_variant>/
+    images/<roi_id>.png
+    hand_roi_crops_manifest.jsonl
+    hand_landmarks_autolabel_draft.jsonl
+    hand_landmarks_roi_visualization/<roi_id>.png
+  03_reviewed/<proposal_variant>/
+    cvat_autolabel.xml
+    cvat_reviewed.xml
+    hand_landmarks_reviewed.jsonl
+  05_labels/<proposal_variant>/
+    hand_training_labels.jsonl | hand_evaluation_labels.jsonl
+    candidate_negatives.jsonl
+    ignored.jsonl
+  qc/<proposal_variant>/*_report.json
+  visualizations/original_image_landmarks/
+    <proposal_variant>/<original_stem>.png
+    <proposal_variant>.mp4
+```
 
-Palm Detector 的产品名为 **Eos**。当前冻结模型为 `eos-1.0`，仓库相对路径是 `models/palm_detector/eos-1.0/model_opt.onnx`，对应的 `proposal_variant` 为 `eos-1.0`。后续模型文件放入 `models/palm_detector/eos-*/model_opt.onnx`；更换 Eos 版本或修改会改变 proposal/ROI 的参数时，必须使用新的唯一 `proposal_variant`，不得覆盖已有派生产物。
+原始 `images/`、`source.json` 和 `raw_images.jsonl` 不属于 proposal variant。其余派生产物按精确 variant 隔离。
 
-Hand landmark 教师由 `hand_landmark.backend` 选择：`mediapipe_tasks` 对应 `mediapipe/mediapipe_v1` 和 `mediapipe_hand_landmarker_task`；`rtmpose_onnx` 对应 `rtmpose/rtmpose_m_hand5_v1` 和 `rtmpose-m_hand5_256x256_onnx`。切换教师只重写同一来源/`proposal_variant` 的 draft 与发布标签，不新增 teacher variant 目录，也不改变 Palm、ROI、路径或字段集合。实际后端和 ONNX provider 记录在 `qc/<proposal_variant>/mediapipe_report.json`。
+## 3. ID 与 Registry
 
-## 稳定身份
+- `raw_image_id`：同一来源原图的稳定 ID，不随 proposal variant 改变。
+- `roi_id/crop_id`：由 raw ID、proposal variant、proposal slot 和 ROI contract version 稳定派生。
+- Registry `proposal_variants` 主键：`(capture_source_id, proposal_variant)`。
+- `status=active`：变体可按现有幂等流程重跑。
+- `status=retired`：变体已永久退役，同一来源不得复用该名称。
+- `retired_at`：UTC 退役时间。
 
-- `capture_source_id`：`<background>-<distance>-<lighting>-<condition>-<split>-<session>-<performer>`。
-- `raw_image_id`：首次验证时生成并持久化；改用另一 Palm 模型仍共享该 ID。
-- `roi_id`：由 `raw_image_id + proposal_variant + proposal kind/slot + ROI contract version` 确定；同变体重跑稳定，不同变体互不覆盖。
-- SQLite 对 capture source、raw、ROI、negative dataset 和 selection 执行唯一性约束。
+打开 Registry 时，已有 ROI 的 source/variant 会自动回填为 active。删除变体只改变 status 并删除派生文件，既有 ROI Registry 元数据保留。
 
-## 标签字段
+## 4. Palm 与 ROI manifest
 
-每条发布记录至少包含：schema、dataset/source/split、`raw_image_id`、`roi_id`、`proposal_variant`、proposal slot/kind、仓库相对 crop 路径、Palm score、presence、handedness、21 点、`label_origin`、`annotation_style`、`human_reviewed` 和 `human_modified_landmark_ids`。
+Eos 产生 `proposal_kind=runtime|negative_candidate`。ROI manifest 至少保存 dataset/source/split、raw/ROI ID、proposal variant/slot/kind、Palm score、`palm_valid`、crop 路径与尺寸、ROI rect/corners 和 ROI contract version。
 
-自动标签 provenance 值固定如下：MediaPipe 为 `mediapipe/mediapipe_v1`；RTMPose 为 `rtmpose/rtmpose_m_hand5_v1`；人工修点后分别为 `mediapipe_human_corrected/project_consensus_v1` 与 `rtmpose_human_corrected/project_consensus_v1`。未送入教师的 Eos 低分候选为 `unresolved/unlabeled_v1` 且 `teacher_model_id=null`，不得标成教师标签。
+Palm bbox、p0、p9 与 ROI 几何是程序输出，CVAT 不得修改。所有 Hand ROI 固定为 `256×256`。
 
-RTMPose runtime ROI 的 `hand_presence.present=true` 是发布路由哨兵，不构成 presence 真值；`handedness` 固定为 `{"label":"unknown","score":null}`。这些记录只可用于 Iris geometry pretrain，训练方必须忽略 presence 和 handedness；多任务训练及正式评估必须使用独立分类器或人工确认字段。
+## 5. Hand landmark draft
 
-Val/Test 的 `no_hand` 是固定 ROI 上的真值 negative，不是 Palm 漏检；`ignore_for_training` 不进入训练或评估标签。
+公共字段包括：
 
-## CVAT frame 对齐契约
+```text
+schema_version
+dataset_id, capture_source_id, split
+raw_image_id, roi_id/crop_id, palm_det_id
+proposal_variant, proposal_slot, proposal_kind
+crop_path/crop_relpath, roi_rect, roi_corners_px
+hand_presence.present
+handedness.label, handedness.score
+landmarks_crop_norm[21]
+landmarks_crop_px[21]
+landmarks_image_px[21]
+source
+label_origin, annotation_style
+teacher_model_id
+handedness_teacher_model_id
+teacher_detected
+human_reviewed
+human_modified_landmark_ids
+human_modified_handedness
+```
 
-`cvat_autolabel.xml` 的 `<image id>` 从 0 开始，严格按照 `02_roi_crops/<proposal_variant>/images/` 的 crop 文件名字典序排列；CVAT Images 任务必须使用 `Lexicographical` Sorting method。每个 manifest `crop_id` 必须恰好对应一条 draft，positive 必须完整包含 landmark ID `0..20`，并按 ID 映射为 CVAT skeleton 子点 `1..21`。`cvat_export_report.json` 记录 `image_order=crop_filename_lexicographic` 和相对 manifest 输入顺序发生重排的数量。
+### MediaPipe
 
-## 发布契约
+`source=mediapipe...`，provenance 为 `mediapipe/mediapipe_v1`，presence、handedness 和关键点来自 MediaPipe。现有行为保持不变。
 
-- Train：positive 与 candidate negative 分文件；RTMPose 只处理 runtime ROI，candidate negative 保持未标注，未经删除式审核不得训练。
-- Val/Test：只发布实际生成且经过 CVAT 决策的固定 ROI，不保留 candidate negative。
-- Val/Test 单个 split 的硬上限为 2500 张原图和 3000 个 ROI。系统必须先根据待发布 report 验证预期总量，再写入标签、`source_publish_report.json` 和 `dataset_manifest.json`；超过上限的失败发布不得产生新的发布文件。
-- 真负样本：published 图片必须与审核树中保留文件一一对应，并带 manifest 与审核报告。服务器内直接复核时使用硬链接节省空间；审核树经过压缩包/网盘/本地复核后可以是普通文件，允许发布这一份人工确认后的图片副本。
-- 困难正样本：selection 只保存零拷贝引用，不生成图片副本。
+### RTMPose + HCF runtime
 
-## 完整性策略
+- `source=rtmpose_m_hand5_onnx`；
+- 固定 21 个关键点；
+- `label_origin=rtmpose`；
+- `annotation_style=rtmpose_m_hand5_v1`；
+- `teacher_model_id=rtmpose-m_hand5_256x256_onnx`；
+- `handedness_teacher_model_id=hand-classifier-mobilenetv3-small-v1`；
+- `handedness.label=Left|Right`，score 为 HCF 对应 softmax 概率；
+- `hand_presence.present=true` 仅为发布路由哨兵，不是真实 presence 标注。
 
-常规验证使用稳定 ID、SQLite、文件大小、尺寸与 TIFF/ROI 解码。图片本来就被读取时缓存像素 CRC32 和 dHash64。仅疑似冲突项逐字节比较；流水线不对图片重复计算 SHA-256。
+HCF runtime 输入为 `[1,1,256,256]` float32；灰度除以 255 后按 `0.485/0.229` 归一化。模型接口名为 `input`/`output`，输出两类 logits（0 Left、1 Right）。
 
-HLMF 3.0 不迁移或删除旧 schema 数据，HLML 4.0 只选择新 manifest。
+### 未推理 candidate
+
+low-score candidate 的关键点为空，handedness 为 `{label: unknown, score: null}`，`handedness_teacher_model_id=null`，provenance 为 `unresolved/unlabeled_v1`。它不得伪装成 RTMPose、HCF 或 MediaPipe 标签。
+
+## 6. QC provider 字段
+
+既有 `qc/<variant>/mediapipe_report.json` 路径为兼容消费者而保留。报告增加：
+
+```text
+hand_landmark_backend
+execution_provider
+handedness_classifier_provider
+handedness_classifier_model_id
+handedness_runtime_rois_labeled
+runtime_rois_labeled
+negative_candidates_skipped
+```
+
+MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录两个实际 ONNX provider 和 HCF 推理数。
+
+## 7. Train 发布分流
+
+Train positive 若质量门控失败，整行进入 `ignored.jsonl` 且 `train_eligible=false`。
+
+- handedness score 低于 `quality.handedness_review_threshold`：`ignore_reason=automatic_positive_failed_quality_gate`。
+- RTMPose Train runtime 的 42 个 crop x/y 值中，精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`：quality error 为 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，`ignore_reason=rtmpose_boundary_coordinate_gate`。
+
+当前边界阈值为 3；1–2 个边界值通过。边界门控不应用于 Eval、MediaPipe 或 negative candidate。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
+
+RTMPose 行用于 geometry pretrain 时必须忽略 presence。正式 presence/handedness multitask 训练与 Val/Test 评估必须使用人工确认或独立真实标签。
+
+## 8. Eval、CVAT 与发布
+
+Eval draft 不是正式真值。CVAT frame 依据 ROI 图片字典序映射到 manifest；导入后产生 `hand_landmarks_reviewed.jsonl`。人工修改 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
+
+Val/Test 发布输出 `hand_evaluation_labels.jsonl` 和 `ignored.jsonl`，不发布 negative candidate。Eval 限额按整个 split 的 prospective dataset manifest 统计，配置位于：
+
+```yaml
+evaluation_limits:
+  max_raw_images_per_split: 5000
+  max_rois_per_split: 6000
+```
+
+需要增大时修改 `configs/datasets.yaml` 中对应值。
+
+## 9. 可视化与视频
+
+ROI 可视化目录是 `02_roi_crops/<variant>/hand_landmarks_roi_visualization/`。RTMPose 独立重建时从既有 QC 报告确定后端，只接受 `proposal_kind=runtime`；MediaPipe 保持原行为。
+
+原图可视化 PNG 位于 `visualizations/original_image_landmarks/<variant>/`。默认视频位于同级 `<variant>.mp4`，PNG 按文件名字典序写入，默认 30 FPS、codec `mp4v`。`ORIGINAL_VIDEO=false` 时不生成视频。
+
+`clean-autolabel-visualizations` 只删除上述 ROI/原图 PNG、MP4 和对应 visualization QC 报告，不修改 draft、发布标签、dataset manifest 或 Registry。
+
+## 10. 变体删除契约
+
+`delete-source-variant` 要求确认字符串与 variant 完全一致。目标仅限精确 source/variant：
+
+```text
+01_palm/<variant>
+02_roi_crops/<variant>
+03_reviewed/<variant>
+05_labels/<variant>
+qc/<variant>
+visualizations/original_image_landmarks/<variant>
+visualizations/original_image_landmarks/<variant>.mp4
+```
+
+必须保留：
+
+```text
+images/
+raw_images.jsonl
+source.json
+Registry 中 raw/ROI 元数据和 retired tombstone
+```
+
+命令成功或中断后均可用同一确认命令继续幂等清理；dataset manifest 会重建并排除已删除发布变体。retired 名称不能重新注册 ROI、标注、复核或发布。
+
+## 11. 负样本与困难样本
+
+负样本目录：
+
+```text
+GoldSource/NegativeSamples/<negative_dataset_id>/review/images/
+GoldSource/NegativeSamples/<negative_dataset_id>/published/images/
+GoldSource/NegativeSamples/<negative_dataset_id>/published/negative_labels.jsonl
+```
+
+困难样本目录：
+
+```text
+Selections/<selection_id>/review/images/
+Selections/<selection_id>/published/images/
+Selections/<selection_id>/published/selection.jsonl
+```
+
+review 与 published 图片都是普通复制产生的独立文件，不是硬链接。困难样本记录保留原始 `source_crop_relpath`，并增加可直接读取的 `published_relpath`。删除源变体不会破坏已经发布的负样本/困难样本。
+
+## 12. Dataset manifest 与完整性
+
+dataset manifest 聚合 source、split 和 active published variant，保存 raw/ROI/label 数量和发布标签相对路径。删除变体后立即重建。
+
+系统用 dataset/source/variant 身份和 SQLite 唯一约束隔离数据。日常流水线不在每一步计算 SHA-256；报告中的 `content_sha256` 保持 `not_computed`。

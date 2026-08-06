@@ -35,6 +35,18 @@ class _FakeDetector:
         return coordinates, np.ones(21, dtype=np.float32)
 
 
+class _FakeHandednessClassifier:
+    provider = "FakeExecutionProvider"
+    model_id = "hand-classifier-mobilenetv3-small-v1"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def classify(self, _image: np.ndarray) -> dict:
+        self.calls += 1
+        return {"label": "Right", "score": 0.93}
+
+
 class _FakeMediaPipeDetector:
     def detect(self, _image: np.ndarray) -> tuple[list, list]:
         landmarks = [
@@ -50,6 +62,11 @@ def _config() -> dict:
         "hand_roi": {"output_width": 256, "output_height": 256},
         "hand_landmark": {"backend": "rtmpose_onnx"},
         "rtmpose": {"model_onnx_path": "unused.onnx", "simcc_split_ratio": 2.0},
+        "hand_classifier": {"model_onnx_path": "unused-classifier.onnx"},
+        "quality": {
+            "handedness_review_threshold": 0.7,
+            "rtmpose_train_boundary_coordinate_reject_threshold": 3,
+        },
     }
 
 
@@ -109,14 +126,24 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-finite"):
             decode_simcc(x, y, split_ratio=2.0)
 
-    def test_runtime_roi_gets_21_points_and_unknown_classification(self) -> None:
+    def test_runtime_roi_gets_21_points_and_handedness_classification(self) -> None:
         detector = _FakeDetector()
+        classifier = _FakeHandednessClassifier()
         row = label_one_roi_rtmpose(
-            _manifest(), np.zeros((256, 256), dtype=np.uint8), detector, _config()
+            _manifest(),
+            np.zeros((256, 256), dtype=np.uint8),
+            detector,
+            classifier,
+            _config(),
         )
         self.assertEqual(1, detector.calls)
+        self.assertEqual(1, classifier.calls)
         self.assertTrue(row["hand_presence"]["present"])
-        self.assertEqual({"label": "unknown", "score": None}, row["handedness"])
+        self.assertEqual({"label": "Right", "score": 0.93}, row["handedness"])
+        self.assertEqual(
+            "hand-classifier-mobilenetv3-small-v1",
+            row["handedness_teacher_model_id"],
+        )
         self.assertEqual(21, len(row["landmarks_crop_norm"]))
         self.assertEqual(21, len(row["landmarks_image_px"]))
         self.assertTrue(
@@ -138,13 +165,16 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
 
     def test_negative_candidate_is_not_sent_to_rtmpose(self) -> None:
         detector = _FakeDetector()
+        classifier = _FakeHandednessClassifier()
         row = label_one_roi_rtmpose(
             _manifest(candidate=True),
             np.zeros((256, 256), dtype=np.uint8),
             detector,
+            classifier,
             _config(),
         )
         self.assertEqual(0, detector.calls)
+        self.assertEqual(0, classifier.calls)
         self.assertFalse(row["hand_presence"]["present"])
         self.assertEqual([], row["landmarks_crop_norm"])
         self.assertEqual("eos_negative_candidate_unassessed", row["source"])
@@ -160,15 +190,19 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
         candidate["crop_path"] = "does-not-exist.png"
         with patch(
             "hand_autolabel.rtmpose_hand_labeler.RTMPoseONNXHandLabeler"
-        ) as constructor:
+        ) as pose_constructor, patch(
+            "hand_autolabel.rtmpose_hand_labeler.HandednessONNXClassifier"
+        ) as handedness_constructor:
             rows, info = label_roi_manifest_rtmpose(
                 [candidate], _config(), Path("."), show_progress=False
             )
-        constructor.assert_not_called()
+        pose_constructor.assert_not_called()
+        handedness_constructor.assert_not_called()
         self.assertEqual(1, len(rows))
         self.assertEqual(1, info["negative_candidates_skipped"])
         self.assertEqual(0, info["runtime_rois_labeled"])
         self.assertIsNone(info["provider"])
+        self.assertIsNone(info["handedness_classifier_provider"])
 
     def test_unknown_backend_fails_immediately(self) -> None:
         cfg = _config()

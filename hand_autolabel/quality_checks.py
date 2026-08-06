@@ -75,6 +75,29 @@ def _points_out_of_bounds(points: Iterable[Mapping[str, Any]], width: int, heigh
     return count
 
 
+def _rtmpose_boundary_coordinate_count(
+    row: Mapping[str, Any], cfg: Mapping[str, Any]
+) -> int:
+    if str(row.get("split")) != "train":
+        return 0
+    if str(row.get("proposal_kind")) != "runtime":
+        return 0
+    if str(row.get("source")) != "rtmpose_m_hand5_onnx":
+        return 0
+    width = int(row.get("width", cfg["hand_roi"]["output_width"]))
+    height = int(row.get("height", cfg["hand_roi"]["output_height"]))
+    count = 0
+    for point in row.get("landmarks_crop_px") or []:
+        for axis, maximum in (("x", float(width - 1)), ("y", float(height - 1))):
+            try:
+                value = float(point[axis])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if value == 0.0 or value == maximum:
+                count += 1
+    return count
+
+
 def label_issues(row: Mapping[str, Any], cfg: Mapping[str, Any]) -> tuple[List[str], List[str], bool]:
     warnings: List[str] = []
     errors: List[str] = []
@@ -91,6 +114,26 @@ def label_issues(row: Mapping[str, Any], cfg: Mapping[str, Any]) -> tuple[List[s
     out_count = _points_out_of_bounds(crop_px, int(row.get("width", cfg["hand_roi"]["output_width"])), int(row.get("height", cfg["hand_roi"]["output_height"])))
     if out_count:
         warnings.append(f"crop_points_out_of_bounds:{out_count}")
+        needs_review = True
+    try:
+        boundary_threshold = int(
+            cfg.get("quality", {}).get(
+                "rtmpose_train_boundary_coordinate_reject_threshold", 3
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "quality.rtmpose_train_boundary_coordinate_reject_threshold must be an integer"
+        ) from exc
+    if boundary_threshold < 1:
+        raise ValueError(
+            "quality.rtmpose_train_boundary_coordinate_reject_threshold must be >= 1"
+        )
+    boundary_count = _rtmpose_boundary_coordinate_count(row, cfg)
+    if boundary_count >= boundary_threshold:
+        errors.append(
+            f"rtmpose_boundary_coordinate_values:{boundary_count}>={boundary_threshold}"
+        )
         needs_review = True
     if int(row.get("mediapipe_num_hands_detected", 0)) > 1:
         warnings.append("multiple_hands_in_one_crop")

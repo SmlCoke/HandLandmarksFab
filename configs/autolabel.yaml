@@ -57,8 +57,12 @@ rtmpose:
   model_onnx_path: models/rtmpose/rtmpose-m_hand5_256x256.onnx
   simcc_split_ratio: 2.0
 
+hand_classifier:
+  model_onnx_path: models/hand_classifier/model.onnx
+
 quality:
   handedness_review_threshold: 0.7
+  rtmpose_train_boundary_coordinate_reject_threshold: 3
   high_palm_score_review_threshold: 0.8
 
 visualization:
@@ -66,5 +70,7 @@ visualization:
   roi_enabled: false
   # Draw projected landmarks on every original image, grouped by proposal variant.
   original_image_enabled: false
+  # Standalone original-image visualization also creates <proposal_variant>.mp4 by default.
+  original_video_enabled: true
   # Train uses a deterministic, evenly spaced sample; Val/Test always render all ROIs.
   train_max_samples: 200

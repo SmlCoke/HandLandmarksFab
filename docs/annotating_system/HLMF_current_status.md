@@ -1,25 +1,41 @@
-# HLMF 当前状态（2026-08-03）
+# HLMF 当前状态（2026-08-06）
 
-当前代码已切换到 HLMF 3.0 破坏性数据契约：公共配置按单一职责保留自动标注 `autolabel.yaml`、Hand ROI 复核 `review.yaml`、数据目录 `datasets.yaml` 和 CVAT 标签 schema `cvat_label.json`；公共入口为统一 `scripts/hlmf.py` 与高层 Make 目标。
+## 代码与配置
 
-已实现并测试：TIFF 幂等旋转、稳定 raw/ROI ID、proposal variant 隔离、Train positive/candidate negative 分流、Hand ROI CVAT 来源记录、Val/Test 无候选负样本、真负样本审核树与发布、selection 零拷贝发布与 registry 唯一性。真负样本和困难正样本审核树默认使用服务器硬链接，也允许经压缩包/网盘往返后以保持原相对路径和文件名的普通文件完成发布。
+HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。MediaPipe Tasks 仍是全局默认 Hand landmark 后端，RTMPose-m Hand5 可通过单次参数启用。
 
-Train 与 Val/Test 的高层 autolabel 现已在来源检查、Palm 推理、ROI 裁剪和 Hand landmark 推理阶段显示 tqdm 进度。默认教师仍为 MediaPipe Tasks；已正式集成可选 `rtmpose_onnx`，支持 YAML 全局选择及 CLI/Make 单次覆盖，未知后端直接报错。Hand ROI 可视化接口已统一为 `visualization.roi_enabled`、`ROI_VISUALIZATION` 与 `make autolabel-visualize-roi`；Train 使用最多 200 张的确定性等距抽样审核图，Val/Test 输出全部实际 ROI 审核图，CVAT 导入导出不重复可视化。
+RTMPose runtime ROI 已接入 MobileNetV3-Small HCF：模型路径 `models/hand_classifier/model.onnx`，模型 ID `hand-classifier-mobilenetv3-small-v1`。服务器现有 ONNX Runtime 为 CPU 构建，真实双模型冒烟中 RTMPose 与 HCF 的实际 provider 均为 `CPUExecutionProvider`。low-score candidate 不运行两模型，保持未解析状态。
 
-已完成自动标注但未生成 Hand ROI 审核图的来源，可通过 `make autolabel-visualize-roi ...` 直接读取现有 Hand landmark draft 补生成，不重跑自动标注链路；该入口明确启用绘图，不受全局开关当前值影响。
+当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 行的 42 个 crop 坐标值中，精确边界值达到 3 个时进入 `ignored.jsonl`。Eval、MediaPipe 和 candidate 不应用边界门控。
 
-原图可视化分支已接入 Train/Eval autolabel：`visualization.original_image_enabled` 默认为 `false`，单次可用 `ORIGINAL_VISUALIZATION=true|false` 覆盖。启用后使用 draft 的 `landmarks_image_px` 在来源全部原图上绘制关键点，输出到 `visualizations/original_image_landmarks/<variant>/`；输出统一为与原图同 stem、压缩级别 3 的 PNG，便于逐图比较不同阈值变体并减小存储和传输体积。已有 draft 可通过 `make autolabel-visualize-original ...` 直接补生成。
+原图可视化默认生成按 PNG 文件名字典序排列的 30 FPS MP4；RTMPose ROI 可视化只抽样 runtime ROI。可视化可以独立清理。
 
-CVAT Images 1.1 导出已修复 frame ID 与 ROI 上传顺序不一致的问题：XML 现按 crop 文件名字典序编号，并强制 manifest/draft 一一对应及 positive landmark ID 完整。创建 CVAT 任务时必须使用 `Lexicographical` 排序，防止 skeleton 或 `no_hand` 被绑定到其他 ROI。
+Registry 已增加 source/variant 的 active/retired 状态表。已有 106 个 ROI 来源/变体已自动回填为 active。删除变体会留下永久 tombstone，禁止同一来源复用同名变体。
 
-Eval 来源发布的总量检查已移到所有发布文件写入之前，避免超过限制时标签和 report 已落盘但命令仍报错。`evaluation_limits` 当前允许每个 Val/Test split 最多 2500 张原图和 3000 个 ROI；克隆服务器上的 `FullEnhanceVal0801` 当前已发布 Val 1200 张原图/1549 ROI、Test 2200 张原图/2354 ROI，其中 `complex-near-bright-random-test-s01-peak/eos-1.0` 发布 492 条评估标签、忽略 12 条。
+负样本和困难样本的 review/published 图片均使用独立复制；困难样本 published 记录包含 `published_relpath`，不依赖源变体存活。当前服务器没有既有 `GoldSource/NegativeSamples` 或 `Selections` 数据需要迁移。
 
-系统当前不存在 Palm CVAT、Palm 标注导入、人工 bbox/p0/p9 修改或人工 ROI 绘制入口。Palm Detector 只负责产生 proposal；CVAT 只复核程序生成的 Hand ROI 内信息。
+批处理脚本已移入 `scripts/`，由环境变量接收数据根、数据集、变体、后端、Python、仓库和日志目录；任一来源失败时最终返回非零，Train 脚本没有自动关机。
 
-Palm Detector 的产品名已统一为 **Eos**。当前自动标注链路固定使用 `eos-1.0`，模型路径为 `models/palm_detector/eos-1.0/model_opt.onnx`，默认 `PROPOSAL_VARIANT` 也为 `eos-1.0`。该文件与旧路径 `materials/preminilary/palm/model_opt.onnx` 已执行一次性校验：文件大小均为 5,520,144 字节，SHA-256 均为 `521246FD7CA7F1A10DFB2288683C053852C42C950AAB340DE03CCB6618000E96`；自动标注链路不再引用旧路径。
+## 服务器数据仓库
 
-RTMPose-m Hand5 转换已通过审查并正式接入：仓库部署路径为 `models/rtmpose/rtmpose-m_hand5_256x256.onnx`，独立文件大小 55,119,819 字节，SHA-256 为 `45206307fe9fca886f9a9e3b6d335370b43083924ae78042b77ee771132cbaa3`；输入为 `[N,3,256,256]`，输出为两个 `[N,21,512]` SimCC 张量。服务器旧 `.onnx.data` 是无效残留，不属于部署资产。运行时按 CUDA→CPU 顺序选择可用 provider，并记录到现有 QC 报告路径。
+Eval 数据集 `FullEnhanceVal0801` 当前有 10 个来源：6 个 val、4 个 test，均已发布 `eos-1.0`：
 
-RTMPose 当前只强制标注 Eos runtime ROI，低分候选不推理并以 `unresolved/unlabeled_v1` 继续人工负样本审核。其 `hand_presence.present=true` 仅是发布路由值，`handedness=unknown/null`；当前训练边界是 Iris geometry pretrain 必须忽略 presence/handedness，后续 multitask 和正式评估仍需独立分类器或人工真值。
+- val：4200 张原图、5288 个 ROI、5091 条发布标签；
+- test：2800 张原图、2960 个 ROI、2816 条发布标签。
 
-截至本状态文档更新时，本地 HLMF 单元测试为 31 项通过，覆盖 RTMPose 预处理、SimCC 解码、形状/有限值检查、后端选择、候选分流、provenance 和 Eval 发布前置总量检查。服务器 `HAND_DATASET_ROOT` 中的旧数据未迁移、未删除；只有按 3.0 schema 新发布的数据可供 HLML 4.0 选择。
+Pretrain 数据集 `FullEnhance0801` 当前有 95 个 train 来源，均已发布 `eos-1.0`。合计 105 个 manifest 中已发布来源变体的必要文件全部存在。本轮没有删除、重跑或改写这些发布资产。
+
+Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI）。对应来源目录不存在，且该记录不在当前 Eval manifest 中；本轮按约定保留，没有自动清理。
+
+Registry 当前计数：2 个 dataset、106 个 capture source、68479 张 raw image、106 个 active proposal variant、572600 个 ROI。
+
+## 验收状态
+
+- `make compile`：27 个 Python 文件语法检查通过；
+- `make test`：37 项测试通过；
+- `make help`：通过；
+- 两个批处理脚本 `bash -n` 通过，缺失数据集时返回非零；
+- 真实 RTMPose+HCF runtime ROI 冒烟通过：21 个有限坐标、有效 Left/Right 概率；
+- 临时 PNG→MP4 冒烟通过：`mp4v`、30 FPS、帧数正确；
+- 实施前后 Eval 计数与 105 个已发布变体必要文件完整性保持不变；
+- `requirements.txt` 未改变，无需重建 `anfab` 环境。

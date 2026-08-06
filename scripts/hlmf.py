@@ -18,6 +18,8 @@ from hand_autolabel.dataset_v3 import (
     SCHEMA_VERSION,
     WarehouseRegistry,
     apply_label_provenance,
+    clean_variant_visualizations,
+    delete_source_variant,
     enrich_palm_rows,
     enrich_roi_rows,
     parse_capture_source_id,
@@ -43,6 +45,7 @@ from hand_autolabel.palm_onnx import run_onnx_palm_detector
 from hand_autolabel.progress import track_progress
 from hand_autolabel.quality_checks import label_issues, palm_record_issues, roi_manifest_issues, summarize_label_rows
 from hand_autolabel.roi_geometry import build_roi_rect_from_palm, crop_image_by_roi
+from tools.png_to_video import create_video
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -64,6 +67,8 @@ def _parser() -> argparse.ArgumentParser:
         "autolabel-eval",
         "autolabel-visualize-roi",
         "autolabel-visualize-original",
+        "clean-autolabel-visualizations",
+        "delete-source-variant",
     )
     for name in source_commands:
         command = sub.add_parser(name)
@@ -91,6 +96,19 @@ def _parser() -> argparse.ArgumentParser:
                 choices=("true", "false"),
                 default=None,
                 help="Override visualization.original_image_enabled for this autolabel run.",
+            )
+        if name == "autolabel-visualize-original":
+            command.add_argument(
+                "--original-video",
+                choices=("true", "false"),
+                default=None,
+                help="Override visualization.original_video_enabled for this render.",
+            )
+        if name == "delete-source-variant":
+            command.add_argument(
+                "--confirm-delete",
+                required=True,
+                help="Must exactly match --proposal-variant.",
             )
     prepare_negative = sub.add_parser("prepare-negative-review")
     prepare_negative.add_argument("--dataset-root", required=True)
@@ -134,6 +152,11 @@ def _load_public_configs(args: argparse.Namespace) -> Dict[str, Any]:
         cfg.setdefault("visualization", {})["original_image_enabled"] = (
             original_visualization_override == "true"
         )
+    original_video_override = getattr(args, "original_video", None)
+    if original_video_override is not None:
+        cfg.setdefault("visualization", {})["original_video_enabled"] = (
+            original_video_override == "true"
+        )
     hand_landmark_backend = getattr(args, "hand_landmark_backend", None)
     if hand_landmark_backend is not None:
         cfg.setdefault("hand_landmark", {})["backend"] = hand_landmark_backend
@@ -143,6 +166,9 @@ def _load_public_configs(args: argparse.Namespace) -> Dict[str, Any]:
 def _source_context(args: argparse.Namespace, cfg: Dict[str, Any]) -> tuple[Path, Dict[str, Path]]:
     dataset_root = Path(args.dataset_root).resolve()
     root = source_root(dataset_root, args.scope, args.dataset_id, args.capture_source_id)
+    WarehouseRegistry(dataset_root).assert_variant_writable(
+        args.capture_source_id, args.proposal_variant
+    )
     paths = proposal_paths(root, args.proposal_variant)
     for path in paths.values():
         if path.name != "images":
@@ -392,6 +418,7 @@ def _run_mediapipe(
     )
     rows = _attach_manifest_fields(rows, manifest)
     rows = apply_label_provenance(rows, human_reviewed=False)
+    backend = str(backend_info["backend"])
     draft_path = paths["roi"] / "hand_landmarks_autolabel_draft.jsonl"
     write_jsonl(draft_path, rows)
     roi_visualization_report = _run_roi_visualization(
@@ -399,6 +426,7 @@ def _run_mediapipe(
         cfg,
         rows,
         paths,
+        hand_landmark_backend=backend,
         enabled=(cfg.get("visualization") or {}).get("roi_enabled", False),
         trigger="autolabel",
         show_progress=show_progress,
@@ -413,7 +441,6 @@ def _run_mediapipe(
         show_progress=show_progress,
     )
     stats = summarize_label_rows(rows, cfg)
-    backend = str(backend_info["backend"])
     report = {
         "schema_version": SCHEMA_VERSION,
         # Retained for consumers of the existing report path/schema.
@@ -421,6 +448,15 @@ def _run_mediapipe(
         "hand_landmark_backend": backend,
         "hand_landmark_mode": backend_info["mode"],
         "execution_provider": backend_info["provider"],
+        "handedness_classifier_provider": backend_info.get(
+            "handedness_classifier_provider"
+        ),
+        "handedness_classifier_model_id": backend_info.get(
+            "handedness_classifier_model_id"
+        ),
+        "handedness_runtime_rois_labeled": backend_info.get(
+            "handedness_runtime_rois_labeled", 0
+        ),
         "runtime_rois_labeled": backend_info["runtime_rois_labeled"],
         "negative_candidates_skipped": backend_info["negative_candidates_skipped"],
         "total": stats["total"],
@@ -440,6 +476,7 @@ def _run_roi_visualization(
     rows: List[Dict[str, Any]],
     paths: Dict[str, Path],
     *,
+    hand_landmark_backend: str,
     enabled: Any,
     trigger: str,
     show_progress: bool,
@@ -455,11 +492,22 @@ def _run_roi_visualization(
     if train_max_samples < 1:
         raise DatasetContractError("visualization.train_max_samples must be >= 1")
 
+    visualization_rows = rows
+    excluded_non_runtime = 0
+    if hand_landmark_backend == "rtmpose_onnx":
+        visualization_rows = [
+            row for row in rows if str(row.get("proposal_kind")) == "runtime"
+        ]
+        excluded_non_runtime = len(rows) - len(visualization_rows)
+
     roi_report: Dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "enabled": enabled,
         "split": split,
         "trigger": trigger,
+        "hand_landmark_backend": hand_landmark_backend,
+        "input_rows": len(rows),
+        "excluded_non_runtime": excluded_non_runtime,
         "output_relpath": str(
             (paths["roi"] / "hand_landmarks_roi_visualization")
             .relative_to(Path(args.dataset_root).resolve())
@@ -469,7 +517,7 @@ def _run_roi_visualization(
         try:
             roi_report.update(
                 render_autolabel_roi_visualizations(
-                    rows,
+                    visualization_rows,
                     paths["roi"] / "images",
                     paths["roi"] / "hand_landmarks_roi_visualization",
                     split=split,
@@ -496,11 +544,23 @@ def _run_existing_roi_visualization(
         raise DatasetContractError(
             f"Hand landmark autolabel draft is missing or empty: {draft_path}"
         )
+    backend = ""
+    backend_report_path = paths["qc"] / "mediapipe_report.json"
+    if backend_report_path.is_file():
+        backend_report = json.loads(backend_report_path.read_text(encoding="utf-8"))
+        backend = str(backend_report.get("hand_landmark_backend") or "")
+    if not backend:
+        backend = (
+            "rtmpose_onnx"
+            if any(str(row.get("source")) == "rtmpose_m_hand5_onnx" for row in rows)
+            else "mediapipe_tasks"
+        )
     return _run_roi_visualization(
         args,
         cfg,
         rows,
         paths,
+        hand_landmark_backend=backend,
         enabled=True,
         trigger="standalone",
         show_progress=show_progress,
@@ -549,6 +609,7 @@ def _run_original_image_visualization(
 
 def _run_existing_original_image_visualization(
     args: argparse.Namespace,
+    cfg: Mapping[str, Any],
     *,
     show_progress: bool = True,
 ) -> Dict[str, Any]:
@@ -564,9 +625,9 @@ def _run_existing_original_image_visualization(
     rows = read_jsonl(draft_path)
     if not rows:
         raise DatasetContractError(
-            f"MediaPipe autolabel draft is missing or empty: {draft_path}"
+            f"Hand landmark autolabel draft is missing or empty: {draft_path}"
         )
-    return _run_original_image_visualization(
+    report = _run_original_image_visualization(
         args,
         rows,
         source,
@@ -575,6 +636,23 @@ def _run_existing_original_image_visualization(
         trigger="standalone",
         show_progress=show_progress,
     )
+    video_enabled = (cfg.get("visualization") or {}).get(
+        "original_video_enabled", True
+    )
+    if not isinstance(video_enabled, bool):
+        raise DatasetContractError(
+            "visualization.original_video_enabled must be true or false"
+        )
+    video_report: Dict[str, Any] = {"enabled": video_enabled}
+    if video_enabled:
+        output_dir = source / "visualizations" / "original_image_landmarks" / args.proposal_variant
+        video_report.update(create_video(output_dir, output_dir.parent))
+        video_report["video_relpath"] = str(
+            Path(video_report["video_path"]).relative_to(Path(args.dataset_root).resolve())
+        ).replace("\\", "/")
+    report["video"] = video_report
+    write_json(paths["qc"] / "original_image_visualization_report.json", report)
+    return report
 
 
 def _run_export_cvat(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -652,6 +730,32 @@ def _dataset_manifest(
     return manifest
 
 
+def _run_clean_visualizations(args: argparse.Namespace) -> Dict[str, Any]:
+    return clean_variant_visualizations(
+        Path(args.dataset_root),
+        args.scope,
+        args.dataset_id,
+        args.capture_source_id,
+        args.proposal_variant,
+    )
+
+
+def _run_delete_source_variant(args: argparse.Namespace) -> Dict[str, Any]:
+    result = delete_source_variant(
+        Path(args.dataset_root),
+        args.scope,
+        args.dataset_id,
+        args.capture_source_id,
+        args.proposal_variant,
+        args.confirm_delete,
+    )
+    _dataset_manifest(
+        Path(args.dataset_root).resolve(), args.scope, args.dataset_id
+    )
+    result["dataset_manifest_updated"] = True
+    return result
+
+
 def _validate_evaluation_limits(dataset: Mapping[str, Any], cfg: Mapping[str, Any]) -> None:
     for eval_split in ("val", "test"):
         selected = [
@@ -688,7 +792,13 @@ def _partition_labels(
         }
         if split == "train" and present and (quality_errors or quality_needs_review):
             row["train_eligible"] = False
-            row["ignore_reason"] = "automatic_positive_failed_quality_gate"
+            if any(
+                str(error).startswith("rtmpose_boundary_coordinate_values:")
+                for error in quality_errors
+            ):
+                row["ignore_reason"] = "rtmpose_boundary_coordinate_gate"
+            else:
+                row["ignore_reason"] = "automatic_positive_failed_quality_gate"
             ignored.append(row)
         elif bool(row.get("ignore_for_training")):
             row["train_eligible"] = False
@@ -799,7 +909,11 @@ def main() -> None:
         elif args.command == "autolabel-visualize-roi":
             result = _run_existing_roi_visualization(args, cfg)
         elif args.command == "autolabel-visualize-original":
-            result = _run_existing_original_image_visualization(args)
+            result = _run_existing_original_image_visualization(args, cfg)
+        elif args.command == "clean-autolabel-visualizations":
+            result = _run_clean_visualizations(args)
+        elif args.command == "delete-source-variant":
+            result = _run_delete_source_variant(args)
         elif args.command == "prepare-negative-review":
             rows = [row for path in args.candidate_labels for row in read_jsonl(Path(path))]
             result = prepare_negative_review(Path(args.dataset_root), args.negative_dataset_id, rows)

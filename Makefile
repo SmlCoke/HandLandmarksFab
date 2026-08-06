@@ -11,7 +11,10 @@ REVIEW_CONFIG ?= configs/review.yaml
 DATASETS_CONFIG ?= configs/datasets.yaml
 ROI_VISUALIZATION ?=
 ORIGINAL_VISUALIZATION ?=
+ORIGINAL_VIDEO ?=
 HAND_LANDMARK_BACKEND ?=
+CONFIRM_DELETE ?=
+BATCH_LOG_DIR ?=
 
 NEGATIVE_DATASET_ID ?=
 NEGATIVE_CANDIDATE_LABELS ?=
@@ -25,7 +28,8 @@ AUTOLABEL_ARGS = $(if $(strip $(ROI_VISUALIZATION)),--roi-visualization "$(ROI_V
 	$(if $(strip $(HAND_LANDMARK_BACKEND)),--hand-landmark-backend "$(HAND_LANDMARK_BACKEND)",)
 
 .PHONY: help paths source-check train-autolabel eval-autolabel autolabel-visualize-roi \
-	autolabel-visualize-original hand-cvat-export \
+	autolabel-visualize-original autolabel-visualizations-clean \
+	source-variant-delete batch-eval-autolabel batch-train-autolabel hand-cvat-export \
 	hand-cvat-import source-publish negative-review negative-publish hard-review \
 	hard-publish registry-check compile test
 
@@ -36,7 +40,11 @@ help:
 	@echo   make train-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
 	@echo   make eval-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
 	@echo   make autolabel-visualize-roi ...  Render existing draft on Hand ROI images
-	@echo   make autolabel-visualize-original ...  Render existing draft on original images
+	@echo   make autolabel-visualize-original ... [ORIGINAL_VIDEO=true/false]
+	@echo   make autolabel-visualizations-clean ...  Remove rebuildable visualization outputs
+	@echo   make source-variant-delete ... CONFIRM_DELETE=exact-variant
+	@echo   make batch-eval-autolabel DATASET_ID=... PROPOSAL_VARIANT=...
+	@echo   make batch-train-autolabel DATASET_ID=... PROPOSAL_VARIANT=...
 	@echo   make hand-cvat-export ...         Export Hand ROI CVAT XML only
 	@echo   make hand-cvat-import ...         Import reviewed Hand ROI XML
 	@echo   make source-publish ...           Publish reviewed Val/Test labels
@@ -67,7 +75,22 @@ autolabel-visualize-roi:
 	$(CLI) autolabel-visualize-roi $(SOURCE_ARGS)
 
 autolabel-visualize-original:
-	$(CLI) autolabel-visualize-original $(SOURCE_ARGS)
+	$(CLI) autolabel-visualize-original $(SOURCE_ARGS) $(if $(strip $(ORIGINAL_VIDEO)),--original-video "$(ORIGINAL_VIDEO)",)
+
+autolabel-visualizations-clean:
+	$(CLI) clean-autolabel-visualizations $(SOURCE_ARGS)
+
+source-variant-delete:
+	$(if $(strip $(CONFIRM_DELETE)),,$(error CONFIRM_DELETE must exactly match PROPOSAL_VARIANT))
+	$(CLI) delete-source-variant $(SOURCE_ARGS) --confirm-delete "$(CONFIRM_DELETE)"
+
+batch-eval-autolabel:
+	$(if $(strip $(DATASET_ID)),,$(error DATASET_ID is required))
+	HAND_DATASET_ROOT="$(HAND_DATASET_ROOT)" DATASET_ID="$(DATASET_ID)" PROPOSAL_VARIANT="$(PROPOSAL_VARIANT)" HAND_LANDMARK_BACKEND="$(or $(HAND_LANDMARK_BACKEND),rtmpose_onnx)" PYTHON_BIN="$(PYTHON)" REPO_DIR="$(CURDIR)" $(if $(strip $(BATCH_LOG_DIR)),LOG_DIR="$(BATCH_LOG_DIR)",) bash scripts/batch_eval_autolabel.sh
+
+batch-train-autolabel:
+	$(if $(strip $(DATASET_ID)),,$(error DATASET_ID is required))
+	HAND_DATASET_ROOT="$(HAND_DATASET_ROOT)" DATASET_ID="$(DATASET_ID)" PROPOSAL_VARIANT="$(PROPOSAL_VARIANT)" HAND_LANDMARK_BACKEND="$(or $(HAND_LANDMARK_BACKEND),rtmpose_onnx)" PYTHON_BIN="$(PYTHON)" REPO_DIR="$(CURDIR)" $(if $(strip $(BATCH_LOG_DIR)),LOG_DIR="$(BATCH_LOG_DIR)",) bash scripts/batch_train_autolabel.sh
 
 hand-cvat-export:
 	$(CLI) export-cvat $(SOURCE_ARGS)

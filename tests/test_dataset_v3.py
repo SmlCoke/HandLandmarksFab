@@ -16,6 +16,8 @@ from hand_autolabel.dataset_v3 import (
     ROI_CONTRACT_VERSION,
     WarehouseRegistry,
     apply_label_provenance,
+    clean_variant_visualizations,
+    delete_source_variant,
     enrich_palm_rows,
     enrich_roi_rows,
     parse_capture_source_id,
@@ -27,7 +29,7 @@ from hand_autolabel.dataset_v3 import (
     source_root,
     validate_and_normalize_source,
 )
-from hand_autolabel.formats import load_yaml_config, read_jsonl, write_jsonl
+from hand_autolabel.formats import load_yaml_config, read_jsonl, write_json, write_jsonl
 from hand_autolabel.mediapipe_roi_visualization import (
     TrainingRoiVisualizationError,
     evenly_spaced_sample,
@@ -40,6 +42,7 @@ from scripts.hlmf import (
     _load_public_configs,
     _parser,
     _partition_labels,
+    _run_delete_source_variant,
     _run_existing_original_image_visualization,
     _run_existing_roi_visualization,
     _validate_evaluation_limits,
@@ -318,30 +321,189 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(2, len(eval_rows))
         self.assertEqual([], eval_candidates)
 
-    def test_negative_review_publishes_hardlinks_and_unique_registry(self) -> None:
+    def test_rtmpose_train_boundary_and_handedness_quality_gates(self) -> None:
+        cfg = load_yaml_config(Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml")
+        points_norm = [
+            {"id": index, "x": 0.25, "y": 0.5} for index in range(21)
+        ]
+        base_points = [
+            {"id": index, "x": 64.0, "y": 128.0} for index in range(21)
+        ]
+        two_boundary = [dict(point) for point in base_points]
+        two_boundary[0]["x"] = 0.0
+        two_boundary[1]["y"] = 255.0
+        base = {
+            "hand_presence": {"present": True},
+            "handedness": {"label": "Left", "score": 0.9},
+            "landmarks_crop_norm": points_norm,
+            "landmarks_crop_px": two_boundary,
+            "mediapipe_num_hands_detected": 1,
+            "palm_score": 0.9,
+            "width": 256,
+            "height": 256,
+            "split": "train",
+            "proposal_kind": "runtime",
+            "source": "rtmpose_m_hand5_onnx",
+        }
+        three_boundary = [dict(point) for point in two_boundary]
+        three_boundary[2]["x"] = 0.0
+        passed = dict(base, crop_id="two")
+        rejected = dict(base, crop_id="three", landmarks_crop_px=three_boundary)
+        low_score = dict(
+            base,
+            crop_id="low-score",
+            handedness={"label": "Right", "score": 0.69},
+        )
+        positives, _, ignored = _partition_labels(
+            [passed, rejected, low_score], "train", cfg
+        )
+        self.assertEqual(["two"], [row["crop_id"] for row in positives])
+        self.assertEqual(["three", "low-score"], [row["crop_id"] for row in ignored])
+        self.assertEqual("rtmpose_boundary_coordinate_gate", ignored[0]["ignore_reason"])
+        self.assertEqual(
+            "automatic_positive_failed_quality_gate", ignored[1]["ignore_reason"]
+        )
+
+        eval_row = dict(rejected, crop_id="eval", split="val")
+        eval_rows, _, eval_ignored = _partition_labels([eval_row], "val", cfg)
+        self.assertEqual(["eval"], [row["crop_id"] for row in eval_rows])
+        self.assertEqual([], eval_ignored)
+        mediapipe_row = dict(
+            rejected, crop_id="mediapipe", source="mediapipe_tasks", split="train"
+        )
+        mediapipe_rows, _, mediapipe_ignored = _partition_labels(
+            [mediapipe_row], "train", cfg
+        )
+        self.assertEqual(["mediapipe"], [row["crop_id"] for row in mediapipe_rows])
+        self.assertEqual([], mediapipe_ignored)
+
+    def test_visualization_clean_and_variant_delete_keep_tombstone(self) -> None:
+        crop, row = self._registered_roi()
+        source = self._source()
+        paths = proposal_paths(source, "p01")
+        for key in ("palm", "reviewed", "labels", "qc"):
+            paths[key].mkdir(parents=True, exist_ok=True)
+            (paths[key] / "artifact.txt").write_text(key, encoding="utf-8")
+        report = {
+            "schema_version": "hlmf_dataset_v1",
+            "dataset_id": "national-r1",
+            "capture_source_id": CAPTURE_TRAIN,
+            "split": "train",
+            "proposal_variant": "p01",
+            "raw_images": 1,
+            "rois": 1,
+            "published_labels": 1,
+            "candidate_negatives": 0,
+            "ignored": 0,
+            "labels_relpath": str(
+                (paths["labels"] / "hand_training_labels.jsonl").relative_to(self.root)
+            ).replace("\\", "/"),
+        }
+        write_json(paths["qc"] / "source_publish_report.json", report)
+        roi_visualization = paths["roi"] / "hand_landmarks_roi_visualization"
+        roi_visualization.mkdir(parents=True)
+        (roi_visualization / "preview.png").write_bytes(b"preview")
+        original_root = source / "visualizations" / "original_image_landmarks"
+        (original_root / "p01").mkdir(parents=True)
+        (original_root / "p01" / "preview.png").write_bytes(b"preview")
+        (original_root / "p01.mp4").write_bytes(b"video")
+        write_json(paths["qc"] / "roi_visualization_report.json", {})
+        write_json(paths["qc"] / "original_image_visualization_report.json", {})
+
+        cleaned = clean_variant_visualizations(
+            self.root, "pretrain", "national-r1", CAPTURE_TRAIN, "p01"
+        )
+        self.assertEqual(5, cleaned["removed_count"])
+        self.assertTrue(crop.is_file())
+        self.assertTrue((paths["qc"] / "source_publish_report.json").is_file())
+        (original_root / "p01").mkdir(parents=True)
+        (original_root / "p01" / "preview.png").write_bytes(b"preview")
+        (original_root / "p01.mp4").write_bytes(b"video")
+
+        _dataset_manifest(self.root, "pretrain", "national-r1")
+        args = SimpleNamespace(
+            dataset_root=str(self.root),
+            scope="pretrain",
+            dataset_id="national-r1",
+            capture_source_id=CAPTURE_TRAIN,
+            proposal_variant="p01",
+            confirm_delete="wrong",
+        )
+        with self.assertRaisesRegex(DatasetContractError, "exactly match"):
+            _run_delete_source_variant(args)
+        args.confirm_delete = "p01"
+        deleted = _run_delete_source_variant(args)
+        self.assertEqual("retired", deleted["registry_status"])
+        self.assertTrue((source / "images" / "frame001.tiff").is_file())
+        self.assertTrue((source / "raw_images.jsonl").is_file())
+        self.assertTrue((source / "source.json").is_file())
+        for key in ("palm", "roi", "reviewed", "labels", "qc"):
+            self.assertFalse(paths[key].exists())
+        manifest = json.loads(
+            (source.parent / "dataset_manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([], manifest["capture_sources"])
+        self.assertEqual(
+            "retired", WarehouseRegistry(self.root).variant_status(CAPTURE_TRAIN, "p01")
+        )
+        self.assertEqual(0, _run_delete_source_variant(args)["removed_count"])
+        with self.assertRaisesRegex(DatasetContractError, "retired"):
+            WarehouseRegistry(self.root).assert_variant_writable(CAPTURE_TRAIN, "p01")
+        with self.assertRaisesRegex(DatasetContractError, "retired"):
+            WarehouseRegistry(self.root).register_rois([row])
+
+    def test_negative_review_publishes_independent_copies_and_unique_registry(self) -> None:
         crop, row = self._registered_roi()
         result = prepare_negative_review(self.root, "neg-r1", [row])
         review_image = next(Path(result["review_root"]).glob("images/*/*"))
-        self.assertEqual(os.stat(crop).st_ino, os.stat(review_image).st_ino)
+        self.assertNotEqual(os.stat(crop).st_ino, os.stat(review_image).st_ino)
+        self.assertEqual(crop.read_bytes(), review_image.read_bytes())
         manifest = publish_negative_review(self.root, "neg-r1")
         published = next(
             (self.root / "GoldSource" / "NegativeSamples" / "neg-r1" / "published" / "images").glob("*/*")
         )
-        self.assertEqual(os.stat(crop).st_ino, os.stat(published).st_ino)
+        self.assertNotEqual(os.stat(crop).st_ino, os.stat(published).st_ino)
+        self.assertEqual(crop.read_bytes(), published.read_bytes())
+        self.assertEqual("copied_review_and_published_images", manifest["image_policy"])
         self.assertEqual(manifest["records"], 1)
+        delete_source_variant(
+            self.root,
+            "pretrain",
+            "national-r1",
+            CAPTURE_TRAIN,
+            "p01",
+            "p01",
+        )
+        self.assertFalse(crop.exists())
+        self.assertTrue(published.is_file())
+        self.assertGreater(published.stat().st_size, 0)
         with self.assertRaises(DatasetContractError):
             prepare_negative_review(self.root, "neg-r1", [row])
 
-    def test_selection_review_is_zero_copy_after_publish(self) -> None:
-        _, row = self._registered_roi()
+    def test_selection_review_publishes_independent_images(self) -> None:
+        crop, row = self._registered_roi()
         row = dict(row, hand_presence={"present": True})
         result = prepare_selection_review(self.root, "hard-r1", [row])
         self.assertTrue(Path(result["review_root"]).is_dir())
         manifest = publish_selection_review(self.root, "hard-r1")
         published = self.root / "Selections" / "hard-r1" / "published"
-        self.assertEqual(manifest["image_policy"], "zero_copy_reference_pretrain_roi")
-        self.assertFalse((published / "images").exists())
-        self.assertEqual(read_jsonl(published / "selection.jsonl")[0]["roi_id"], row["roi_id"])
+        self.assertEqual(manifest["image_policy"], "copied_review_and_published_images")
+        published_image = next((published / "images").glob("*/*"))
+        self.assertNotEqual(os.stat(crop).st_ino, os.stat(published_image).st_ino)
+        selected = read_jsonl(published / "selection.jsonl")[0]
+        self.assertEqual(selected["roi_id"], row["roi_id"])
+        self.assertTrue((self.root / selected["published_relpath"]).is_file())
+        delete_source_variant(
+            self.root,
+            "pretrain",
+            "national-r1",
+            CAPTURE_TRAIN,
+            "p01",
+            "p01",
+        )
+        self.assertFalse(crop.exists())
+        self.assertTrue(published_image.is_file())
+        self.assertGreater(published_image.stat().st_size, 0)
 
     def test_local_downsample_is_tiff_only_and_refuses_overwrite(self) -> None:
         source = self.root / "camera"
@@ -557,9 +719,19 @@ class DatasetV3Tests(unittest.TestCase):
                     "hand_presence": {"present": False},
                     "handedness": {"label": "unknown", "score": None},
                     "landmarks_crop_px": [],
+                    "proposal_kind": "runtime" if index == 0 else "negative_candidate",
+                    "source": (
+                        "rtmpose_m_hand5_onnx"
+                        if index == 0
+                        else "eos_negative_candidate_unassessed"
+                    ),
                 }
             )
         write_jsonl(paths["roi"] / "hand_landmarks_autolabel_draft.jsonl", rows)
+        write_json(
+            paths["qc"] / "mediapipe_report.json",
+            {"hand_landmark_backend": "rtmpose_onnx"},
+        )
 
         args = SimpleNamespace(
             dataset_root=str(self.root),
@@ -582,9 +754,11 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertTrue(report["enabled"])
         self.assertEqual("standalone", report["trigger"])
         self.assertEqual("evenly_spaced", report["selection"])
-        self.assertEqual(2, report["saved"])
+        self.assertEqual(3, report["input_rows"])
+        self.assertEqual(2, report["excluded_non_runtime"])
+        self.assertEqual(1, report["saved"])
         self.assertEqual(
-            2,
+            1,
             len(
                 list(
                     (paths["roi"] / "hand_landmarks_roi_visualization").glob("*.png")
@@ -695,6 +869,7 @@ class DatasetV3Tests(unittest.TestCase):
         )
         report = _run_existing_original_image_visualization(
             args,
+            {"visualization": {"original_video_enabled": False}},
             show_progress=False,
         )
 
@@ -717,6 +892,10 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertNotIn("\nautolabel-visualize:", makefile)
         self.assertNotIn("\nVISUALIZATION ?=", makefile)
         self.assertIn("autolabel-visualize-original:", makefile)
+        self.assertIn("autolabel-visualizations-clean:", makefile)
+        self.assertIn("source-variant-delete:", makefile)
+        self.assertIn("batch-eval-autolabel:", makefile)
+        self.assertIn("batch-train-autolabel:", makefile)
         self.assertEqual({"hlmf.py"}, {path.name for path in (root / "scripts").glob("*.py")})
         self.assertEqual(
             {"autolabel.yaml", "review.yaml", "datasets.yaml", "cvat_label.json"},
@@ -731,6 +910,7 @@ class DatasetV3Tests(unittest.TestCase):
             {
                 "roi_enabled": False,
                 "original_image_enabled": False,
+                "original_video_enabled": True,
                 "train_max_samples": 200,
             },
             autolabel["visualization"],

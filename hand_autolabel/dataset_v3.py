@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import zlib
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, MutableMapping, Sequence
 
@@ -379,6 +380,13 @@ class WarehouseRegistry:
                     dhash64 TEXT NOT NULL,
                     UNIQUE(capture_source_id, relative_path)
                 );
+                CREATE TABLE IF NOT EXISTS proposal_variants (
+                    capture_source_id TEXT NOT NULL REFERENCES capture_sources(capture_source_id),
+                    proposal_variant TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('active','retired')),
+                    retired_at TEXT,
+                    PRIMARY KEY(capture_source_id, proposal_variant)
+                );
                 CREATE TABLE IF NOT EXISTS rois (
                     roi_id TEXT PRIMARY KEY,
                     raw_image_id TEXT NOT NULL REFERENCES raw_images(raw_image_id),
@@ -402,6 +410,11 @@ class WarehouseRegistry:
                     status TEXT NOT NULL CHECK(status IN ('reserved','published','retired'))
                 );
                 """
+            )
+            db.execute(
+                """INSERT OR IGNORE INTO proposal_variants
+                   (capture_source_id,proposal_variant,status,retired_at)
+                   SELECT DISTINCT capture_source_id,proposal_variant,'active',NULL FROM rois"""
             )
 
     def register_source(
@@ -478,8 +491,95 @@ class WarehouseRegistry:
                     ),
                 )
 
-    def register_rois(self, rows: Sequence[Mapping[str, Any]]) -> None:
+    def variant_status(
+        self, capture_source_id: str, proposal_variant: str
+    ) -> str | None:
+        capture_source_id = require_safe_id(capture_source_id, "capture_source_id")
+        proposal_variant = require_safe_id(proposal_variant, "proposal_variant")
         with self.connect() as db:
+            stored = db.execute(
+                "SELECT status FROM proposal_variants "
+                "WHERE capture_source_id=? AND proposal_variant=?",
+                (capture_source_id, proposal_variant),
+            ).fetchone()
+        return str(stored["status"]) if stored is not None else None
+
+    def assert_variant_writable(
+        self, capture_source_id: str, proposal_variant: str
+    ) -> None:
+        capture_source_id = require_safe_id(capture_source_id, "capture_source_id")
+        proposal_variant = require_safe_id(proposal_variant, "proposal_variant")
+        with self.connect() as db:
+            stored = db.execute(
+                "SELECT status FROM proposal_variants "
+                "WHERE capture_source_id=? AND proposal_variant=?",
+                (capture_source_id, proposal_variant),
+            ).fetchone()
+        if stored is not None and stored["status"] == "retired":
+            raise DatasetContractError(
+                "proposal variant is retired and cannot be reused: "
+                f"{capture_source_id}/{proposal_variant}"
+            )
+
+    def retire_variant(
+        self, capture_source_id: str, proposal_variant: str
+    ) -> str:
+        capture_source_id = require_safe_id(capture_source_id, "capture_source_id")
+        proposal_variant = require_safe_id(proposal_variant, "proposal_variant")
+        retired_at = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            source = db.execute(
+                "SELECT 1 FROM capture_sources WHERE capture_source_id=?",
+                (capture_source_id,),
+            ).fetchone()
+            if source is None:
+                raise DatasetContractError(
+                    f"capture source is not registered: {capture_source_id}"
+                )
+            stored = db.execute(
+                "SELECT status FROM proposal_variants "
+                "WHERE capture_source_id=? AND proposal_variant=?",
+                (capture_source_id, proposal_variant),
+            ).fetchone()
+            previous = str(stored["status"]) if stored is not None else "unregistered"
+            if stored is None:
+                db.execute(
+                    "INSERT INTO proposal_variants "
+                    "(capture_source_id,proposal_variant,status,retired_at) "
+                    "VALUES(?,?,'retired',?)",
+                    (capture_source_id, proposal_variant, retired_at),
+                )
+            elif stored["status"] != "retired":
+                db.execute(
+                    "UPDATE proposal_variants SET status='retired',retired_at=? "
+                    "WHERE capture_source_id=? AND proposal_variant=?",
+                    (retired_at, capture_source_id, proposal_variant),
+                )
+        return previous
+
+    def register_rois(self, rows: Sequence[Mapping[str, Any]]) -> None:
+        pairs = {
+            (str(row["capture_source_id"]), str(row["proposal_variant"]))
+            for row in rows
+        }
+        with self.connect() as db:
+            for capture_source_id, proposal_variant in sorted(pairs):
+                stored = db.execute(
+                    "SELECT status FROM proposal_variants "
+                    "WHERE capture_source_id=? AND proposal_variant=?",
+                    (capture_source_id, proposal_variant),
+                ).fetchone()
+                if stored is not None and stored["status"] == "retired":
+                    raise DatasetContractError(
+                        "proposal variant is retired and cannot be reused: "
+                        f"{capture_source_id}/{proposal_variant}"
+                    )
+                db.execute(
+                    "INSERT OR IGNORE INTO proposal_variants "
+                    "(capture_source_id,proposal_variant,status,retired_at) "
+                    "VALUES(?,?,'active',NULL)",
+                    (capture_source_id, proposal_variant),
+                )
             for row in rows:
                 current = db.execute(
                     "SELECT raw_image_id,proposal_variant,proposal_slot FROM rois WHERE roi_id=?",
@@ -528,21 +628,30 @@ class WarehouseRegistry:
         roi_id = str(row.get("roi_id") or row.get("crop_id") or "")
         with self.connect() as db:
             stored = db.execute(
-                "SELECT raw_image_id,capture_source_id,proposal_variant,crop_relpath "
-                "FROM rois WHERE roi_id=?",
+                "SELECT r.raw_image_id,r.capture_source_id,r.proposal_variant,r.crop_relpath, "
+                "v.status AS variant_status FROM rois AS r "
+                "JOIN proposal_variants AS v "
+                "ON v.capture_source_id=r.capture_source_id "
+                "AND v.proposal_variant=r.proposal_variant "
+                "WHERE r.roi_id=?",
                 (roi_id,),
             ).fetchone()
         if stored is None:
             raise DatasetContractError(f"review request references unregistered roi_id: {roi_id}")
+        if stored["variant_status"] != "active":
+            raise DatasetContractError(f"review request references retired roi_id: {roi_id}")
         expected = (
             str(row.get("raw_image_id")),
             str(row.get("capture_source_id")),
             str(row.get("proposal_variant")),
             str(row.get("crop_relpath") or row.get("crop_path")),
         )
-        if tuple(stored) != expected:
+        actual = tuple(stored[key] for key in (
+            "raw_image_id", "capture_source_id", "proposal_variant", "crop_relpath"
+        ))
+        if actual != expected:
             raise DatasetContractError(
-                f"review request disagrees with registry for {roi_id}: {expected} != {tuple(stored)}"
+                f"review request disagrees with registry for {roi_id}: {expected} != {actual}"
             )
 
     def publish_negatives(
@@ -592,6 +701,7 @@ class WarehouseRegistry:
                 "datasets",
                 "capture_sources",
                 "raw_images",
+                "proposal_variants",
                 "rois",
                 "negative_datasets",
                 "published_negatives",
@@ -601,15 +711,25 @@ class WarehouseRegistry:
             duplicate_variants = [
                 dict(row)
                 for row in db.execute(
-                    """SELECT capture_source_id,proposal_variant,COUNT(*) AS count
-                       FROM rois GROUP BY capture_source_id,proposal_variant"""
+                    """SELECT r.capture_source_id,r.proposal_variant,v.status,COUNT(*) AS count
+                       FROM rois AS r JOIN proposal_variants AS v
+                       ON v.capture_source_id=r.capture_source_id
+                       AND v.proposal_variant=r.proposal_variant
+                       GROUP BY r.capture_source_id,r.proposal_variant,v.status"""
                 )
             ]
+            variant_status_counts = {
+                str(row["status"]): int(row["count"])
+                for row in db.execute(
+                    "SELECT status,COUNT(*) AS count FROM proposal_variants GROUP BY status"
+                )
+            }
         return {
             "schema_version": SCHEMA_VERSION,
             "registry": str(self.path),
             "counts": counts,
             "roi_counts_by_source_variant": duplicate_variants,
+            "proposal_variant_status_counts": variant_status_counts,
             "content_sha256": "not_computed",
         }
 
@@ -739,6 +859,18 @@ def apply_label_provenance(
         present = bool((row.get("hand_presence") or {}).get("present"))
         teacher_present = bool((draft.get("hand_presence") or {}).get("present")) if draft else False
         teacher_origin, teacher_style, teacher_model_id = teacher_identity(draft or row)
+        handedness_teacher_model_id = (draft or row).get("handedness_teacher_model_id")
+        if handedness_teacher_model_id is None and teacher_origin == "mediapipe":
+            handedness_teacher_model_id = "mediapipe_hand_landmarker_task"
+        teacher_handedness = str(
+            ((draft or row).get("handedness") or {}).get("label", "unknown")
+        ).lower()
+        current_handedness = str(
+            (row.get("handedness") or {}).get("label", "unknown")
+        ).lower()
+        modified_handedness = bool(
+            human_reviewed and current_handedness != teacher_handedness
+        )
         modified: List[int] = []
         if human_reviewed and present and teacher_present:
             old = {int(point["id"]): point for point in draft.get("landmarks_crop_norm") or []}
@@ -769,22 +901,134 @@ def apply_label_provenance(
                 "teacher_detected": teacher_present if human_reviewed else present,
                 "human_reviewed": bool(human_reviewed),
                 "human_modified_landmark_ids": sorted(modified),
+                "handedness_teacher_model_id": handedness_teacher_model_id,
+                "human_modified_handedness": modified_handedness,
             }
         )
         output.append(row)
     return output
 
 
-def _hardlink(source: Path, destination: Path) -> None:
+def _copy_image(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         raise DatasetContractError(f"refusing to overwrite review/published image: {destination}")
     try:
-        os.link(source, destination)
+        shutil.copy2(source, destination)
     except OSError as exc:
         raise DatasetContractError(
-            f"hard-link publication failed; HAND_DATASET_ROOT must use one filesystem: {source} -> {destination}"
+            f"image copy failed: {source} -> {destination}"
         ) from exc
+
+
+def _remove_variant_target(
+    target: Path, source: Path, dataset_root: Path
+) -> str | None:
+    target = Path(target)
+    source = Path(source).resolve()
+    dataset_root = Path(dataset_root).resolve()
+    if target.is_symlink():
+        raise DatasetContractError(f"refusing to delete symlinked variant artifact: {target}")
+    try:
+        target.resolve(strict=False).relative_to(source)
+    except ValueError as exc:
+        raise DatasetContractError(f"variant artifact escapes capture source: {target}") from exc
+    if not target.exists():
+        return None
+    relpath = str(target.resolve().relative_to(dataset_root)).replace("\\", "/")
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    return relpath
+
+
+def clean_variant_visualizations(
+    dataset_root: Path,
+    scope: str,
+    dataset_id: str,
+    capture_source_id: str,
+    proposal_variant: str,
+) -> Dict[str, Any]:
+    dataset_root = Path(dataset_root).resolve()
+    source = source_root(dataset_root, scope, dataset_id, capture_source_id)
+    if not source.is_dir():
+        raise DatasetContractError(f"capture source does not exist: {source}")
+    paths = proposal_paths(source, proposal_variant)
+    original_root = source / "visualizations" / "original_image_landmarks"
+    targets = [
+        paths["roi"] / "hand_landmarks_roi_visualization",
+        original_root / proposal_variant,
+        original_root / f"{proposal_variant}.mp4",
+        paths["qc"] / "roi_visualization_report.json",
+        paths["qc"] / "original_image_visualization_report.json",
+    ]
+    removed = []
+    for target in targets:
+        relpath = _remove_variant_target(target, source, dataset_root)
+        if relpath is not None:
+            removed.append(relpath)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "capture_source_id": capture_source_id,
+        "proposal_variant": proposal_variant,
+        "removed": removed,
+        "removed_count": len(removed),
+    }
+
+
+def delete_source_variant(
+    dataset_root: Path,
+    scope: str,
+    dataset_id: str,
+    capture_source_id: str,
+    proposal_variant: str,
+    confirmation: str,
+) -> Dict[str, Any]:
+    proposal_variant = require_safe_id(proposal_variant, "proposal_variant")
+    if str(confirmation) != proposal_variant:
+        raise DatasetContractError(
+            "deletion confirmation must exactly match proposal_variant"
+        )
+    dataset_root = Path(dataset_root).resolve()
+    source = source_root(dataset_root, scope, dataset_id, capture_source_id)
+    if not source.is_dir() or not (source / "source.json").is_file():
+        raise DatasetContractError(f"registered capture source does not exist: {source}")
+    paths = proposal_paths(source, proposal_variant)
+    original_root = source / "visualizations" / "original_image_landmarks"
+    targets = [
+        paths["palm"],
+        paths["roi"],
+        paths["reviewed"],
+        paths["labels"],
+        paths["qc"],
+        original_root / proposal_variant,
+        original_root / f"{proposal_variant}.mp4",
+    ]
+    existing_targets = [target for target in targets if target.exists()]
+    registry = WarehouseRegistry(dataset_root)
+    status = registry.variant_status(capture_source_id, proposal_variant)
+    if status is None and not existing_targets:
+        raise DatasetContractError(
+            f"proposal variant has no registry entry or artifacts: {capture_source_id}/{proposal_variant}"
+        )
+    previous_status = registry.retire_variant(capture_source_id, proposal_variant)
+    removed = []
+    for target in targets:
+        relpath = _remove_variant_target(target, source, dataset_root)
+        if relpath is not None:
+            removed.append(relpath)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "dataset_id": dataset_id,
+        "capture_source_id": capture_source_id,
+        "proposal_variant": proposal_variant,
+        "previous_registry_status": previous_status,
+        "registry_status": "retired",
+        "removed": removed,
+        "removed_count": len(removed),
+        "raw_source_preserved": True,
+    }
 
 
 def prepare_negative_review(
@@ -808,7 +1052,7 @@ def prepare_negative_review(
             raise DatasetContractError(f"candidate ROI does not exist: {source}")
         capture_id = str(row["capture_source_id"])
         destination = review_root / "images" / capture_id / source.name
-        _hardlink(source, destination)
+        _copy_image(source, destination)
         item = dict(row)
         item["review_relpath"] = str(destination.relative_to(batch_root)).replace("\\", "/")
         materialized.append(item)
@@ -846,7 +1090,7 @@ def publish_negative_review(dataset_root: Path, negative_dataset_id: str) -> Dic
             removed.append(str(row["roi_id"]))
             continue
         destination = published_root / "images" / str(row["capture_source_id"]) / source.name
-        _hardlink(source, destination)
+        _copy_image(source, destination)
         item = dict(row)
         item.update(
             {
@@ -873,6 +1117,7 @@ def publish_negative_review(dataset_root: Path, negative_dataset_id: str) -> Dic
         "records": len(retained),
         "capture_sources": sorted({str(row["capture_source_id"]) for row in retained}),
         "labels": "negative_labels.jsonl",
+        "image_policy": "copied_review_and_published_images",
         "content_sha256": "not_computed",
     }
     write_json(published_root / "manifest.json", manifest)
@@ -911,7 +1156,7 @@ def prepare_selection_review(
         if not source.is_file():
             raise DatasetContractError(f"requested ROI does not exist: {source}")
         destination = review_root / "images" / str(row["capture_source_id"]) / source.name
-        _hardlink(source, destination)
+        _copy_image(source, destination)
         item = dict(row)
         item["review_relpath"] = str(destination.relative_to(root)).replace("\\", "/")
         materialized.append(item)
@@ -920,7 +1165,7 @@ def prepare_selection_review(
         review_root / "README.json",
         {
             "selection_id": selection_id,
-            "instruction": "Delete only ROIs whose MediaPipe landmarks are clearly wrong; do not relabel points.",
+            "instruction": "Delete only ROIs whose teacher landmarks are clearly wrong; do not relabel points.",
             "candidate_count": len(materialized),
         },
     )
@@ -935,21 +1180,35 @@ def publish_selection_review(dataset_root: Path, selection_id: str) -> Dict[str,
     if published_root.exists():
         raise DatasetContractError(f"selection is already published: {selection_id}")
     rows = read_jsonl(review_root / "request_manifest.jsonl")
-    retained_files = {
-        str(path.relative_to(root)).replace("\\", "/")
+    retained_by_path = {
+        str(path.relative_to(root)).replace("\\", "/"): path
         for path in (review_root / "images").rglob("*")
         if path.is_file()
     }
-    retained = [row for row in rows if str(row["review_relpath"]) in retained_files]
     known = {str(row["review_relpath"]) for row in rows}
-    unknown = sorted(retained_files - known)
+    unknown = sorted(set(retained_by_path) - known)
     if unknown:
         raise DatasetContractError(f"selection review contains unmanifested files: {unknown[:8]}")
+    retained: List[Dict[str, Any]] = []
+    for row in rows:
+        review_relpath = str(row["review_relpath"])
+        source = retained_by_path.get(review_relpath)
+        if source is None:
+            continue
+        destination = (
+            published_root / "images" / str(row["capture_source_id"]) / source.name
+        )
+        _copy_image(source, destination)
+        item = dict(row)
+        item.pop("review_relpath", None)
+        item["selection_id"] = selection_id
+        item["source_crop_relpath"] = str(item.get("crop_relpath") or item.get("crop_path"))
+        item["published_relpath"] = str(
+            destination.relative_to(dataset_root)
+        ).replace("\\", "/")
+        retained.append(item)
     if not retained:
         raise DatasetContractError("cannot publish an empty hard-positive selection")
-    for row in retained:
-        row.pop("review_relpath", None)
-        row["selection_id"] = selection_id
     write_jsonl(published_root / "selection.jsonl", retained)
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -957,7 +1216,7 @@ def publish_selection_review(dataset_root: Path, selection_id: str) -> Dict[str,
         "records": len(retained),
         "removed_teacher_errors": len(rows) - len(retained),
         "selection": "selection.jsonl",
-        "image_policy": "zero_copy_reference_pretrain_roi",
+        "image_policy": "copied_review_and_published_images",
     }
     write_json(published_root / "manifest.json", manifest)
     WarehouseRegistry(dataset_root).publish_selection(selection_id)
