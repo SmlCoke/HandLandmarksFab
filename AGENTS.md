@@ -52,6 +52,7 @@ This repository contains the dataset generation system for the Hand Landmarker m
 - `docs\annotating_system\HLMF_quick_start.md`: Referred to as the "quick_start" document; a simplified version of the "workflow" document containing instructions for executing the full process, designed for getting started quickly.
 - `docs\annotating_system\HLMF_current_status.md`: Referred to as the "current_status" document; it records the current annotation status of the dataset, reflecting the latest version's status.
 - `docs\annotating_system\HLMF_data_contract.md`: Referred to as the "data_contract" document; it defines the data directories and data interfaces produced by the current system.
+- `docs\annotating_system\HLMF_qa.md`: Referred to as the "qa" document; it is used to record questions related to this repository raised by users during conversations, along with their answers.
 
 ## IV. General Working Rules
 
@@ -61,9 +62,10 @@ This repository contains the dataset generation system for the Hand Landmarker m
 - The "quick_start" document is a simplified version of the "workflow" document; it contains only the commands for each operational step and omits explanations of the underlying principles. Include the name of the process stage for each step and briefly describe the inputs and outputs. Please keep this principle in mind when making modifications. 
 - The "current_status" document records the current state of the system and the server-side data warehouse. Please keep this principle in mind when making modifications.
 - The "data_contract" document records the data directories and data interfaces produced by the current system. Please keep this principle in mind when making modifications.
+- The "qa" document is used to record questions regarding this repository raised by users during conversations, along with their corresponding answers. Unless the user explicitly requests that a specific Q&A exchange be recorded in the prompt, there is no need to modify this document during routine work.
 
-These four documents have distinct roles and independent content; each should avoid extensive discussion of the material covered in the others.
-These four documents serve as the primary interface documentation for the current repository and are critical; they must be kept synchronized whenever there are subsequent updates to code, configurations, or other documentation.
+These five documents have distinct roles and independent content; each should avoid extensive discussion of the material covered in the others.
+These five documents serve as the primary interface documentation for the repository and are critical; apart from the "qa" document, the remaining four documents must be kept synchronized whenever there are subsequent updates to code, configurations, or other documentation.
 
 ### 4.2 Principle of simplification
 

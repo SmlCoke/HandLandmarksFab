@@ -10,6 +10,7 @@ HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。
 - [快速开始](docs/annotating_system/HLMF_quick_start.md)
 - [数据契约](docs/annotating_system/HLMF_data_contract.md)
 - [当前状态](docs/annotating_system/HLMF_current_status.md)
+- [常见问题与解答](docs/annotating_system/HLMF_qa.md)
 
 ## 当前教师后端
 
