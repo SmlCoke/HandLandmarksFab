@@ -132,7 +132,7 @@ make hand-cvat-import HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval 
 
 ## 5. 发布 Val/Test 来源（Source Publish）
 
-输入：已通过检查的 reviewed JSONL。处理：发布固定 ROI 标签并更新 dataset manifest。输出：`05_labels/eos-1.0/hand_evaluation_labels.jsonl`、发布报告和 `EValSource/<dataset_id>/dataset_manifest.json`。
+输入：已通过检查的 reviewed JSONL。处理：先检查预期 Val/Test split 总量不超过 2500 张原图和 3000 个 ROI，通过后发布固定 ROI 标签并更新 dataset manifest。输出：`05_labels/eos-1.0/hand_evaluation_labels.jsonl`、发布报告和 `EValSource/<dataset_id>/dataset_manifest.json`。
 
 ```bash
 make source-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" DATASET_SCOPE=eval DATASET_ID=national-eval-0801 CAPTURE_SOURCE_ID=room-near-daylight-normal-val-s02-alice PROPOSAL_VARIANT=eos-1.0

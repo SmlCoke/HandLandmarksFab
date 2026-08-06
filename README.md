@@ -42,4 +42,6 @@ make compile test
 
 长期图片、标签和 registry 只写入 `HAND_DATASET_ROOT`。HLMF 不迁移或删除旧 schema 数据；3.0 只发布新契约数据。
 
+Val/Test 每个 split 默认最多发布 2500 张原图和 3000 个 ROI；`source-publish` 会在写入标签和 manifest 前完成预期总量检查。
+
 RTMPose 对每个 Eos runtime ROI 固定输出 21 点；Eos 低分候选不会送入 RTMPose，仍以 `unresolved/unlabeled_v1` 进入 `candidate_negatives.jsonl` 人工审核链路。RTMPose 行中的 `hand_presence.present=true` 只是现有发布路由哨兵，`handedness=unknown/null`；HLML 只能在 Iris 第一阶段 geometry pretrain 中使用这些行，并必须屏蔽 presence 与 handedness loss。多任务训练和正式评估需要独立分类器或人工确认的真实标签。

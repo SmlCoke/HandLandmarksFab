@@ -250,7 +250,7 @@ make eval-autolabel \
 
 输出：Palm、ROI、Hand landmark draft 和 QC 文件与 Train 的路径相同；对应开关启用时额外生成 `<source>/02_roi_crops/<variant>/hand_landmarks_roi_visualization/` 或 `<source>/visualizations/original_image_landmarks/<variant>/`。`qc/<variant>/mediapipe_report.json` 路径为兼容现有链路而保留，报告中的 `hand_landmark_backend` 和 `execution_provider` 记录实际后端/provider。此时**不发布最终评估标签**。命令返回的下一步是 CVAT 导出；后续 CVAT 导出和导入不重复生成可视化。
 
-限制：每个 Val/Test split 最多 2000 张原图、3000 个实际生成 ROI；最终在来源发布阶段根据 dataset manifest 统一检查。
+限制：每个 Val/Test split 最多 2500 张原图、3000 个实际生成 ROI；来源发布会先用待发布 report 构造内存中的预期 dataset manifest 并检查总量，只有通过后才写标签、发布报告和正式 dataset manifest，避免失败命令留下部分发布结果。
 
 ### 6.1 自动标注后补生成可视化
 
@@ -597,7 +597,7 @@ RTMPose 参数与原理：
 
 `datasets.yaml` 是 operator-owned 发布集合目录：`pretrain.dataset_ids`、`evaluation.val_dataset_ids/test_dataset_ids` **记录采用的数据集 ID**，`proposal_variants` 记录各数据集**选择的 Palm 变体**。单来源命令仍通过 Make 参数接收这些 ID；该文件不用于手工拼路径或存图片。
 
-`policies.capture_source_split` 和 `one_proposal_variant_per_capture_source` 应保持 `fail`；`performer_cross_split` 默认 `warn`，需要严格人员隔离时可升级为 `fail`。`evaluation_limits.max_raw_images_per_split` 和 `max_rois_per_split` 是 Val/Test 发布硬上限，默认分别为 2000 和 3000。
+`policies.capture_source_split` 和 `one_proposal_variant_per_capture_source` 应保持 `fail`；`performer_cross_split` 默认 `warn`，需要严格人员隔离时可升级为 `fail`。`evaluation_limits.max_raw_images_per_split` 和 `max_rois_per_split` 是 Val/Test 发布硬上限，默认分别为 2500 和 3000。上限检查是写入前置条件；需要扩大评估集时应先明确调整 operator-owned 配置，不得依赖一次失败发布留下的文件。
 
 `cvat_label.json` 完整包含五个 tag 和 `hand_landmarks` 21 点 skeleton。修改任何实际 label 名称时必须同步修改 `review.yaml` 并运行测试。
 

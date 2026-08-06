@@ -609,7 +609,14 @@ def _run_import_cvat(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str,
     return stats
 
 
-def _dataset_manifest(dataset_root: Path, scope: str, dataset_id: str) -> Dict[str, Any]:
+def _dataset_manifest(
+    dataset_root: Path,
+    scope: str,
+    dataset_id: str,
+    *,
+    pending_report: Mapping[str, Any] | None = None,
+    write: bool = True,
+) -> Dict[str, Any]:
     bucket = "PretrainSource" if scope == "pretrain" else "EValSource"
     root = dataset_root / bucket / dataset_id
     sources = []
@@ -619,6 +626,17 @@ def _dataset_manifest(dataset_root: Path, scope: str, dataset_id: str) -> Dict[s
         published = []
         for report in sorted((capture_root / "qc").glob("*/source_publish_report.json")):
             published.append(json.loads(report.read_text(encoding="utf-8")))
+        if pending_report is not None and str(descriptor.get("capture_source_id")) == str(
+            pending_report.get("capture_source_id")
+        ):
+            pending_variant = str(pending_report.get("proposal_variant"))
+            published = [
+                report
+                for report in published
+                if str(report.get("proposal_variant")) != pending_variant
+            ]
+            published.append(dict(pending_report))
+            published.sort(key=lambda report: str(report.get("proposal_variant")))
         if published:
             descriptor["published_variants"] = published
             sources.append(descriptor)
@@ -629,8 +647,28 @@ def _dataset_manifest(dataset_root: Path, scope: str, dataset_id: str) -> Dict[s
         "capture_sources": sources,
         "content_sha256": "not_computed",
     }
-    write_json(root / "dataset_manifest.json", manifest)
+    if write:
+        write_json(root / "dataset_manifest.json", manifest)
     return manifest
+
+
+def _validate_evaluation_limits(dataset: Mapping[str, Any], cfg: Mapping[str, Any]) -> None:
+    for eval_split in ("val", "test"):
+        selected = [
+            source
+            for source in dataset.get("capture_sources", [])
+            if source.get("split") == eval_split
+        ]
+        raw_count = sum(int(source["raw_image_count"]) for source in selected)
+        roi_count = sum(
+            int(variant["rois"])
+            for source in selected
+            for variant in source.get("published_variants", [])
+        )
+        if raw_count > int(cfg["evaluation_limits"]["max_raw_images_per_split"]):
+            raise DatasetContractError(f"{eval_split} exceeds raw-image limit: {raw_count}")
+        if roi_count > int(cfg["evaluation_limits"]["max_rois_per_split"]):
+            raise DatasetContractError(f"{eval_split} exceeds ROI limit: {roi_count}")
 
 
 def _partition_labels(
@@ -684,9 +722,6 @@ def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[s
             raise DatasetContractError("Val/Test publication requires reviewed CVAT labels")
     positives, candidates, ignored = _partition_labels(rows, split, cfg)
     labels_file = paths["labels"] / ("hand_training_labels.jsonl" if split == "train" else "hand_evaluation_labels.jsonl")
-    write_jsonl(labels_file, positives)
-    write_jsonl(paths["labels"] / "candidate_negatives.jsonl", candidates)
-    write_jsonl(paths["labels"] / "ignored.jsonl", ignored)
     report = {
         "schema_version": SCHEMA_VERSION,
         "dataset_id": args.dataset_id,
@@ -702,21 +737,20 @@ def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[s
         "palm_output_human_modified": False,
         "evaluation_scope": "fixed_hand_roi_only" if split in {"val", "test"} else None,
     }
-    write_json(paths["qc"] / "source_publish_report.json", report)
-    dataset = _dataset_manifest(Path(args.dataset_root).resolve(), args.scope, args.dataset_id)
     if args.scope == "eval":
-        for eval_split in ("val", "test"):
-            selected = [source for source in dataset["capture_sources"] if source["split"] == eval_split]
-            raw_count = sum(int(source["raw_image_count"]) for source in selected)
-            roi_count = sum(
-                int(variant["rois"])
-                for source in selected
-                for variant in source.get("published_variants", [])
-            )
-            if raw_count > int(cfg["evaluation_limits"]["max_raw_images_per_split"]):
-                raise DatasetContractError(f"{eval_split} exceeds raw-image limit: {raw_count}")
-            if roi_count > int(cfg["evaluation_limits"]["max_rois_per_split"]):
-                raise DatasetContractError(f"{eval_split} exceeds ROI limit: {roi_count}")
+        prospective_dataset = _dataset_manifest(
+            Path(args.dataset_root).resolve(),
+            args.scope,
+            args.dataset_id,
+            pending_report=report,
+            write=False,
+        )
+        _validate_evaluation_limits(prospective_dataset, cfg)
+    write_jsonl(labels_file, positives)
+    write_jsonl(paths["labels"] / "candidate_negatives.jsonl", candidates)
+    write_jsonl(paths["labels"] / "ignored.jsonl", ignored)
+    write_json(paths["qc"] / "source_publish_report.json", report)
+    _dataset_manifest(Path(args.dataset_root).resolve(), args.scope, args.dataset_id)
     return report
 
 

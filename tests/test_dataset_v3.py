@@ -36,11 +36,13 @@ from hand_autolabel.mediapipe_roi_visualization import (
 )
 from hand_autolabel.progress import track_progress
 from scripts.hlmf import (
+    _dataset_manifest,
     _load_public_configs,
     _parser,
     _partition_labels,
     _run_existing_original_image_visualization,
     _run_existing_roi_visualization,
+    _validate_evaluation_limits,
 )
 from tools.downsample import downsample
 
@@ -480,6 +482,63 @@ class DatasetV3Tests(unittest.TestCase):
             _parser().parse_args(common + ["--hand-landmark-backend", "rtmpose_onnx"])
         )
         self.assertEqual("rtmpose_onnx", override_cfg["hand_landmark"]["backend"])
+
+    def test_eval_limit_preflight_uses_pending_report_without_writing_manifest(self) -> None:
+        dataset = self.root / "EValSource" / "eval-r1"
+        existing = dataset / "existing-test"
+        pending = dataset / "pending-test"
+        for source, capture_id, raw_count in (
+            (existing, "existing-test", 2000),
+            (pending, "pending-test", 600),
+        ):
+            source.mkdir(parents=True)
+            (source / "source.json").write_text(
+                json.dumps(
+                    {
+                        "capture_source_id": capture_id,
+                        "split": "test",
+                        "raw_image_count": raw_count,
+                    }
+                ),
+                encoding="utf-8",
+            )
+        report_dir = existing / "qc" / "eos-1.0"
+        report_dir.mkdir(parents=True)
+        (report_dir / "source_publish_report.json").write_text(
+            json.dumps(
+                {
+                    "capture_source_id": "existing-test",
+                    "proposal_variant": "eos-1.0",
+                    "rois": 1800,
+                }
+            ),
+            encoding="utf-8",
+        )
+        prospective = _dataset_manifest(
+            self.root,
+            "eval",
+            "eval-r1",
+            pending_report={
+                "capture_source_id": "pending-test",
+                "proposal_variant": "eos-1.0",
+                "rois": 500,
+            },
+            write=False,
+        )
+        self.assertFalse((dataset / "dataset_manifest.json").exists())
+        cfg = {
+            "evaluation_limits": {
+                "max_raw_images_per_split": 2500,
+                "max_rois_per_split": 3000,
+            }
+        }
+        with self.assertRaisesRegex(
+            DatasetContractError, "test exceeds raw-image limit: 2600"
+        ):
+            _validate_evaluation_limits(prospective, cfg)
+
+        cfg["evaluation_limits"]["max_raw_images_per_split"] = 2600
+        _validate_evaluation_limits(prospective, cfg)
 
     def test_standalone_roi_visualization_reuses_existing_draft(self) -> None:
         source = source_root(self.root, "pretrain", "national-r1", CAPTURE_TRAIN)

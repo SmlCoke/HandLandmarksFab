@@ -62,6 +62,7 @@ Val/Test 的 `no_hand` 是固定 ROI 上的真值 negative，不是 Palm 漏检�
 
 - Train：positive 与 candidate negative 分文件；RTMPose 只处理 runtime ROI，candidate negative 保持未标注，未经删除式审核不得训练。
 - Val/Test：只发布实际生成且经过 CVAT 决策的固定 ROI，不保留 candidate negative。
+- Val/Test 单个 split 的硬上限为 2500 张原图和 3000 个 ROI。系统必须先根据待发布 report 验证预期总量，再写入标签、`source_publish_report.json` 和 `dataset_manifest.json`；超过上限的失败发布不得产生新的发布文件。
 - 真负样本：published 图片必须与审核树中保留文件一一对应，并带 manifest 与审核报告。服务器内直接复核时使用硬链接节省空间；审核树经过压缩包/网盘/本地复核后可以是普通文件，允许发布这一份人工确认后的图片副本。
 - 困难正样本：selection 只保存零拷贝引用，不生成图片副本。
 

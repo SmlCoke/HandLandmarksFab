@@ -12,6 +12,8 @@ Train 与 Val/Test 的高层 autolabel 现已在来源检查、Palm 推理、ROI
 
 CVAT Images 1.1 导出已修复 frame ID 与 ROI 上传顺序不一致的问题：XML 现按 crop 文件名字典序编号，并强制 manifest/draft 一一对应及 positive landmark ID 完整。创建 CVAT 任务时必须使用 `Lexicographical` 排序，防止 skeleton 或 `no_hand` 被绑定到其他 ROI。
 
+Eval 来源发布的总量检查已移到所有发布文件写入之前，避免超过限制时标签和 report 已落盘但命令仍报错。`evaluation_limits` 当前允许每个 Val/Test split 最多 2500 张原图和 3000 个 ROI；克隆服务器上的 `FullEnhanceVal0801` 当前已发布 Val 1200 张原图/1549 ROI、Test 2200 张原图/2354 ROI，其中 `complex-near-bright-random-test-s01-peak/eos-1.0` 发布 492 条评估标签、忽略 12 条。
+
 系统当前不存在 Palm CVAT、Palm 标注导入、人工 bbox/p0/p9 修改或人工 ROI 绘制入口。Palm Detector 只负责产生 proposal；CVAT 只复核程序生成的 Hand ROI 内信息。
 
 Palm Detector 的产品名已统一为 **Eos**。当前自动标注链路固定使用 `eos-1.0`，模型路径为 `models/palm_detector/eos-1.0/model_opt.onnx`，默认 `PROPOSAL_VARIANT` 也为 `eos-1.0`。该文件与旧路径 `materials/preminilary/palm/model_opt.onnx` 已执行一次性校验：文件大小均为 5,520,144 字节，SHA-256 均为 `521246FD7CA7F1A10DFB2288683C053852C42C950AAB340DE03CCB6618000E96`；自动标注链路不再引用旧路径。
@@ -20,4 +22,4 @@ RTMPose-m Hand5 转换已通过审查并正式接入：仓库部署路径为 `mo
 
 RTMPose 当前只强制标注 Eos runtime ROI，低分候选不推理并以 `unresolved/unlabeled_v1` 继续人工负样本审核。其 `hand_presence.present=true` 仅是发布路由值，`handedness=unknown/null`；当前训练边界是 Iris geometry pretrain 必须忽略 presence/handedness，后续 multitask 和正式评估仍需独立分类器或人工真值。
 
-截至本状态文档更新时，本地 HLMF 单元测试为 30 项通过，覆盖 RTMPose 预处理、SimCC 解码、形状/有限值检查、后端选择、候选分流和 provenance。服务器 `HAND_DATASET_ROOT` 中的旧数据未迁移、未删除；只有按 3.0 schema 新发布的数据可供 HLML 4.0 选择。
+截至本状态文档更新时，本地 HLMF 单元测试为 31 项通过，覆盖 RTMPose 预处理、SimCC 解码、形状/有限值检查、后端选择、候选分流、provenance 和 Eval 发布前置总量检查。服务器 `HAND_DATASET_ROOT` 中的旧数据未迁移、未删除；只有按 3.0 schema 新发布的数据可供 HLML 4.0 选择。

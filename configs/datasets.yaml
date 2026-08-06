@@ -17,5 +17,5 @@ policies:
   one_proposal_variant_per_capture_source: fail
 
 evaluation_limits:
-  max_raw_images_per_split: 2000
+  max_raw_images_per_split: 2500
   max_rois_per_split: 3000
