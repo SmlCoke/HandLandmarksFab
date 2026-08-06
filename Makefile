@@ -45,7 +45,7 @@ help:
 	@echo   make hard-review SELECTION_ID=... MINING_REQUEST=/abs/request.jsonl
 	@echo   make hard-publish SELECTION_ID=...
 	@echo   make registry-check
-	@echo No command exports, imports or edits Palm annotations; Hand ROIs are always program-generated.
+	@echo "No command exports, imports or edits Palm annotations; Hand ROIs are always program-generated."
 
 paths:
 	@echo HAND_DATASET_ROOT=$(HAND_DATASET_ROOT)
