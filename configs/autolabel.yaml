@@ -58,10 +58,12 @@ rtmpose:
   simcc_split_ratio: 2.0
 
 hand_classifier:
-  model_onnx_path: models/hand_classifier/model.onnx
+  model_onnx_path: models/handedness-handpresence-0807/model.onnx
 
 quality:
   handedness_review_threshold: 0.7
+  # P(has_hand); derived from 7,907 human-reviewed FullEnhanceVal0801 ROIs.
+  rtmpose_train_hand_presence_threshold: 0.5
   rtmpose_train_boundary_coordinate_reject_threshold: 3
   high_palm_score_review_threshold: 0.8
 

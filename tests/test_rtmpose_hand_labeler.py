@@ -35,16 +35,19 @@ class _FakeDetector:
         return coordinates, np.ones(21, dtype=np.float32)
 
 
-class _FakeHandednessClassifier:
+class _FakeHandClassifier:
     provider = "FakeExecutionProvider"
-    model_id = "hand-classifier-mobilenetv3-small-v1"
+    model_id = "hand-classifier-handedness-handpresence-0807"
 
     def __init__(self) -> None:
         self.calls = 0
 
     def classify(self, _image: np.ndarray) -> dict:
         self.calls += 1
-        return {"label": "Right", "score": 0.93}
+        return {
+            "handedness": {"label": "Right", "score": 0.93},
+            "hand_presence": {"present": True, "score": 0.98},
+        }
 
 
 class _FakeMediaPipeDetector:
@@ -65,6 +68,7 @@ def _config() -> dict:
         "hand_classifier": {"model_onnx_path": "unused-classifier.onnx"},
         "quality": {
             "handedness_review_threshold": 0.7,
+            "rtmpose_train_hand_presence_threshold": 0.5,
             "rtmpose_train_boundary_coordinate_reject_threshold": 3,
         },
     }
@@ -128,7 +132,7 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
 
     def test_runtime_roi_gets_21_points_and_handedness_classification(self) -> None:
         detector = _FakeDetector()
-        classifier = _FakeHandednessClassifier()
+        classifier = _FakeHandClassifier()
         row = label_one_roi_rtmpose(
             _manifest(),
             np.zeros((256, 256), dtype=np.uint8),
@@ -138,11 +142,15 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
         )
         self.assertEqual(1, detector.calls)
         self.assertEqual(1, classifier.calls)
-        self.assertTrue(row["hand_presence"]["present"])
+        self.assertEqual({"present": True, "score": 0.98}, row["hand_presence"])
         self.assertEqual({"label": "Right", "score": 0.93}, row["handedness"])
         self.assertEqual(
-            "hand-classifier-mobilenetv3-small-v1",
+            "hand-classifier-handedness-handpresence-0807",
             row["handedness_teacher_model_id"],
+        )
+        self.assertEqual(
+            "hand-classifier-handedness-handpresence-0807",
+            row["hand_presence_teacher_model_id"],
         )
         self.assertEqual(21, len(row["landmarks_crop_norm"]))
         self.assertEqual(21, len(row["landmarks_image_px"]))
@@ -163,9 +171,34 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
         )[0]
         self.assertEqual(set(mediapipe_published), set(rtmpose_published))
 
+    def test_low_presence_runtime_keeps_points_and_is_ignored_for_train(self) -> None:
+        detector = _FakeDetector()
+        classifier = _FakeHandClassifier()
+        classifier.classify = lambda _image: {
+            "handedness": {"label": "Left", "score": 0.99},
+            "hand_presence": {"present": False, "score": 0.01},
+        }
+        row = label_one_roi_rtmpose(
+            _manifest(),
+            np.zeros((256, 256), dtype=np.uint8),
+            detector,
+            classifier,
+            _config(),
+        )
+        row["split"] = "train"
+        row["proposal_kind"] = "runtime"
+        row = apply_label_provenance([row], human_reviewed=False)[0]
+        self.assertEqual(21, len(row["landmarks_crop_norm"]))
+        self.assertFalse(row["hand_presence"]["present"])
+        positives, candidates, ignored = _partition_labels([row], "train", _config())
+        self.assertEqual([], positives)
+        self.assertEqual([], candidates)
+        self.assertEqual(["roi_runtime"], [item["crop_id"] for item in ignored])
+        self.assertEqual("rtmpose_hand_presence_gate", ignored[0]["ignore_reason"])
+
     def test_negative_candidate_is_not_sent_to_rtmpose(self) -> None:
         detector = _FakeDetector()
-        classifier = _FakeHandednessClassifier()
+        classifier = _FakeHandClassifier()
         row = label_one_roi_rtmpose(
             _manifest(candidate=True),
             np.zeros((256, 256), dtype=np.uint8),
@@ -191,18 +224,18 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
         with patch(
             "hand_autolabel.rtmpose_hand_labeler.RTMPoseONNXHandLabeler"
         ) as pose_constructor, patch(
-            "hand_autolabel.rtmpose_hand_labeler.HandednessONNXClassifier"
-        ) as handedness_constructor:
+            "hand_autolabel.rtmpose_hand_labeler.HandClassifierONNX"
+        ) as hand_classifier_constructor:
             rows, info = label_roi_manifest_rtmpose(
                 [candidate], _config(), Path("."), show_progress=False
             )
         pose_constructor.assert_not_called()
-        handedness_constructor.assert_not_called()
+        hand_classifier_constructor.assert_not_called()
         self.assertEqual(1, len(rows))
         self.assertEqual(1, info["negative_candidates_skipped"])
         self.assertEqual(0, info["runtime_rois_labeled"])
         self.assertIsNone(info["provider"])
-        self.assertIsNone(info["handedness_classifier_provider"])
+        self.assertIsNone(info["hand_classifier_provider"])
 
     def test_unknown_backend_fails_immediately(self) -> None:
         cfg = _config()

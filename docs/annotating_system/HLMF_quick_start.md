@@ -2,7 +2,7 @@
 
 ## 1. 环境检查
 
-输入：仓库、现有 `anfab` 环境和已部署的 Eos/Hand landmark ONNX。
+输入：仓库、现有 `anfab` 环境和已部署的 Eos/Hand landmark ONNX；RTMPose 模式还需要 `models/handedness-handpresence-0807/model.onnx` 双头 HCF。
 
 ```bash
 cd /root/HandLandmarksFab
@@ -30,7 +30,7 @@ make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 ## 3. Train 自动标注
 
-输入：已注册 train 来源、Eos、RTMPose 和 HCF。
+输入：已注册 train 来源、Eos、RTMPose 和双头 HCF；`configs/autolabel.yaml` 当前使用 `rtmpose_train_hand_presence_threshold: 0.5`。
 
 ```bash
 make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
@@ -39,7 +39,7 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
-输出：Palm、ROI、draft、`hand_training_labels.jsonl`、`candidate_negatives.jsonl`、`ignored.jsonl` 和 QC。
+输出：Palm、ROI、含 HCF presence/handedness 的 draft、`hand_training_labels.jsonl`、`candidate_negatives.jsonl`、`ignored.jsonl` 和 QC；低 presence 的 RTMPose Train runtime 行进入 `ignored.jsonl`。
 
 批量处理全部已注册 train 来源：
 
@@ -51,7 +51,7 @@ make batch-train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 ## 4. Eval 自动标注
 
-输入：已注册 val/test 来源和教师模型。
+输入：已注册 val/test 来源、Eos、RTMPose 和双头 HCF。
 
 ```bash
 make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
@@ -60,7 +60,7 @@ make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
-输出：Palm、ROI、draft 和 QC；正式评估标签仍需 CVAT 复核。
+输出：Palm、ROI、含 HCF presence/handedness 的 draft 和 QC；Train presence 阈值不作用于 Eval，正式评估标签仍需 CVAT 复核。
 
 批量处理并导出各来源 CVAT XML：
 

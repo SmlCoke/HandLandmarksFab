@@ -76,7 +76,7 @@ dataset_id, capture_source_id, split
 raw_image_id, roi_id/crop_id, palm_det_id
 proposal_variant, proposal_slot, proposal_kind
 crop_path/crop_relpath, roi_rect, roi_corners_px
-hand_presence.present
+hand_presence.present, hand_presence.score
 handedness.label, handedness.score
 landmarks_crop_norm[21]
 landmarks_crop_px[21]
@@ -85,32 +85,36 @@ source
 label_origin, annotation_style
 teacher_model_id
 handedness_teacher_model_id
+hand_presence_teacher_model_id
 teacher_detected
 human_reviewed
 human_modified_landmark_ids
 human_modified_handedness
+human_modified_presence
 ```
 
 ### MediaPipe
 
-`source=mediapipe...`，provenance 为 `mediapipe/mediapipe_v1`，presence、handedness 和关键点来自 MediaPipe。现有行为保持不变。
+`source=mediapipe...`，provenance 为 `mediapipe/mediapipe_v1`，presence、handedness 和关键点来自 MediaPipe。`hand_presence.score` 不是 MediaPipe 行的必需字段；现有行为保持不变。
 
 ### RTMPose + HCF runtime
 
 - `source=rtmpose_m_hand5_onnx`；
-- 固定 21 个关键点；
+- RTMPose 固定输出 21 个关键点；
 - `label_origin=rtmpose`；
 - `annotation_style=rtmpose_m_hand5_v1`；
 - `teacher_model_id=rtmpose-m_hand5_256x256_onnx`；
-- `handedness_teacher_model_id=hand-classifier-mobilenetv3-small-v1`；
-- `handedness.label=Left|Right`，score 为 HCF 对应 softmax 概率；
-- `hand_presence.present=true` 仅为发布路由哨兵，不是真实 presence 标注。
+- `handedness_teacher_model_id=hand-classifier-handedness-handpresence-0807`；
+- `hand_presence_teacher_model_id=hand-classifier-handedness-handpresence-0807`；
+- `handedness.label=Left|Right`，score 为 HCF 胜出类 softmax 概率；
+- `hand_presence.present` 为 HCF presence argmax（0 no_hand、1 has_hand）；
+- `hand_presence.score` 始终为 `P(has_hand)`，不是胜出类别置信度。
 
-HCF runtime 输入为 `[1,1,256,256]` float32；灰度除以 255 后按 `0.485/0.229` 归一化。模型接口名为 `input`/`output`，输出两类 logits（0 Left、1 Right）。
+HCF runtime 输入为 `[N,1,256,256]` float32；灰度除以 255 后按 `mean=0.485/std=0.229` 归一化。模型必须暴露动态 batch 的 `input`，以及 `handedness`、`hand_presence` 两个 `[N,2]` float 输出。该 HCF 只用于 RTMPose runtime ROI，Train 和 Eval 都执行；输出是教师伪标签，不等价于人工真值。Eval 经 CVAT 导入后，人工 presence 的 `score` 可为 null，教师身份由 provenance 字段保留。
 
 ### 未推理 candidate
 
-low-score candidate 的关键点为空，handedness 为 `{label: unknown, score: null}`，`handedness_teacher_model_id=null`，provenance 为 `unresolved/unlabeled_v1`。它不得伪装成 RTMPose、HCF 或 MediaPipe 标签。
+low-score candidate 的关键点为空，handedness 为 `{label: unknown, score: null}`，`hand_presence={present:false}`，`handedness_teacher_model_id=null`、`hand_presence_teacher_model_id=null`，provenance 为 `unresolved/unlabeled_v1`。它不运行 RTMPose/HCF，不得伪装成任何教师标签。
 
 ## 6. QC provider 字段
 
@@ -119,29 +123,31 @@ low-score candidate 的关键点为空，handedness 为 `{label: unknown, score:
 ```text
 hand_landmark_backend
 execution_provider
-handedness_classifier_provider
-handedness_classifier_model_id
-handedness_runtime_rois_labeled
+hand_classifier_provider
+hand_classifier_model_id
+hand_classifier_runtime_rois_labeled
 runtime_rois_labeled
 negative_candidates_skipped
 ```
 
-MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录两个实际 ONNX provider 和 HCF 推理数。
+MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 的实际 ONNX provider、HCF 模型 ID 和 HCF 推理数。
 
 ## 7. Train 发布分流
 
-Train positive 若质量门控失败，整行进入 `ignored.jsonl` 且 `train_eligible=false`。
+Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`。
 
-- handedness score 低于 `quality.handedness_review_threshold`：`ignore_reason=automatic_positive_failed_quality_gate`。
+- RTMPose Train runtime 的 `hand_presence.score=P(has_hand)` 缺失或非有限：quality error 为 `rtmpose_hand_presence_score_missing|non_finite`，`ignore_reason=rtmpose_hand_presence_gate`。
+- RTMPose Train runtime 的 `P(has_hand)` 严格低于 `quality.rtmpose_train_hand_presence_threshold`：quality error 为 `rtmpose_hand_presence_score_below_threshold:{score}<{threshold}`，`ignore_reason=rtmpose_hand_presence_gate`。等于阈值时通过。
+- Train positive 的 handedness score 低于 `quality.handedness_review_threshold`：`ignore_reason=automatic_positive_failed_quality_gate`。
 - RTMPose Train runtime 的 42 个 crop x/y 值中，精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`：quality error 为 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，`ignore_reason=rtmpose_boundary_coordinate_gate`。
 
-当前边界阈值为 3；1–2 个边界值通过。边界门控不应用于 Eval、MediaPipe 或 negative candidate。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
+当前 presence 阈值为 `0.5`，边界阈值为 3；1–2 个边界值通过。presence 与边界门控不应用于 Eval、MediaPipe 或 Eos negative candidate。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
 
-RTMPose 行用于 geometry pretrain 时必须忽略 presence。正式 presence/handedness multitask 训练与 Val/Test 评估必须使用人工确认或独立真实标签。
+双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
 
 ## 8. Eval、CVAT 与发布
 
-Eval draft 不是正式真值。CVAT frame 依据 ROI 图片字典序映射到 manifest；导入后产生 `hand_landmarks_reviewed.jsonl`。人工修改 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
+Eval draft 不是正式真值，RTMPose Train presence 阈值也不作用于 Eval。CVAT frame 依据 ROI 图片字典序映射到 manifest；导入后产生 `hand_landmarks_reviewed.jsonl`。人工改变 presence 时设置 `human_modified_presence=true`，改变 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
 
 Val/Test 发布输出 `hand_evaluation_labels.jsonl` 和 `ignored.jsonl`，不发布 negative candidate。Eval 限额按整个 split 的 prospective dataset manifest 统计，配置位于：
 

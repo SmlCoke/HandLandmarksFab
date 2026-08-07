@@ -10,16 +10,16 @@ from .image_io import to_uint8_gray
 
 
 HAND_CLASSIFIER_INPUT_NAME = "input"
-HAND_CLASSIFIER_OUTPUT_NAME = "output"
+HAND_CLASSIFIER_OUTPUT_NAMES = ("handedness", "hand_presence")
 HAND_CLASSIFIER_INPUT_SIZE = (256, 256)
-HAND_CLASSIFIER_LABELS = ("Left", "Right")
+HANDEDNESS_LABELS = ("Left", "Right")
 HAND_CLASSIFIER_MEAN = 0.485
 HAND_CLASSIFIER_STD = 0.229
-HAND_CLASSIFIER_MODEL_ID = "hand-classifier-mobilenetv3-small-v1"
+HAND_CLASSIFIER_MODEL_ID = "hand-classifier-handedness-handpresence-0807"
 
 
-def preprocess_handedness_image(image: np.ndarray) -> np.ndarray:
-    """Build the grayscale tensor used to train the handedness classifier."""
+def preprocess_hand_classifier_image(image: np.ndarray) -> np.ndarray:
+    """Build the normalized grayscale tensor used to train the classifier."""
 
     gray = to_uint8_gray(image)
     width, height = HAND_CLASSIFIER_INPUT_SIZE
@@ -33,19 +33,45 @@ def preprocess_handedness_image(image: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(tensor, dtype=np.float32)
 
 
-def decode_handedness_logits(logits: np.ndarray) -> Dict[str, Any]:
+def _softmax_probabilities(logits: np.ndarray, *, output_name: str) -> np.ndarray:
     values = np.asarray(logits, dtype=np.float32)
     if values.shape != (1, 2):
-        raise ValueError(f"unexpected Hand classifier output shape: {values.shape}; expected (1, 2)")
+        raise ValueError(
+            f"unexpected Hand classifier {output_name} output shape: {values.shape}; "
+            "expected (1, 2)"
+        )
     if not np.isfinite(values).all():
-        raise ValueError("Hand classifier output contains non-finite logits")
+        raise ValueError(f"Hand classifier {output_name} output contains non-finite logits")
     shifted = values[0] - float(np.max(values[0]))
     exponentials = np.exp(shifted)
     probabilities = exponentials / float(np.sum(exponentials))
-    class_id = int(np.argmax(values[0]))
+    if probabilities.shape != (2,) or not np.isfinite(probabilities).all():
+        raise ValueError(f"Hand classifier {output_name} softmax is invalid")
+    return probabilities
+
+
+def decode_hand_classifier_logits(
+    handedness_logits: np.ndarray,
+    hand_presence_logits: np.ndarray,
+) -> Dict[str, Dict[str, Any]]:
+    handedness_probabilities = _softmax_probabilities(
+        handedness_logits, output_name="handedness"
+    )
+    presence_probabilities = _softmax_probabilities(
+        hand_presence_logits, output_name="hand_presence"
+    )
+    handedness_class_id = int(np.argmax(np.asarray(handedness_logits)[0]))
+    presence_class_id = int(np.argmax(np.asarray(hand_presence_logits)[0]))
     return {
-        "label": HAND_CLASSIFIER_LABELS[class_id],
-        "score": float(probabilities[class_id]),
+        "handedness": {
+            "label": HANDEDNESS_LABELS[handedness_class_id],
+            "score": float(handedness_probabilities[handedness_class_id]),
+        },
+        "hand_presence": {
+            "present": presence_class_id == 1,
+            # This is always P(has_hand), not the winning-class probability.
+            "score": float(presence_probabilities[1]),
+        },
     }
 
 
@@ -54,13 +80,15 @@ def _shape_matches(actual: Sequence[Any], expected: Sequence[int | None]) -> boo
         return False
     for value, wanted in zip(actual, expected):
         if wanted is None:
+            if isinstance(value, int):
+                return False
             continue
-        if isinstance(value, int) and value != wanted:
+        if not isinstance(value, int) or value != wanted:
             return False
     return True
 
 
-class HandednessONNXClassifier:
+class HandClassifierONNX:
     def __init__(self, model_path: Path) -> None:
         try:
             import onnxruntime as ort
@@ -82,6 +110,12 @@ class HandednessONNXClassifier:
         self.provider = str(active[0])
         self.model_id = HAND_CLASSIFIER_MODEL_ID
 
+    @staticmethod
+    def _validate_tensor_type(node: Any, *, description: str) -> None:
+        node_type = getattr(node, "type", None)
+        if node_type is not None and node_type != "tensor(float)":
+            raise ValueError(f"{description} must use tensor(float), got {node_type!r}")
+
     def _validate_model_interface(self) -> None:
         inputs = self.session.get_inputs()
         outputs = self.session.get_outputs()
@@ -89,17 +123,27 @@ class HandednessONNXClassifier:
             raise ValueError("Hand classifier ONNX must expose exactly one input named 'input'")
         if not _shape_matches(inputs[0].shape, (None, 1, 256, 256)):
             raise ValueError(f"unexpected Hand classifier input shape: {inputs[0].shape}")
-        if len(outputs) != 1 or outputs[0].name != HAND_CLASSIFIER_OUTPUT_NAME:
-            raise ValueError("Hand classifier ONNX must expose exactly one output named 'output'")
-        if not _shape_matches(outputs[0].shape, (None, 2)):
-            raise ValueError(f"unexpected Hand classifier output shape: {outputs[0].shape}")
+        self._validate_tensor_type(inputs[0], description="Hand classifier input")
+        by_name = {output.name: output for output in outputs}
+        if set(by_name) != set(HAND_CLASSIFIER_OUTPUT_NAMES):
+            raise ValueError(
+                "Hand classifier ONNX outputs must be exactly 'handedness' and 'hand_presence'"
+            )
+        for name in HAND_CLASSIFIER_OUTPUT_NAMES:
+            if not _shape_matches(by_name[name].shape, (None, 2)):
+                raise ValueError(
+                    f"unexpected Hand classifier output shape for {name}: {by_name[name].shape}"
+                )
+            self._validate_tensor_type(
+                by_name[name], description=f"Hand classifier {name} output"
+            )
 
-    def classify(self, image: np.ndarray) -> Dict[str, Any]:
-        tensor = preprocess_handedness_image(image)
+    def classify(self, image: np.ndarray) -> Dict[str, Dict[str, Any]]:
+        tensor = preprocess_hand_classifier_image(image)
         outputs = self.session.run(
-            [HAND_CLASSIFIER_OUTPUT_NAME],
+            list(HAND_CLASSIFIER_OUTPUT_NAMES),
             {HAND_CLASSIFIER_INPUT_NAME: tensor},
         )
-        if len(outputs) != 1:
-            raise ValueError(f"Hand classifier ONNX returned {len(outputs)} outputs, expected 1")
-        return decode_handedness_logits(outputs[0])
+        if len(outputs) != 2:
+            raise ValueError(f"Hand classifier ONNX returned {len(outputs)} outputs, expected 2")
+        return decode_hand_classifier_logits(outputs[0], outputs[1])

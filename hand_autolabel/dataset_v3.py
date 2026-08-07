@@ -860,8 +860,14 @@ def apply_label_provenance(
         teacher_present = bool((draft.get("hand_presence") or {}).get("present")) if draft else False
         teacher_origin, teacher_style, teacher_model_id = teacher_identity(draft or row)
         handedness_teacher_model_id = (draft or row).get("handedness_teacher_model_id")
-        if handedness_teacher_model_id is None and teacher_origin == "mediapipe":
-            handedness_teacher_model_id = "mediapipe_hand_landmarker_task"
+        hand_presence_teacher_model_id = (draft or row).get(
+            "hand_presence_teacher_model_id"
+        )
+        if teacher_origin == "mediapipe":
+            if handedness_teacher_model_id is None:
+                handedness_teacher_model_id = "mediapipe_hand_landmarker_task"
+            if hand_presence_teacher_model_id is None:
+                hand_presence_teacher_model_id = "mediapipe_hand_landmarker_task"
         teacher_handedness = str(
             ((draft or row).get("handedness") or {}).get("label", "unknown")
         ).lower()
@@ -871,6 +877,7 @@ def apply_label_provenance(
         modified_handedness = bool(
             human_reviewed and current_handedness != teacher_handedness
         )
+        modified_presence = bool(human_reviewed and present != teacher_present)
         modified: List[int] = []
         if human_reviewed and present and teacher_present:
             old = {int(point["id"]): point for point in draft.get("landmarks_crop_norm") or []}
@@ -902,7 +909,9 @@ def apply_label_provenance(
                 "human_reviewed": bool(human_reviewed),
                 "human_modified_landmark_ids": sorted(modified),
                 "handedness_teacher_model_id": handedness_teacher_model_id,
+                "hand_presence_teacher_model_id": hand_presence_teacher_model_id,
                 "human_modified_handedness": modified_handedness,
+                "human_modified_presence": modified_presence,
             }
         )
         output.append(row)

@@ -1,41 +1,44 @@
-# HLMF 当前状态（2026-08-06）
+# HLMF 当前状态（2026-08-08）
 
 ## 代码与配置
 
 HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。MediaPipe Tasks 仍是全局默认 Hand landmark 后端，RTMPose-m Hand5 可通过单次参数启用。
 
-RTMPose runtime ROI 已接入 MobileNetV3-Small HCF：模型路径 `models/hand_classifier/model.onnx`，模型 ID `hand-classifier-mobilenetv3-small-v1`。服务器现有 ONNX Runtime 为 CPU 构建，真实双模型冒烟中 RTMPose 与 HCF 的实际 provider 均为 `CPUExecutionProvider`。low-score candidate 不运行两模型，保持未解析状态。
+RTMPose runtime ROI 已接入新的 MobileNetV3-Small 双头 HCF。模型路径为 `models/handedness-handpresence-0807/model.onnx`，模型 ID 为 `hand-classifier-handedness-handpresence-0807`；旧 handedness-only 资产保存在 `models/handedness-0806/`，不再参与推理。新模型输入为 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits。服务器 ONNX Runtime 当前只激活 CPU；真实双模型冒烟中 RTMPose 与 HCF 均使用 `CPUExecutionProvider`，RTMPose 输出 21 个有限坐标，HCF 两个分类头均输出有限概率。Eos low-score candidate 不运行两模型，保持未解析状态。
 
-当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 行的 42 个 crop 坐标值中，精确边界值达到 3 个时进入 `ignored.jsonl`。Eval、MediaPipe 和 candidate 不应用边界门控。
+新 HCF 自带验证集指标：presence accuracy `0.991279`、presence ROC AUC `0.999312`；handedness accuracy `0.992248`、handedness ROC AUC `0.996689`。presence 混淆矩阵为 `[[322,3],[9,1042]]`（0=no_hand，1=has_hand）。
 
-原图可视化默认生成按 PNG 文件名字典序排列的 30 FPS MP4；RTMPose ROI 可视化只抽样 runtime ROI。可视化可以独立清理。
+当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 的 `P(has_hand)` 阈值为 `0.5`；42 个 crop 坐标值中精确边界值达到 3 个时拒绝。presence 分数缺失、非有限或低于阈值时，以 `rtmpose_hand_presence_gate` 进入 `ignored.jsonl`。等于阈值通过。Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界门控。
 
-Registry 已增加 source/variant 的 active/retired 状态表。已有 106 个 ROI 来源/变体已自动回填为 active。删除变体会留下永久 tombstone，禁止同一来源复用同名变体。
+Presence 阈值分析放在仓库外的 `/root/hcf_presence_threshold_0807/`。分析使用复制出的 `FullEnhanceVal0801` 人工复核 ROI，没有写入现有数据集。有效样本共 7,907 条：7,892 条 hand、15 条 no_hand。正样本 `P(has_hand)` 均值为 `0.993917`，no_hand 最大值为 `0.0192493`。正式阈值 `0.5` 与模型 argmax 决策边界一致，拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。全局 recall 约束产生的候选阈值 `0.843369` 虽仍保留 99.0117% 的全局 hand，却把一个来源的 hand recall 降至 88.24%，因此未采用；`0.5` 在该来源的已知 recall 为 94.75%，这部分低置信 ROI 在 Train 中会被拒绝，Eval 仍由人工复核纠正。
 
-负样本和困难样本的 review/published 图片均使用独立复制；困难样本 published 记录包含 `published_relpath`，不依赖源变体存活。当前服务器没有既有 `GoldSource/NegativeSamples` 或 `Selections` 数据需要迁移。
+原图可视化默认生成按 PNG 文件名字典序排列的 30 FPS MP4；RTMPose ROI 可视化只抽样 runtime ROI。可视化可以独立清理。Registry 使用 source/variant active/retired 状态表，删除变体会留下永久 tombstone。
 
-批处理脚本已移入 `scripts/`，由环境变量接收数据根、数据集、变体、后端、Python、仓库和日志目录；任一来源失败时最终返回非零，Train 脚本没有自动关机。
+负样本和困难样本的 review/published 图片均使用独立复制；困难样本 published 记录包含 `published_relpath`，不依赖源变体存活。当前服务器存在 `background-neg-0801` review 工作区，以及已发布 1,543 条记录/图片的 `background-neg-0801-full`；本轮均未修改。
 
 ## 服务器数据仓库
 
 Eval 数据集 `FullEnhanceVal0801` 当前有 10 个来源：6 个 val、4 个 test，均已发布 `eos-1.0`：
 
-- val：4200 张原图、5288 个 ROI、5091 条发布标签；
-- test：2800 张原图、2960 个 ROI、2816 条发布标签。
+- val：4,200 张原图、5,288 个 ROI、5,091 条发布标签；
+- test：2,800 张原图、2,960 个 ROI、2,816 条发布标签。
 
-Pretrain 数据集 `FullEnhance0801` 当前有 95 个 train 来源，均已发布 `eos-1.0`。合计 105 个 manifest 中已发布来源变体的必要文件全部存在。本轮没有删除、重跑或改写这些发布资产。
+Pretrain 数据集 `FullEnhance0801` 当前有 95 个 train 来源：
 
-Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI）。对应来源目录不存在，且该记录不在当前 Eval manifest 中；本轮按约定保留，没有自动清理。
+- `eos-1.0`：95 个来源均完整发布，共 564,243 个 ROI、72,226 条 positive、492,017 条 candidate、0 条 ignored；
+- `eos_1.0-gate`：95 个来源均完整发布，共 564,243 个 ROI、65,089 条 positive、492,017 条 candidate、7,137 条 ignored。
 
-Registry 当前计数：2 个 dataset、106 个 capture source、68479 张 raw image、106 个 active proposal variant、572600 个 ROI。
+上述现有发布资产均为本轮实施前状态。本轮没有重跑、删除或改写任何 Train/Eval/Test 发布文件；新双头 HCF 与 presence gate 只影响今后执行的 RTMPose 标注。
+
+Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 2 个 dataset、106 个 capture source、68,479 张 raw image、201 个 active proposal variant、1,136,843 个 ROI；201 个 active 由 106 个 `eos-1.0` 与 95 个 `eos_1.0-gate` 组成。
 
 ## 验收状态
 
 - `make compile`：27 个 Python 文件语法检查通过；
-- `make test`：37 项测试通过；
+- `make test`：40 项测试通过；
 - `make help`：通过；
-- 两个批处理脚本 `bash -n` 通过，缺失数据集时返回非零；
-- 真实 RTMPose+HCF runtime ROI 冒烟通过：21 个有限坐标、有效 Left/Right 概率；
-- 临时 PNG→MP4 冒烟通过：`mp4v`、30 FPS、帧数正确；
-- 实施前后 Eval 计数与 105 个已发布变体必要文件完整性保持不变；
+- 新 HCF ONNX 接口验证通过：动态 batch、`input`、`handedness`、`hand_presence`、float32 与双 `[N,2]` 输出均符合契约；
+- 真实 RTMPose+双头 HCF runtime ROI 冒烟通过：21 个有限坐标、有效 handedness 与 `P(has_hand)`；
+- 实施前后 105 个 `eos-1.0` 已发布来源变体的必要文件完整性以及 Eval 计数保持不变；
+- 阈值扫描程序、配置、复制 ROI 和结果全部位于仓库外；
 - `requirements.txt` 未改变，无需重建 `anfab` 环境。

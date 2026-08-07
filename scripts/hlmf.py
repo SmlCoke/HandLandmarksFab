@@ -448,14 +448,10 @@ def _run_mediapipe(
         "hand_landmark_backend": backend,
         "hand_landmark_mode": backend_info["mode"],
         "execution_provider": backend_info["provider"],
-        "handedness_classifier_provider": backend_info.get(
-            "handedness_classifier_provider"
-        ),
-        "handedness_classifier_model_id": backend_info.get(
-            "handedness_classifier_model_id"
-        ),
-        "handedness_runtime_rois_labeled": backend_info.get(
-            "handedness_runtime_rois_labeled", 0
+        "hand_classifier_provider": backend_info.get("hand_classifier_provider"),
+        "hand_classifier_model_id": backend_info.get("hand_classifier_model_id"),
+        "hand_classifier_runtime_rois_labeled": backend_info.get(
+            "hand_classifier_runtime_rois_labeled", 0
         ),
         "runtime_rois_labeled": backend_info["runtime_rois_labeled"],
         "negative_candidates_skipped": backend_info["negative_candidates_skipped"],
@@ -790,7 +786,15 @@ def _partition_labels(
             "warnings": quality_warnings,
             "errors": quality_errors,
         }
-        if split == "train" and present and (quality_errors or quality_needs_review):
+        presence_gate_failed = any(
+            str(error).startswith("rtmpose_hand_presence_score_")
+            for error in quality_errors
+        )
+        if split == "train" and presence_gate_failed:
+            row["train_eligible"] = False
+            row["ignore_reason"] = "rtmpose_hand_presence_gate"
+            ignored.append(row)
+        elif split == "train" and present and (quality_errors or quality_needs_review):
             row["train_eligible"] = False
             if any(
                 str(error).startswith("rtmpose_boundary_coordinate_values:")

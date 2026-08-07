@@ -75,14 +75,18 @@ def _points_out_of_bounds(points: Iterable[Mapping[str, Any]], width: int, heigh
     return count
 
 
+def _is_rtmpose_train_runtime(row: Mapping[str, Any]) -> bool:
+    return (
+        str(row.get("split")) == "train"
+        and str(row.get("proposal_kind")) == "runtime"
+        and str(row.get("source")) == "rtmpose_m_hand5_onnx"
+    )
+
+
 def _rtmpose_boundary_coordinate_count(
     row: Mapping[str, Any], cfg: Mapping[str, Any]
 ) -> int:
-    if str(row.get("split")) != "train":
-        return 0
-    if str(row.get("proposal_kind")) != "runtime":
-        return 0
-    if str(row.get("source")) != "rtmpose_m_hand5_onnx":
+    if not _is_rtmpose_train_runtime(row):
         return 0
     width = int(row.get("width", cfg["hand_roi"]["output_width"]))
     height = int(row.get("height", cfg["hand_roi"]["output_height"]))
@@ -96,6 +100,41 @@ def _rtmpose_boundary_coordinate_count(
             if value == 0.0 or value == maximum:
                 count += 1
     return count
+
+
+def _rtmpose_hand_presence_gate_error(
+    row: Mapping[str, Any], cfg: Mapping[str, Any]
+) -> str | None:
+    if not _is_rtmpose_train_runtime(row):
+        return None
+    raw_threshold = cfg.get("quality", {}).get(
+        "rtmpose_train_hand_presence_threshold", 0.5
+    )
+    try:
+        threshold = float(raw_threshold)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "quality.rtmpose_train_hand_presence_threshold must be a finite number"
+        ) from exc
+    if not np.isfinite(threshold) or threshold < 0.0 or threshold > 1.0:
+        raise ValueError(
+            "quality.rtmpose_train_hand_presence_threshold must be within [0, 1]"
+        )
+    score = (row.get("hand_presence") or {}).get("score")
+    if score is None:
+        return "rtmpose_hand_presence_score_missing"
+    try:
+        score_value = float(score)
+    except (TypeError, ValueError):
+        return "rtmpose_hand_presence_score_non_finite"
+    if not np.isfinite(score_value):
+        return "rtmpose_hand_presence_score_non_finite"
+    if score_value < threshold:
+        return (
+            f"rtmpose_hand_presence_score_below_threshold:"
+            f"{score_value:.6f}<{threshold:.6f}"
+        )
+    return None
 
 
 def label_issues(row: Mapping[str, Any], cfg: Mapping[str, Any]) -> tuple[List[str], List[str], bool]:
@@ -134,6 +173,10 @@ def label_issues(row: Mapping[str, Any], cfg: Mapping[str, Any]) -> tuple[List[s
         errors.append(
             f"rtmpose_boundary_coordinate_values:{boundary_count}>={boundary_threshold}"
         )
+        needs_review = True
+    presence_gate_error = _rtmpose_hand_presence_gate_error(row, cfg)
+    if presence_gate_error is not None:
+        errors.append(presence_gate_error)
         needs_review = True
     if int(row.get("mediapipe_num_hands_detected", 0)) > 1:
         warnings.append("multiple_hands_in_one_crop")

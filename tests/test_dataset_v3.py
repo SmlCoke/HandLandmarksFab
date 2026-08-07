@@ -246,8 +246,18 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(changed["label_origin"], "mediapipe_human_corrected")
         self.assertEqual(changed["human_modified_landmark_ids"], [4])
         self.assertEqual(abstain["label_origin"], "human")
+        self.assertTrue(abstain["human_modified_presence"])
+        self.assertEqual(
+            "mediapipe_hand_landmarker_task",
+            unchanged["hand_presence_teacher_model_id"],
+        )
 
-        rtmpose_draft = dict(draft, source="rtmpose_m_hand5_onnx")
+        rtmpose_draft = dict(
+            draft,
+            source="rtmpose_m_hand5_onnx",
+            handedness_teacher_model_id="hand-classifier-handedness-handpresence-0807",
+            hand_presence_teacher_model_id="hand-classifier-handedness-handpresence-0807",
+        )
         rtmpose_unchanged = apply_label_provenance(
             [rtmpose_draft], {"roi_1": rtmpose_draft}, True
         )[0]
@@ -274,10 +284,17 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(
             "rtmpose-m_hand5_256x256_onnx", rtmpose_unchanged["teacher_model_id"]
         )
+        self.assertEqual(
+            "hand-classifier-handedness-handpresence-0807",
+            rtmpose_unchanged["hand_presence_teacher_model_id"],
+        )
+        self.assertFalse(rtmpose_unchanged["human_modified_presence"])
         self.assertEqual("rtmpose_human_corrected", rtmpose_changed["label_origin"])
         self.assertEqual("unresolved", unresolved["label_origin"])
         self.assertEqual("unlabeled_v1", unresolved["annotation_style"])
         self.assertIsNone(unresolved["teacher_model_id"])
+        self.assertIsNone(unresolved["hand_presence_teacher_model_id"])
+        self.assertFalse(unresolved["human_modified_presence"])
 
     def test_train_positive_candidate_negative_and_quality_gate_partition(self) -> None:
         cfg = load_yaml_config(Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml")
@@ -321,7 +338,7 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(2, len(eval_rows))
         self.assertEqual([], eval_candidates)
 
-    def test_rtmpose_train_boundary_and_handedness_quality_gates(self) -> None:
+    def test_rtmpose_train_boundary_handedness_and_presence_quality_gates(self) -> None:
         cfg = load_yaml_config(Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml")
         points_norm = [
             {"id": index, "x": 0.25, "y": 0.5} for index in range(21)
@@ -333,7 +350,7 @@ class DatasetV3Tests(unittest.TestCase):
         two_boundary[0]["x"] = 0.0
         two_boundary[1]["y"] = 255.0
         base = {
-            "hand_presence": {"present": True},
+            "hand_presence": {"present": True, "score": 0.9},
             "handedness": {"label": "Left", "score": 0.9},
             "landmarks_crop_norm": points_norm,
             "landmarks_crop_px": two_boundary,
@@ -349,33 +366,102 @@ class DatasetV3Tests(unittest.TestCase):
         three_boundary[2]["x"] = 0.0
         passed = dict(base, crop_id="two")
         rejected = dict(base, crop_id="three", landmarks_crop_px=three_boundary)
-        low_score = dict(
+        low_handedness = dict(
             base,
-            crop_id="low-score",
+            crop_id="low-handedness",
             handedness={"label": "Right", "score": 0.69},
         )
-        positives, _, ignored = _partition_labels(
-            [passed, rejected, low_score], "train", cfg
+        threshold = cfg["quality"]["rtmpose_train_hand_presence_threshold"]
+        presence_at_threshold = dict(
+            base,
+            crop_id="presence-at-threshold",
+            hand_presence={"present": True, "score": threshold},
         )
-        self.assertEqual(["two"], [row["crop_id"] for row in positives])
-        self.assertEqual(["three", "low-score"], [row["crop_id"] for row in ignored])
+        low_presence = dict(
+            base,
+            crop_id="low-presence",
+            hand_presence={"present": False, "score": threshold - 0.0001},
+        )
+        positives, candidates, ignored = _partition_labels(
+            [passed, rejected, low_handedness, presence_at_threshold, low_presence],
+            "train",
+            cfg,
+        )
+        self.assertEqual(
+            ["two", "presence-at-threshold"],
+            [row["crop_id"] for row in positives],
+        )
+        self.assertEqual([], candidates)
+        self.assertEqual(
+            ["three", "low-handedness", "low-presence"],
+            [row["crop_id"] for row in ignored],
+        )
         self.assertEqual("rtmpose_boundary_coordinate_gate", ignored[0]["ignore_reason"])
         self.assertEqual(
             "automatic_positive_failed_quality_gate", ignored[1]["ignore_reason"]
         )
+        self.assertEqual("rtmpose_hand_presence_gate", ignored[2]["ignore_reason"])
+        self.assertTrue(
+            any(
+                error.startswith("rtmpose_hand_presence_score_below_threshold:")
+                for error in ignored[2]["quality_gate"]["errors"]
+            )
+        )
 
-        eval_row = dict(rejected, crop_id="eval", split="val")
+        eval_row = dict(low_presence, crop_id="eval", split="val")
         eval_rows, _, eval_ignored = _partition_labels([eval_row], "val", cfg)
         self.assertEqual(["eval"], [row["crop_id"] for row in eval_rows])
         self.assertEqual([], eval_ignored)
         mediapipe_row = dict(
-            rejected, crop_id="mediapipe", source="mediapipe_tasks", split="train"
+            low_presence, crop_id="mediapipe", source="mediapipe_tasks", split="train"
         )
-        mediapipe_rows, _, mediapipe_ignored = _partition_labels(
+        mediapipe_rows, mediapipe_candidates, mediapipe_ignored = _partition_labels(
             [mediapipe_row], "train", cfg
         )
-        self.assertEqual(["mediapipe"], [row["crop_id"] for row in mediapipe_rows])
+        self.assertEqual([], mediapipe_rows)
+        self.assertEqual(["mediapipe"], [row["crop_id"] for row in mediapipe_candidates])
         self.assertEqual([], mediapipe_ignored)
+        candidate_row = dict(
+            low_presence, crop_id="candidate", proposal_kind="negative_candidate"
+        )
+        _, candidate_rows, candidate_ignored = _partition_labels(
+            [candidate_row], "train", cfg
+        )
+        self.assertEqual(["candidate"], [row["crop_id"] for row in candidate_rows])
+        self.assertEqual([], candidate_ignored)
+
+    def test_rtmpose_train_presence_gate_rejects_missing_or_non_finite_scores(self) -> None:
+        cfg = load_yaml_config(Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml")
+        base = {
+            "crop_id": "missing",
+            "hand_presence": {"present": True},
+            "handedness": {"label": "Left", "score": 0.9},
+            "landmarks_crop_norm": [
+                {"id": index, "x": 0.25, "y": 0.5} for index in range(21)
+            ],
+            "landmarks_crop_px": [
+                {"id": index, "x": 64.0, "y": 128.0} for index in range(21)
+            ],
+            "width": 256,
+            "height": 256,
+            "split": "train",
+            "proposal_kind": "runtime",
+            "source": "rtmpose_m_hand5_onnx",
+        }
+        non_finite = dict(
+            base,
+            crop_id="non-finite",
+            hand_presence={"present": True, "score": float("nan")},
+        )
+        positives, candidates, ignored = _partition_labels(
+            [base, non_finite], "train", cfg
+        )
+        self.assertEqual([], positives)
+        self.assertEqual([], candidates)
+        self.assertEqual(["missing", "non-finite"], [row["crop_id"] for row in ignored])
+        self.assertTrue(
+            all(row["ignore_reason"] == "rtmpose_hand_presence_gate" for row in ignored)
+        )
 
     def test_visualization_clean_and_variant_delete_keep_tombstone(self) -> None:
         crop, row = self._registered_roi()

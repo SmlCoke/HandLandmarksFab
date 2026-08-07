@@ -11,11 +11,16 @@ import numpy as np
 
 from hand_autolabel.handedness_classifier import (
     HAND_CLASSIFIER_MEAN,
+    HAND_CLASSIFIER_MODEL_ID,
     HAND_CLASSIFIER_STD,
-    HandednessONNXClassifier,
-    decode_handedness_logits,
-    preprocess_handedness_image,
+    HandClassifierONNX,
+    decode_hand_classifier_logits,
+    preprocess_hand_classifier_image,
 )
+
+
+def _node(name: str, shape: list[object], node_type: str = "tensor(float)") -> SimpleNamespace:
+    return SimpleNamespace(name=name, shape=shape, type=node_type)
 
 
 class _FakeSession:
@@ -23,24 +28,35 @@ class _FakeSession:
         self.requested_providers = providers
 
     def get_inputs(self) -> list[SimpleNamespace]:
-        return [SimpleNamespace(name="input", shape=["batch", 1, "height", "width"])]
+        return [_node("input", ["batch", 1, 256, 256])]
 
     def get_outputs(self) -> list[SimpleNamespace]:
-        return [SimpleNamespace(name="output", shape=["batch", 2])]
+        return [
+            _node("handedness", ["batch", 2]),
+            _node("hand_presence", ["batch", 2]),
+        ]
 
     def get_providers(self) -> list[str]:
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
     def run(self, names: list[str], feeds: dict[str, np.ndarray]) -> list[np.ndarray]:
-        if names != ["output"] or feeds["input"].shape != (1, 1, 256, 256):
+        if names != ["handedness", "hand_presence"] or feeds["input"].shape != (
+            1,
+            1,
+            256,
+            256,
+        ):
             raise AssertionError((names, feeds))
-        return [np.asarray([[-1.0, 2.0]], dtype=np.float32)]
+        return [
+            np.asarray([[-1.0, 2.0]], dtype=np.float32),
+            np.asarray([[1.0, 3.0]], dtype=np.float32),
+        ]
 
 
-class HandednessClassifierTests(unittest.TestCase):
+class HandClassifierTests(unittest.TestCase):
     def test_preprocess_matches_training_normalization(self) -> None:
-        tensor = preprocess_handedness_image(
-            np.full((128, 128), 100, dtype=np.uint8)
+        tensor = preprocess_hand_classifier_image(
+            np.full((128, 128, 3), 100, dtype=np.uint8)
         )
         self.assertEqual((1, 1, 256, 256), tensor.shape)
         self.assertEqual(np.float32, tensor.dtype)
@@ -48,20 +64,27 @@ class HandednessClassifierTests(unittest.TestCase):
         np.testing.assert_allclose(tensor[0, 0, 0, 0], expected, rtol=1e-6)
         self.assertTrue(np.isfinite(tensor).all())
 
-    def test_decode_uses_argmax_and_softmax_probability(self) -> None:
-        result = decode_handedness_logits(
-            np.asarray([[0.0, 2.0]], dtype=np.float32)
+    def test_decode_returns_handedness_and_probability_of_has_hand(self) -> None:
+        result = decode_hand_classifier_logits(
+            np.asarray([[0.0, 2.0]], dtype=np.float32),
+            np.asarray([[2.0, 0.0]], dtype=np.float32),
         )
-        self.assertEqual("Right", result["label"])
-        self.assertAlmostEqual(0.880797, result["score"], places=6)
-        with self.assertRaisesRegex(ValueError, "output shape"):
-            decode_handedness_logits(np.zeros((1, 3), dtype=np.float32))
-        with self.assertRaisesRegex(ValueError, "non-finite"):
-            decode_handedness_logits(
-                np.asarray([[np.nan, 1.0]], dtype=np.float32)
+        self.assertEqual("Right", result["handedness"]["label"])
+        self.assertAlmostEqual(0.880797, result["handedness"]["score"], places=6)
+        self.assertFalse(result["hand_presence"]["present"])
+        self.assertAlmostEqual(0.119203, result["hand_presence"]["score"], places=6)
+        with self.assertRaisesRegex(ValueError, "hand_presence output shape"):
+            decode_hand_classifier_logits(
+                np.zeros((1, 2), dtype=np.float32),
+                np.zeros((1, 3), dtype=np.float32),
+            )
+        with self.assertRaisesRegex(ValueError, "handedness output contains non-finite"):
+            decode_hand_classifier_logits(
+                np.asarray([[np.nan, 1.0]], dtype=np.float32),
+                np.zeros((1, 2), dtype=np.float32),
             )
 
-    def test_session_prefers_cuda_and_validates_runtime_output(self) -> None:
+    def test_session_prefers_cuda_and_runs_both_heads(self) -> None:
         fake_ort = SimpleNamespace(
             get_available_providers=lambda: [
                 "CUDAExecutionProvider",
@@ -73,13 +96,26 @@ class HandednessClassifierTests(unittest.TestCase):
             model = Path(temporary) / "model.onnx"
             model.write_bytes(b"test")
             with patch.dict(sys.modules, {"onnxruntime": fake_ort}):
-                classifier = HandednessONNXClassifier(model)
-                result = classifier.classify(
-                    np.zeros((256, 256), dtype=np.uint8)
-                )
+                classifier = HandClassifierONNX(model)
+                result = classifier.classify(np.zeros((256, 256), dtype=np.uint8))
         self.assertEqual("CUDAExecutionProvider", classifier.provider)
-        self.assertEqual("Right", result["label"])
-        self.assertGreater(result["score"], 0.95)
+        self.assertEqual(HAND_CLASSIFIER_MODEL_ID, classifier.model_id)
+        self.assertEqual("Right", result["handedness"]["label"])
+        self.assertTrue(result["hand_presence"]["present"])
+        self.assertAlmostEqual(0.880797, result["hand_presence"]["score"], places=6)
+
+    def test_interface_rejects_static_batch_and_wrong_outputs(self) -> None:
+        session = _FakeSession("unused", ["CPUExecutionProvider"])
+        session.get_inputs = lambda: [_node("input", [1, 1, 256, 256])]
+        classifier = HandClassifierONNX.__new__(HandClassifierONNX)
+        classifier.session = session
+        with self.assertRaisesRegex(ValueError, "input shape"):
+            classifier._validate_model_interface()
+
+        session.get_inputs = lambda: [_node("input", ["batch", 1, 256, 256])]
+        session.get_outputs = lambda: [_node("output", ["batch", 2])]
+        with self.assertRaisesRegex(ValueError, "outputs must be exactly"):
+            classifier._validate_model_interface()
 
 
 if __name__ == "__main__":

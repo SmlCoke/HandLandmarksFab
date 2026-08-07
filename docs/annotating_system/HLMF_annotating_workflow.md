@@ -27,11 +27,14 @@ make test
 
 代码依赖以 `requirements.txt` 为准。本轮继续使用现有 ONNX Runtime、OpenCV 和 FFmpeg 支持，无新增依赖。
 
-Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略，需要在执行环境单独部署。HCF 默认路径为：
+Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略，需要在执行环境单独部署。当前双头 HCF 与上一版归档路径为：
 
 ```text
-models/hand_classifier/model.onnx
+models/handedness-handpresence-0807/model.onnx
+models/handedness-0806/
 ```
+
+代码只读取新路径；旧目录仅用于保留 handedness-only 模型和指标，不参与推理。
 
 关键配置：
 
@@ -42,9 +45,10 @@ rtmpose:
   model_onnx_path: models/rtmpose/rtmpose-m_hand5_256x256.onnx
   simcc_split_ratio: 2.0
 hand_classifier:
-  model_onnx_path: models/hand_classifier/model.onnx
+  model_onnx_path: models/handedness-handpresence-0807/model.onnx
 quality:
   handedness_review_threshold: 0.7
+  rtmpose_train_hand_presence_threshold: 0.5
   rtmpose_train_boundary_coordinate_reject_threshold: 3
 visualization:
   roi_enabled: false
@@ -53,7 +57,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：MediaPipe 保持全局默认；命令行后端只覆盖当前执行。SimCC split ratio 与模型绑定为 `2.0`。handedness 阈值越高，Train 被送入人工复核/忽略的行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 3 个才拒绝。
+配置原则：MediaPipe 保持全局默认；命令行后端只覆盖当前执行。SimCC split ratio 与模型绑定为 `2.0`。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 3 个才拒绝。
 
 ## 3. 来源注册与图像检查
 
@@ -117,23 +121,25 @@ make train-autolabel \
 
 RTMPose 灰度 ROI 复制为 RGB，使用官方 mean/std，输出两个 `[N,21,512]` SimCC logits。坐标直接对原始 logits 取 argmax，再除以 `2.0`，不执行 softmax；输出夹到 `[0,255]`。默认关键点分数为 x/y 峰值较小者。
 
-HCF 输入是灰度 `[N,1,256,256]`：转 float、除以 255，再以 `mean=0.485/std=0.229` 归一化。输出 `[N,2]` logits，argmax 映射 `0=Left、1=Right`，对应 softmax 概率写入 `handedness.score`。
+双头 HCF 输入是灰度 `[N,1,256,256]`：转 float、除以 255，再以 `mean=0.485/std=0.229` 归一化。输出名称必须恰为 `handedness` 和 `hand_presence`，形状均为 `[N,2]`。handedness 的 argmax 映射 `0=Left、1=Right`，胜出类 softmax 概率写入 `handedness.score`；presence 的 argmax 映射 `0=no_hand、1=has_hand`，无论胜出类别为何，`hand_presence.score` 始终保存 `P(has_hand)`。
 
-两个模型都校验输入输出名称、形状和有限值。ONNX Runtime 可用 CUDA 时优先 CUDA，否则 CPU；实际 RTMPose/HCF provider、HCF 模型 ID 和推理数量写入 `qc/<variant>/mediapipe_report.json`（报告路径为兼容既有消费者而保留）。
+两个模型都校验输入输出名称、动态 batch、固定通道/空间/类别形状、float 类型和有限值。ONNX Runtime 可用 CUDA 时优先 CUDA，否则 CPU；实际 RTMPose/HCF provider、HCF 模型 ID 和推理数量写入 `qc/<variant>/mediapipe_report.json`（报告路径沿用现有位置）。
 
-RTMPose runtime ROI 固定输出 21 点，`hand_presence.present=true` 只用于现有发布路由。它不代表真实 presence 标签。low-score candidate 的关键点为空、handedness 为 `unknown/null`，进入 `candidate_negatives.jsonl` 人工链路。
+RTMPose runtime ROI 固定输出 21 点，并在 Train 与 Eval 都运行一次双头 HCF；`hand_presence.present` 和 `hand_presence.score` 是 HCF 教师输出，不是人工真值。Eos low-score candidate 不运行 RTMPose/HCF，关键点为空、handedness 为 `unknown/null`、两个 HCF provenance ID 均为 null，继续进入 `candidate_negatives.jsonl` 人工链路。
 
 ## 6. Train 质量门控
 
 质量门控只改变发布分流，不改变 Palm 或 ROI：
 
-1. 所有 Train positive 若 handedness 分数低于 `quality.handedness_review_threshold`，整行进入 `ignored.jsonl`。
-2. 仅对 `split=train`、`proposal_kind=runtime`、`source=rtmpose_m_hand5_onnx` 的行统计 21 点的 42 个 crop x/y 值。
-3. 每个精确等于 `0.0` 或 `255.0` 的值计一次；计数达到 `rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，并以 `ignore_reason=rtmpose_boundary_coordinate_gate` 进入 `ignored.jsonl`。
-4. 当前阈值为 3，因此 1–2 个边界值通过。
-5. Eval、MediaPipe 和 low-score candidate 不应用 RTMPose 边界门控。
+1. 仅对 `split=train`、`proposal_kind=runtime`、`source=rtmpose_m_hand5_onnx` 的行读取 `hand_presence.score=P(has_hand)`。分数缺失、非有限或低于 `quality.rtmpose_train_hand_presence_threshold` 时，写入明确 quality error，并以 `ignore_reason=rtmpose_hand_presence_gate` 进入 `ignored.jsonl`；等于阈值通过。
+2. 所有 Train positive 若 handedness 分数低于 `quality.handedness_review_threshold`，以 `ignore_reason=automatic_positive_failed_quality_gate` 进入 `ignored.jsonl`。
+3. 仅对 RTMPose Train runtime 行统计 21 点的 42 个 crop x/y 值。每个精确等于 `0.0` 或 `255.0` 的值计一次；计数达到 `rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，并以 `ignore_reason=rtmpose_boundary_coordinate_gate` 进入 `ignored.jsonl`。
+4. 当前 presence 阈值为 `0.5`，边界阈值为 3，因此 1–2 个边界值通过。
+5. Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界门控。
 
-Iris 第一阶段 geometry pretrain 可以使用 RTMPose 关键点，但必须忽略这些行的 presence。后续 multitask 训练和正式评估必须使用独立分类器或人工确认的真实 presence/handedness 标签。
+Presence 阈值应使用与正式标注隔离的人工复核 ROI 副本重新校准。当前选择规则同时考虑：与模型 `no_hand/has_hand` 的 argmax 决策一致、拒绝人工 no_hand、尽量保留人工 hand，并避免更高阈值在单一来源上过度丢样本。当前校准中 `0.5` 拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。曾评估“全局 hand recall 至少 99% 时取最高阈值”的 `0.843369`，但它在 `complex-near-bright-random-val-s01-peak` 上只保留 88.24% 的 hand，因此未采用。
+
+HCF presence/handedness 是 Train 的教师伪标签；Eval draft 必须经过 CVAT 人工确认后才能成为正式真值。
 
 ## 7. Eval 自动标注、CVAT 与发布
 
@@ -148,7 +154,7 @@ make eval-autolabel \
 make hand-cvat-export ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.0
 ```
 
-`eval-autolabel` 生成 Palm、ROI、草标和 QC，但不把教师结果当成正式评估真值；`hand-cvat-export` 从 ROI manifest、ROI images 和 draft 生成：
+`eval-autolabel` 生成 Palm、ROI、RTMPose 关键点以及双头 HCF 的 presence/handedness 草标和 QC，但不把任何教师结果当成正式评估真值；`hand-cvat-export` 从 ROI manifest、ROI images 和 draft 生成：
 
 ```text
 <source>/03_reviewed/<variant>/cvat_autolabel.xml
@@ -176,9 +182,9 @@ Eval 限额在 `configs/datasets.yaml` 的 `evaluation_limits.max_raw_images_per
 
 - MediaPipe：`label_origin=mediapipe`、`annotation_style=mediapipe_v1`。
 - RTMPose：`label_origin=rtmpose`、`annotation_style=rtmpose_m_hand5_v1`、`teacher_model_id=rtmpose-m_hand5_256x256_onnx`。
-- HCF：`handedness_teacher_model_id=hand-classifier-mobilenetv3-small-v1`。
-- 人工复核记录 `human_reviewed`、`human_modified_landmark_ids` 和 `human_modified_handedness`；修点后使用 `*_human_corrected/project_consensus_v1`。
-- 未推理 candidate：`unresolved/unlabeled_v1`，不伪装为教师标签。
+- 双头 HCF：`handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 均为 `hand-classifier-handedness-handpresence-0807`。
+- 人工复核记录 `human_reviewed`、`human_modified_landmark_ids`、`human_modified_handedness` 和 `human_modified_presence`；修点后使用 `*_human_corrected/project_consensus_v1`。
+- 未推理 candidate：两个 HCF teacher ID 均为 null，provenance 为 `unresolved/unlabeled_v1`，不伪装为教师标签。
 
 ## 9. 可视化、视频与清理
 
