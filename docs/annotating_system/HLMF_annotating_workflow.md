@@ -49,7 +49,7 @@ hand_classifier:
 quality:
   handedness_review_threshold: 0.7
   rtmpose_train_hand_presence_threshold: 0.5
-  rtmpose_train_boundary_coordinate_reject_threshold: 3
+  rtmpose_train_boundary_coordinate_reject_threshold: 2
 visualization:
   roi_enabled: false
   original_image_enabled: false
@@ -57,7 +57,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：MediaPipe 保持全局默认；命令行后端只覆盖当前执行。SimCC split ratio 与模型绑定为 `2.0`。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 3 个才拒绝。
+配置原则：MediaPipe 保持全局默认；命令行后端只覆盖当前执行。SimCC split ratio 与模型绑定为 `2.0`。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。
 
 ## 3. 来源注册与图像检查
 
@@ -102,7 +102,7 @@ make train-autolabel \
 
 输入：已注册原图、Eos/RTMPose/HCF 模型和 `configs/autolabel.yaml`。
 
-处理：Eos 生成 runtime 与 low-score candidate proposal；程序构造 ROI；runtime ROI 运行所选 Hand landmark 后端。RTMPose runtime ROI 同时运行 HCF；candidate 不运行 RTMPose/HCF。Train 自动完成质量分流和发布。
+处理：Eos 生成 runtime 与 low-score candidate proposal；程序把原图解码后转换为单通道 `uint8`，再构造固定 `256×256` ROI；runtime ROI 运行所选 Hand landmark 后端。RTMPose runtime ROI 同时运行 HCF；candidate 不运行 RTMPose/HCF。Train 自动完成质量分流和发布。
 
 输出：
 
@@ -116,6 +116,8 @@ make train-autolabel \
 <source>/05_labels/<variant>/ignored.jsonl
 <source>/qc/<variant>/*_report.json
 ```
+
+ROI 使用无损 PNG 保存，模型实际读取的是解码后的 `uint8` 灰度像素，而不是 PNG/TIFF 容器。板端输入为摄像头 `SSNE_Y_8` 内存并现场构造 ROI，也不会读取 TIFF 文件作为 Hand Landmarker 输入。对同一 `uint8` ROI，改用无损 TIFF 不改变像素域，只会改变文件路径和存储开销。
 
 ## 5. RTMPose 与 HCF 推理契约
 
@@ -134,7 +136,7 @@ RTMPose runtime ROI 固定输出 21 点，并在 Train 与 Eval 都运行一次�
 1. 仅对 `split=train`、`proposal_kind=runtime`、`source=rtmpose_m_hand5_onnx` 的行读取 `hand_presence.score=P(has_hand)`。分数缺失、非有限或低于 `quality.rtmpose_train_hand_presence_threshold` 时，写入明确 quality error，并以 `ignore_reason=rtmpose_hand_presence_gate` 进入 `ignored.jsonl`；等于阈值通过。
 2. 所有 Train positive 若 handedness 分数低于 `quality.handedness_review_threshold`，以 `ignore_reason=automatic_positive_failed_quality_gate` 进入 `ignored.jsonl`。
 3. 仅对 RTMPose Train runtime 行统计 21 点的 42 个 crop x/y 值。每个精确等于 `0.0` 或 `255.0` 的值计一次；计数达到 `rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，并以 `ignore_reason=rtmpose_boundary_coordinate_gate` 进入 `ignored.jsonl`。
-4. 当前 presence 阈值为 `0.5`，边界阈值为 3，因此 1–2 个边界值通过。
+4. 当前 presence 阈值为 `0.5`，边界阈值为 2，因此 0–1 个边界值通过。
 5. Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界门控。
 
 Presence 阈值应使用与正式标注隔离的人工复核 ROI 副本重新校准。当前选择规则同时考虑：与模型 `no_hand/has_hand` 的 argmax 决策一致、拒绝人工 no_hand、尽量保留人工 hand，并避免更高阈值在单一来源上过度丢样本。当前校准中 `0.5` 拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。曾评估“全局 hand recall 至少 99% 时取最高阈值”的 `0.843369`，但它在 `complex-near-bright-random-val-s01-peak` 上只保留 88.24% 的 hand，因此未采用。

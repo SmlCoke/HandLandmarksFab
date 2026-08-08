@@ -8,13 +8,15 @@ RTMPose runtime ROI 已接入新的 MobileNetV3-Small 双头 HCF。模型路径�
 
 新 HCF 自带验证集指标：presence accuracy `0.991279`、presence ROC AUC `0.999312`；handedness accuracy `0.992248`、handedness ROC AUC `0.996689`。presence 混淆矩阵为 `[[322,3],[9,1042]]`（0=no_hand，1=has_hand）。
 
-当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 的 `P(has_hand)` 阈值为 `0.5`；42 个 crop 坐标值中精确边界值达到 3 个时拒绝。presence 分数缺失、非有限或低于阈值时，以 `rtmpose_hand_presence_gate` 进入 `ignored.jsonl`。等于阈值通过。Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界门控。
+当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 的 `P(has_hand)` 阈值为 `0.5`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝。presence 分数缺失、非有限或低于阈值时，以 `rtmpose_hand_presence_gate` 进入 `ignored.jsonl`。等于阈值通过。Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界门控。
 
 Presence 阈值分析放在仓库外的 `/root/hcf_presence_threshold_0807/`。分析使用复制出的 `FullEnhanceVal0801` 人工复核 ROI，没有写入现有数据集。有效样本共 7,907 条：7,892 条 hand、15 条 no_hand。正样本 `P(has_hand)` 均值为 `0.993917`，no_hand 最大值为 `0.0192493`。正式阈值 `0.5` 与模型 argmax 决策边界一致，拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。全局 recall 约束产生的候选阈值 `0.843369` 虽仍保留 99.0117% 的全局 hand，却把一个来源的 hand recall 降至 88.24%，因此未采用；`0.5` 在该来源的已知 recall 为 94.75%，这部分低置信 ROI 在 Train 中会被拒绝，Eval 仍由人工复核纠正。
 
 原图可视化默认生成按 PNG 文件名字典序排列的 30 FPS MP4；RTMPose ROI 可视化只抽样 runtime ROI。可视化可以独立清理。Registry 使用 source/variant active/retired 状态表，删除变体会留下永久 tombstone。
 
 自动标注批处理现从数据集直接子目录的 `images/` 发现来源，不再要求首次运行前已有 `source.json`。新增数据集级 `batch-autolabel-visualizations-clean` 与 `batch-source-variant-delete`；后者保留精确确认和 retired tombstone，并在批处理末尾重建 dataset manifest。未执行 `source-publish` 的来源仍不会进入 manifest。
+
+服务器 Hand ROI 像素域审查覆盖 Pretrain/Eval 的 71,779 张原图 TIFF，全部为单通道 8-bit、`1280×720`；`FullEnhanceVal0801/eos-1.0` 的 8,248 张 ROI 全部为单通道 8-bit、`256×256` PNG。跨 10 个来源抽查 50 个 ROI，无损 PNG 与无损 TIFF 往返后逐像素一致。Python OpenCV 与板端 C++ 双线性采样的对比中，3,276,800 个像素仅 242 个相差 1 灰度级（0.0074%），差异来自插值舍入而非文件格式；现有 ROI、人工复核结果和发布资产均不重建。
 
 负样本和困难样本的 review/published 图片均使用独立复制；困难样本 published 记录包含 `published_relpath`，不依赖源变体存活。当前服务器存在 `background-neg-0801` review 工作区，以及已发布 1,543 条记录/图片的 `background-neg-0801-full`；本轮均未修改。
 
@@ -45,8 +47,8 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 
 ## 验收状态
 
-- `make compile`：27 个 Python 文件语法检查通过；
-- `make test`：41 项测试通过；
+- `make compile`：28 个 Python 文件语法检查通过；
+- `make test`：44 项测试通过；
 - `make help`：通过；
 - 4 个 Bash 批处理脚本均通过 `bash -n`；未注册 Eval 来源发现测试识别 3/3 个仅含 `images/` 的来源；
 - 数据集级可视化清理与永久变体删除均在隔离临时数据仓库通过，永久删除后 dataset manifest 已重建；

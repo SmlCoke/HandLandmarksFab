@@ -346,14 +346,13 @@ class DatasetV3Tests(unittest.TestCase):
         base_points = [
             {"id": index, "x": 64.0, "y": 128.0} for index in range(21)
         ]
-        two_boundary = [dict(point) for point in base_points]
-        two_boundary[0]["x"] = 0.0
-        two_boundary[1]["y"] = 255.0
+        one_boundary = [dict(point) for point in base_points]
+        one_boundary[0]["x"] = 0.0
         base = {
             "hand_presence": {"present": True, "score": 0.9},
             "handedness": {"label": "Left", "score": 0.9},
             "landmarks_crop_norm": points_norm,
-            "landmarks_crop_px": two_boundary,
+            "landmarks_crop_px": one_boundary,
             "mediapipe_num_hands_detected": 1,
             "palm_score": 0.9,
             "width": 256,
@@ -362,10 +361,10 @@ class DatasetV3Tests(unittest.TestCase):
             "proposal_kind": "runtime",
             "source": "rtmpose_m_hand5_onnx",
         }
-        three_boundary = [dict(point) for point in two_boundary]
-        three_boundary[2]["x"] = 0.0
-        passed = dict(base, crop_id="two")
-        rejected = dict(base, crop_id="three", landmarks_crop_px=three_boundary)
+        two_boundary = [dict(point) for point in one_boundary]
+        two_boundary[1]["y"] = 255.0
+        passed = dict(base, crop_id="one")
+        rejected = dict(base, crop_id="two", landmarks_crop_px=two_boundary)
         low_handedness = dict(
             base,
             crop_id="low-handedness",
@@ -388,12 +387,12 @@ class DatasetV3Tests(unittest.TestCase):
             cfg,
         )
         self.assertEqual(
-            ["two", "presence-at-threshold"],
+            ["one", "presence-at-threshold"],
             [row["crop_id"] for row in positives],
         )
         self.assertEqual([], candidates)
         self.assertEqual(
-            ["three", "low-handedness", "low-presence"],
+            ["two", "low-handedness", "low-presence"],
             [row["crop_id"] for row in ignored],
         )
         self.assertEqual("rtmpose_boundary_coordinate_gate", ignored[0]["ignore_reason"])

@@ -62,11 +62,15 @@ split 在来源注册阶段写入所有 manifest，不在发布阶段随机生�
 
 打开 Registry 时，已有 ROI 的 source/variant 会自动回填为 active。删除变体只改变 status 并删除派生文件，既有 ROI Registry 元数据保留。
 
+ROI ID 不包含图片扩展名，但 `crop_path/crop_relpath` 是精确文件引用。Registry 会校验完整相对路径；文件从 `.png` 改为 `.tiff` 时，不能只改磁盘文件而不迁移 Registry 和所有 manifest/label 引用。
+
 ## 4. Palm 与 ROI manifest
 
 Eos 产生 `proposal_kind=runtime|negative_candidate`。ROI manifest 至少保存 dataset/source/split、raw/ROI ID、proposal variant/slot/kind、Palm score、`palm_valid`、crop 路径与尺寸、ROI rect/corners 和 ROI contract version。
 
-Palm bbox、p0、p9 与 ROI 几何是程序输出，CVAT 不得修改。所有 Hand ROI 固定为 `256×256`。
+Palm bbox、p0、p9 与 ROI 几何是程序输出，CVAT 不得修改。所有 Hand ROI 固定为单通道 `uint8 256×256`，以无损 PNG 保存。模型输入契约是图片解码后的灰度像素数组，不是 PNG/TIFF 容器；相同 `uint8` 数组使用无损 PNG 或无损 TIFF 编解码后像素一致。板端从摄像头 `SSNE_Y_8` 内存构造 ROI，不读取 TIFF 文件作为 Hand Landmarker 输入。
+
+原图若是 `uint16`、彩色、不同有效动态范围或经过有损编码，必须重新审查灰度转换与归一化，不能沿用当前 8-bit 单通道数据域结论。
 
 ## 5. Hand landmark draft
 
@@ -143,13 +147,13 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 - Train positive 的 handedness score 低于 `quality.handedness_review_threshold`：`ignore_reason=automatic_positive_failed_quality_gate`。
 - RTMPose Train runtime 的 42 个 crop x/y 值中，精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`：quality error 为 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，`ignore_reason=rtmpose_boundary_coordinate_gate`。
 
-当前 presence 阈值为 `0.5`，边界阈值为 3；1–2 个边界值通过。presence 与边界门控不应用于 Eval、MediaPipe 或 Eos negative candidate。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
+当前 presence 阈值为 `0.5`，边界阈值为 2；0–1 个边界值通过。presence 与边界门控不应用于 Eval、MediaPipe 或 Eos negative candidate。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
 
 双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
 
 ## 8. Eval、CVAT 与发布
 
-Eval draft 不是正式真值，RTMPose Train presence 阈值也不作用于 Eval。CVAT frame 依据 ROI 图片字典序映射到 manifest；导入后产生 `hand_landmarks_reviewed.jsonl`。人工改变 presence 时设置 `human_modified_presence=true`，改变 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
+Eval draft 不是正式真值，RTMPose Train presence 阈值也不作用于 Eval。CVAT frame 依据 ROI 图片完整 basename（包含扩展名）的字典序映射到 manifest；导入后也按完整 basename 精确匹配。因此擅自更换 ROI 后缀会使既有 CVAT XML 无法直接导入，即使稳定 ROI ID 没有变化。导入后产生 `hand_landmarks_reviewed.jsonl`。人工改变 presence 时设置 `human_modified_presence=true`，改变 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
 
 Val/Test 发布输出 `hand_evaluation_labels.jsonl` 和 `ignored.jsonl`，不发布 negative candidate。Eval 限额按整个 split 的 prospective dataset manifest 统计，配置位于：
 

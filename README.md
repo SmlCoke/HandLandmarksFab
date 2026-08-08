@@ -4,6 +4,8 @@ HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。
 
 本仓库只制作 Hand Landmarker 数据。Palm 几何不能人工修改，人工复核对象是程序生成的 Hand ROI、21 个关键点、handedness 以及 `no_hand/ignore_for_training` 状态。
 
+Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素。仓库使用无损 PNG 保存 ROI；PNG/TIFF 是存储容器，不改变相同灰度数组的像素域。板端从 `SSNE_Y_8` 摄像头内存直接构造 ROI，并不把 TIFF 文件送入 Hand Landmarker。
+
 ## 入口文档
 
 - [完整工作流](docs/annotating_system/HLMF_annotating_workflow.md)
@@ -70,8 +72,8 @@ RTMPose Train runtime 行满足以下任一条件时整行进入 `ignored.jsonl`
 
 - `hand_presence.score=P(has_hand)` 缺失、非有限，或低于 `quality.rtmpose_train_hand_presence_threshold`（当前 `0.5`）；
 - HCF handedness 分数低于 `quality.handedness_review_threshold`（当前 `0.7`）；
-- 42 个 crop 坐标值中，精确等于 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`（当前 `3`）。
+- 42 个 crop 坐标值中，精确等于 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`（当前 `2`）。
 
-Presence 阈值来自 7,907 条人工复核 Eval ROI：`0.5` 拒绝全部 15 条 no_hand，同时保留 7,856/7,892 条正样本（99.5438%），并与模型 `no_hand/has_hand` 的 argmax 决策边界一致。等于阈值时 quality gate 通过；1–2 个边界值也通过。这些门控不作用于 Eval、MediaPipe 或 low-score candidate。HCF presence 是教师伪标签，Eval 正式真值仍以 CVAT 人工复核为准。
+Presence 阈值来自 7,907 条人工复核 Eval ROI：`0.5` 拒绝全部 15 条 no_hand，同时保留 7,856/7,892 条正样本（99.5438%），并与模型 `no_hand/has_hand` 的 argmax 决策边界一致。等于阈值时 quality gate 通过；0–1 个边界值通过。这些门控不作用于 Eval、MediaPipe 或 low-score candidate。HCF presence 是教师伪标签，Eval 正式真值仍以 CVAT 人工复核为准。
 
 依赖仍由现有 `requirements.txt` 管理，本次集成没有新增 Python 依赖。

@@ -39,7 +39,7 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
-输出：Palm、ROI、含 HCF presence/handedness 的 draft、`hand_training_labels.jsonl`、`candidate_negatives.jsonl`、`ignored.jsonl` 和 QC；低 presence 的 RTMPose Train runtime 行进入 `ignored.jsonl`。
+输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 的 draft、`hand_training_labels.jsonl`、`candidate_negatives.jsonl`、`ignored.jsonl` 和 QC；低 presence 的 RTMPose Train runtime 行进入 `ignored.jsonl`。
 
 批量处理全部含 `images/` 的 train 来源；无需预先运行 `source-check`：
 
@@ -60,7 +60,7 @@ make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
-输出：Palm、ROI、含 HCF presence/handedness 的 draft 和 QC；Train presence 阈值不作用于 Eval，正式评估标签仍需 CVAT 复核。
+输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 的 draft 和 QC；Train presence 阈值不作用于 Eval，正式评估标签仍需 CVAT 复核。
 
 批量处理全部含 `images/` 的 Eval 来源并导出各来源 CVAT XML；无需预先运行 `source-check`：
 
