@@ -27,14 +27,21 @@ Eval 数据集 `FullEnhanceVal0801` 当前有 10 个来源：6 个 val、4 个 t
 
 Pretrain 数据集 `FullEnhance0801` 当前有 95 个 train 来源：
 
-- `eos-1.0`：95 个来源均完整发布，共 564,243 个 ROI、72,226 条 positive、492,017 条 candidate、0 条 ignored；
+- `eos-1.0`：95 个来源的变体派生产物已全部删除，Registry 保留 95 个 retired tombstone；原始 `images/`、`raw_images.jsonl`、`source.json` 和既有 ROI Registry 元数据均保留；
 - `eos_1.0-gate`：95 个来源均完整发布，共 564,243 个 ROI、65,089 条 positive、492,017 条 candidate、7,137 条 ignored。
 
-Eval 数据集 `FullEnhanceVal0808` 当前有 3 个直接来源包含 `images/`，均尚无 `source.json`，且数据集尚无 `dataset_manifest.json`。这正是本轮批处理来源发现修复覆盖的首次运行状态；本轮未对其执行真实自动标注。
+Eval 数据集 `FullEnhanceVal0808` 当前有 3 个 val 来源，每个来源 600 张原图，均已使用 `eos_1.0-gate_r2 + rtmpose_onnx` 完成自动标注和 Hand ROI CVAT XML 导出：
 
-上述现有发布资产均为本轮实施前状态。本轮没有重跑、删除或改写任何 Train/Eval/Test 发布文件；新批处理命令也只用隔离的临时目录测试。
+- `white-far-dark-random-val-s03-soar`：880 个 ROI/draft；
+- `white-mid-dark-random-val-s03-soar`：727 个 ROI/draft；
+- `white-near-dark-random-val-s03-soar`：441 个 ROI/draft；
+- 合计 1,800 张原图、2,048 个 ROI/draft、3 份 `cvat_autolabel.xml`；RTMPose 与 HCF 均使用 `CPUExecutionProvider`。
 
-Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 2 个 dataset、106 个 capture source、68,479 张 raw image、201 个 active proposal variant、1,136,843 个 ROI；201 个 active 由 106 个 `eos-1.0` 与 95 个 `eos_1.0-gate` 组成。
+该 Eval 数据集尚未导入人工复核 XML，也未执行 `source-publish`，因此当前没有 `dataset_manifest.json`，不会进入下游 HLML 的正式评估数据。
+
+本轮永久删除只作用于 `FullEnhance0801/eos-1.0`。`FullEnhance0801/eos_1.0-gate` 的 95 个 Palm/ROI/labels/发布报告以及所有既有 EValSource 变体均未被该删除操作修改。
+
+Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 4 个 dataset、116 个 capture source、72,379 张 raw image、116 个 active proposal variant、95 个 retired proposal variant、1,142,002 个 ROI。active variant 由 11 个 `eos-1.0`、95 个 `eos_1.0-gate` 和 10 个 `eos_1.0-gate_r2` 组成。
 
 ## 验收状态
 
@@ -45,6 +52,8 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 - 数据集级可视化清理与永久变体删除均在隔离临时数据仓库通过，永久删除后 dataset manifest 已重建；
 - 新 HCF ONNX 接口验证通过：动态 batch、`input`、`handedness`、`hand_presence`、float32 与双 `[N,2]` 输出均符合契约；
 - 真实 RTMPose+双头 HCF runtime ROI 冒烟通过：21 个有限坐标、有效 handedness 与 `P(has_hand)`；
-- 实施前后 105 个 `eos-1.0` 已发布来源变体的必要文件完整性以及 Eval 计数保持不变；
+- `FullEnhance0801/eos-1.0` 批量删除 95/95 成功，7 类目标路径均清零，dataset manifest 已重建且 Registry 为 `retired:95`；
+- `FullEnhance0801/eos_1.0-gate` 的 95 个发布来源完整保留；
+- `FullEnhanceVal0808/eos_1.0-gate_r2` 自动标注与 CVAT 导出 3/3 成功，日志无 `ERROR` 或 `FAILED`；
 - 阈值扫描程序、配置、复制 ROI 和结果全部位于仓库外；
 - `requirements.txt` 未改变，无需重建 `anfab` 环境。
