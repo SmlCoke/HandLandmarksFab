@@ -14,6 +14,8 @@ Presence 阈值分析放在仓库外的 `/root/hcf_presence_threshold_0807/`。�
 
 原图可视化默认生成按 PNG 文件名字典序排列的 30 FPS MP4；RTMPose ROI 可视化只抽样 runtime ROI。可视化可以独立清理。Registry 使用 source/variant active/retired 状态表，删除变体会留下永久 tombstone。
 
+自动标注批处理现从数据集直接子目录的 `images/` 发现来源，不再要求首次运行前已有 `source.json`。新增数据集级 `batch-autolabel-visualizations-clean` 与 `batch-source-variant-delete`；后者保留精确确认和 retired tombstone，并在批处理末尾重建 dataset manifest。未执行 `source-publish` 的来源仍不会进入 manifest。
+
 负样本和困难样本的 review/published 图片均使用独立复制；困难样本 published 记录包含 `published_relpath`，不依赖源变体存活。当前服务器存在 `background-neg-0801` review 工作区，以及已发布 1,543 条记录/图片的 `background-neg-0801-full`；本轮均未修改。
 
 ## 服务器数据仓库
@@ -28,15 +30,19 @@ Pretrain 数据集 `FullEnhance0801` 当前有 95 个 train 来源：
 - `eos-1.0`：95 个来源均完整发布，共 564,243 个 ROI、72,226 条 positive、492,017 条 candidate、0 条 ignored；
 - `eos_1.0-gate`：95 个来源均完整发布，共 564,243 个 ROI、65,089 条 positive、492,017 条 candidate、7,137 条 ignored。
 
-上述现有发布资产均为本轮实施前状态。本轮没有重跑、删除或改写任何 Train/Eval/Test 发布文件；新双头 HCF 与 presence gate 只影响今后执行的 RTMPose 标注。
+Eval 数据集 `FullEnhanceVal0808` 当前有 3 个直接来源包含 `images/`，均尚无 `source.json`，且数据集尚无 `dataset_manifest.json`。这正是本轮批处理来源发现修复覆盖的首次运行状态；本轮未对其执行真实自动标注。
+
+上述现有发布资产均为本轮实施前状态。本轮没有重跑、删除或改写任何 Train/Eval/Test 发布文件；新批处理命令也只用隔离的临时目录测试。
 
 Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 2 个 dataset、106 个 capture source、68,479 张 raw image、201 个 active proposal variant、1,136,843 个 ROI；201 个 active 由 106 个 `eos-1.0` 与 95 个 `eos_1.0-gate` 组成。
 
 ## 验收状态
 
 - `make compile`：27 个 Python 文件语法检查通过；
-- `make test`：40 项测试通过；
+- `make test`：41 项测试通过；
 - `make help`：通过；
+- 4 个 Bash 批处理脚本均通过 `bash -n`；未注册 Eval 来源发现测试识别 3/3 个仅含 `images/` 的来源；
+- 数据集级可视化清理与永久变体删除均在隔离临时数据仓库通过，永久删除后 dataset manifest 已重建；
 - 新 HCF ONNX 接口验证通过：动态 batch、`input`、`handedness`、`hand_presence`、float32 与双 `[N,2]` 输出均符合契约；
 - 真实 RTMPose+双头 HCF runtime ROI 冒烟通过：21 个有限坐标、有效 handedness 与 `P(has_hand)`；
 - 实施前后 105 个 `eos-1.0` 已发布来源变体的必要文件完整性以及 Eval 计数保持不变；

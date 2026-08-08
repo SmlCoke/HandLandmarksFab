@@ -178,6 +178,8 @@ make source-publish ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.0
 
 Eval 限额在 `configs/datasets.yaml` 的 `evaluation_limits.max_raw_images_per_split` 与 `max_rois_per_split` 调整。限额按整个 val/test split 的 prospective dataset manifest 统计，不是单来源阈值。
 
+Dataset manifest 只聚合至少存在一个 `qc/<variant>/source_publish_report.json` 的来源。某个 Eval 来源即使已执行 `eval-autolabel` 或导出 CVAT，只要尚未导入人工复核结果并执行 `source-publish`，就不会进入 `dataset_manifest.json`；下游 HLML 按 manifest 中的发布标签路径读取数据，因此会忽略该来源。
+
 ## 8. Provenance
 
 - MediaPipe：`label_origin=mediapipe`、`annotation_style=mediapipe_v1`。
@@ -218,6 +220,16 @@ make autolabel-visualizations-clean ... PROPOSAL_VARIANT=eos-2.0
 
 该命令删除 ROI/原图审核图、MP4 和对应 visualization QC 报告；不删除 ROI/draft，不改变 Registry，不写 tombstone。
 
+数据集级批量清理：
+
+```bash
+make batch-autolabel-visualizations-clean \
+  HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
+  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.0
+```
+
+脚本从数据集的直接子目录 `images/` 发现全部来源，对每个来源执行同一精确变体的可视化清理，并在全部来源处理后汇总成功与失败数量。输入是 scope、dataset ID 和 proposal variant；输出是删除汇总，不改变 dataset manifest 或 Registry。
+
 ## 10. 变体删除与 tombstone
 
 ```bash
@@ -231,6 +243,17 @@ make source-variant-delete \
 `CONFIRM_DELETE` 必须与 `PROPOSAL_VARIANT` 完全相同。处理顺序是先把 `(capture_source_id, proposal_variant)` 标为 retired，再删除精确变体的 `01_palm`、`02_roi_crops`、`03_reviewed`、`05_labels`、`qc`、原图可视化目录与 MP4，最后重建 dataset manifest。
 
 原始 `images/`、`raw_images.jsonl`、`source.json` 和 Registry 中的 ROI 元数据永久保留。同名变体不能再次标注或发布。若删除中断，使用同一确认命令继续执行，剩余清理是幂等的。
+
+数据集级批量删除：
+
+```bash
+make batch-source-variant-delete \
+  HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
+  DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
+  PROPOSAL_VARIANT=eos-2.0 CONFIRM_DELETE=eos-2.0
+```
+
+脚本从 `source.json` 发现全部已注册来源，逐来源执行永久退役与精确产物删除；`CONFIRM_DELETE` 不完全匹配时在任何删除前退出。所有来源处理结束后，无论是否有单来源失败，都会再执行一次 `dataset-manifest-rebuild`，使 manifest 与已完成的删除保持一致。批处理继续保留每个来源的原图、raw/source 元数据及 Registry ROI 元数据。
 
 ## 11. 负样本与困难样本
 
@@ -254,7 +277,11 @@ make batch-eval-autolabel DATASET_ID=FullEnhanceVal0801 \
   PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
-脚本位于 `scripts/`，从 `<dataset>/<source>/source.json` 发现来源。`HAND_DATASET_ROOT`、`DATASET_ID`、`PROPOSAL_VARIANT`、`HAND_LANDMARK_BACKEND`、`PYTHON_BIN`、`REPO_DIR`、`LOG_DIR` 均通过环境变量传入。每个来源单独写日志；任一来源失败时脚本完成其余来源后返回非零。Train 脚本不会自动关机。
+自动标注脚本从 `<dataset>/<source>/images/` 发现来源，不要求预先存在 `source.json`；每个单来源流水线首先执行 source check，因此新来源会在批处理中自动注册。只有数据集的直接子目录被视为 capture source，`images/` 内部不递归发现来源。
+
+`HAND_DATASET_ROOT`、`DATASET_ID`、`PROPOSAL_VARIANT`、`HAND_LANDMARK_BACKEND`、`PYTHON_BIN`、`REPO_DIR`、`LOG_DIR` 均通过环境变量传入。每个自动标注来源单独写日志；任一来源失败时脚本完成其余来源后返回非零。Train 脚本不会自动关机。
+
+可视化清理批处理同样从 `images/` 发现来源；永久变体删除批处理只处理已有 `source.json` 的注册来源，并额外接收 `DATASET_SCOPE` 与 `CONFIRM_DELETE`。所有批处理仅作用于指定 dataset ID 与 proposal variant。
 
 ## 13. Registry 与验收
 

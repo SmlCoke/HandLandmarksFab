@@ -29,7 +29,8 @@ AUTOLABEL_ARGS = $(if $(strip $(ROI_VISUALIZATION)),--roi-visualization "$(ROI_V
 
 .PHONY: help paths source-check train-autolabel eval-autolabel autolabel-visualize-roi \
 	autolabel-visualize-original autolabel-visualizations-clean \
-	source-variant-delete batch-eval-autolabel batch-train-autolabel hand-cvat-export \
+	batch-autolabel-visualizations-clean source-variant-delete batch-source-variant-delete \
+	dataset-manifest-rebuild batch-eval-autolabel batch-train-autolabel hand-cvat-export \
 	hand-cvat-import source-publish negative-review negative-publish hard-review \
 	hard-publish registry-check compile test
 
@@ -42,7 +43,10 @@ help:
 	@echo   make autolabel-visualize-roi ...  Render existing draft on Hand ROI images
 	@echo   make autolabel-visualize-original ... [ORIGINAL_VIDEO=true/false]
 	@echo   make autolabel-visualizations-clean ...  Remove rebuildable visualization outputs
+	@echo   make batch-autolabel-visualizations-clean DATASET_SCOPE=... DATASET_ID=... PROPOSAL_VARIANT=...
 	@echo   make source-variant-delete ... CONFIRM_DELETE=exact-variant
+	@echo   make batch-source-variant-delete DATASET_SCOPE=... DATASET_ID=... PROPOSAL_VARIANT=... CONFIRM_DELETE=exact-variant
+	@echo   make dataset-manifest-rebuild DATASET_SCOPE=... DATASET_ID=...
 	@echo   make batch-eval-autolabel DATASET_ID=... PROPOSAL_VARIANT=...
 	@echo   make batch-train-autolabel DATASET_ID=... PROPOSAL_VARIANT=...
 	@echo   make hand-cvat-export ...         Export Hand ROI CVAT XML only
@@ -80,9 +84,22 @@ autolabel-visualize-original:
 autolabel-visualizations-clean:
 	$(CLI) clean-autolabel-visualizations $(SOURCE_ARGS)
 
+batch-autolabel-visualizations-clean:
+	$(if $(strip $(DATASET_ID)),,$(error DATASET_ID is required))
+	HAND_DATASET_ROOT="$(HAND_DATASET_ROOT)" DATASET_SCOPE="$(DATASET_SCOPE)" DATASET_ID="$(DATASET_ID)" PROPOSAL_VARIANT="$(PROPOSAL_VARIANT)" PYTHON_BIN="$(PYTHON)" REPO_DIR="$(CURDIR)" bash scripts/batch_autolabel_visualizations_clean.sh
+
 source-variant-delete:
 	$(if $(strip $(CONFIRM_DELETE)),,$(error CONFIRM_DELETE must exactly match PROPOSAL_VARIANT))
 	$(CLI) delete-source-variant $(SOURCE_ARGS) --confirm-delete "$(CONFIRM_DELETE)"
+
+batch-source-variant-delete:
+	$(if $(strip $(DATASET_ID)),,$(error DATASET_ID is required))
+	$(if $(strip $(CONFIRM_DELETE)),,$(error CONFIRM_DELETE must exactly match PROPOSAL_VARIANT))
+	HAND_DATASET_ROOT="$(HAND_DATASET_ROOT)" DATASET_SCOPE="$(DATASET_SCOPE)" DATASET_ID="$(DATASET_ID)" PROPOSAL_VARIANT="$(PROPOSAL_VARIANT)" CONFIRM_DELETE="$(CONFIRM_DELETE)" PYTHON_BIN="$(PYTHON)" REPO_DIR="$(CURDIR)" bash scripts/batch_source_variant_delete.sh
+
+dataset-manifest-rebuild:
+	$(if $(strip $(DATASET_ID)),,$(error DATASET_ID is required))
+	$(CLI) rebuild-dataset-manifest --dataset-root "$(HAND_DATASET_ROOT)" --scope "$(DATASET_SCOPE)" --dataset-id "$(DATASET_ID)"
 
 batch-eval-autolabel:
 	$(if $(strip $(DATASET_ID)),,$(error DATASET_ID is required))

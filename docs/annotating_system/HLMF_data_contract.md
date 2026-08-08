@@ -47,6 +47,8 @@ split 在来源注册阶段写入所有 manifest，不在发布阶段随机生�
     <proposal_variant>.mp4
 ```
 
+来源初始可以只有 `images/`；`source-check` 或自动标注流水线的第一步生成 `source.json` 与 `raw_images.jsonl`。自动标注批处理以数据集直接子目录中的 `images/` 为来源发现条件，不要求预注册。
+
 原始 `images/`、`source.json` 和 `raw_images.jsonl` 不属于 proposal variant。其余派生产物按精确 variant 隔离。
 
 ## 3. ID 与 Registry
@@ -167,6 +169,8 @@ ROI 可视化目录是 `02_roi_crops/<variant>/hand_landmarks_roi_visualization/
 
 `clean-autolabel-visualizations` 只删除上述 ROI/原图 PNG、MP4 和对应 visualization QC 报告，不修改 draft、发布标签、dataset manifest 或 Registry。
 
+`batch-autolabel-visualizations-clean` 从指定 scope/dataset 的直接子目录 `images/` 发现来源，并对每个来源应用相同的精确 variant 清理契约；批处理不扩大单来源删除范围。
+
 ## 10. 变体删除契约
 
 `delete-source-variant` 要求确认字符串与 variant 完全一致。目标仅限精确 source/variant：
@@ -192,6 +196,8 @@ Registry 中 raw/ROI 元数据和 retired tombstone
 
 命令成功或中断后均可用同一确认命令继续幂等清理；dataset manifest 会重建并排除已删除发布变体。retired 名称不能重新注册 ROI、标注、复核或发布。
 
+`batch-source-variant-delete` 只遍历指定 scope/dataset 下存在 `source.json` 的注册来源，并对每个来源使用同一确认值执行上述契约；批处理末尾再次重建 dataset manifest。单来源失败会被汇总并使批处理返回非零，但不回滚已经完成的 retired tombstone 或文件删除。
+
 ## 11. 负样本与困难样本
 
 负样本目录：
@@ -214,6 +220,8 @@ review 与 published 图片都是普通复制产生的独立文件，不是硬�
 
 ## 12. Dataset manifest 与完整性
 
-dataset manifest 聚合 source、split 和 active published variant，保存 raw/ROI/label 数量和发布标签相对路径。删除变体后立即重建。
+dataset manifest 只聚合含至少一个 `qc/<proposal_variant>/source_publish_report.json` 的 source 及其 published variant，保存 split、raw/ROI/label 数量和发布标签相对路径。仅有 `source.json`、自动标注 draft 或 CVAT 导出文件的来源不进入 manifest；未完成 CVAT 导入和 `source-publish` 的 Eval 来源因此不会被按 manifest 消费数据的下游 HLML 读取。
+
+删除变体后立即重建 dataset manifest；数据集级批量删除在全部单来源操作后额外重建一次。
 
 系统用 dataset/source/variant 身份和 SQLite 唯一约束隔离数据。日常流水线不在每一步计算 SHA-256；报告中的 `content_sha256` 保持 `not_computed`。

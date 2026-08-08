@@ -41,7 +41,7 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 输出：Palm、ROI、含 HCF presence/handedness 的 draft、`hand_training_labels.jsonl`、`candidate_negatives.jsonl`、`ignored.jsonl` 和 QC；低 presence 的 RTMPose Train runtime 行进入 `ignored.jsonl`。
 
-批量处理全部已注册 train 来源：
+批量处理全部含 `images/` 的 train 来源；无需预先运行 `source-check`：
 
 ```bash
 make batch-train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
@@ -62,7 +62,7 @@ make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 输出：Palm、ROI、含 HCF presence/handedness 的 draft 和 QC；Train presence 阈值不作用于 Eval，正式评估标签仍需 CVAT 复核。
 
-批量处理并导出各来源 CVAT XML：
+批量处理全部含 `images/` 的 Eval 来源并导出各来源 CVAT XML；无需预先运行 `source-check`：
 
 ```bash
 make batch-eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
@@ -97,6 +97,15 @@ make autolabel-visualizations-clean HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   PROPOSAL_VARIANT=eos-2.0
 ```
 
+批量清理同一数据集全部来源的该变体可视化：
+
+```bash
+make batch-autolabel-visualizations-clean HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.0
+```
+
+输出：删除 ROI/原图可视化 PNG、MP4 和 visualization QC；标签、manifest 与 Registry 不变。
+
 ## 6. Eval CVAT 与发布
 
 输入：Eval ROI/draft；导入阶段还需 `03_reviewed/<variant>/cvat_reviewed.xml`。
@@ -118,7 +127,7 @@ make source-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   PROPOSAL_VARIANT=eos-2.0
 ```
 
-输出：reviewed JSONL、evaluation labels、ignored 和 dataset manifest。
+输出：reviewed JSONL、evaluation labels、ignored 和 dataset manifest。未完成 CVAT 导入与 `source-publish` 的来源不进入 manifest，下游 HLML 会忽略。
 
 ## 7. 负样本与困难样本
 
@@ -149,6 +158,16 @@ make source-variant-delete HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 ```
 
 输出：派生产物被删除、dataset manifest 被重建、Registry 写入 retired tombstone；原图和 raw/source 元数据保留。同名变体不能再次使用。
+
+批量永久删除数据集全部已注册来源的同名变体：
+
+```bash
+make batch-source-variant-delete HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
+  PROPOSAL_VARIANT=eos-2.0 CONFIRM_DELETE=eos-2.0
+```
+
+输出：逐来源写入 retired tombstone、删除精确变体产物，最后重建 dataset manifest。确认值必须与变体名完全一致。
 
 ## 9. 最终检查
 

@@ -27,6 +27,7 @@ from hand_autolabel.dataset_v3 import (
     prepare_selection_review,
     proposal_paths,
     publish_negative_review,
+    require_safe_id,
     publish_selection_review,
     source_root,
     stable_id,
@@ -110,6 +111,12 @@ def _parser() -> argparse.ArgumentParser:
                 required=True,
                 help="Must exactly match --proposal-variant.",
             )
+    rebuild_manifest = sub.add_parser("rebuild-dataset-manifest")
+    rebuild_manifest.add_argument("--dataset-root", required=True)
+    rebuild_manifest.add_argument(
+        "--scope", choices=("pretrain", "eval"), required=True
+    )
+    rebuild_manifest.add_argument("--dataset-id", required=True)
     prepare_negative = sub.add_parser("prepare-negative-review")
     prepare_negative.add_argument("--dataset-root", required=True)
     prepare_negative.add_argument("--negative-dataset-id", required=True)
@@ -691,6 +698,11 @@ def _dataset_manifest(
     pending_report: Mapping[str, Any] | None = None,
     write: bool = True,
 ) -> Dict[str, Any]:
+    dataset_root = Path(dataset_root).resolve()
+    scope = str(scope).strip().lower()
+    if scope not in {"pretrain", "eval"}:
+        raise DatasetContractError("dataset scope must be pretrain or eval")
+    dataset_id = require_safe_id(dataset_id, "dataset_id")
     bucket = "PretrainSource" if scope == "pretrain" else "EValSource"
     root = dataset_root / bucket / dataset_id
     sources = []
@@ -918,6 +930,10 @@ def main() -> None:
             result = _run_clean_visualizations(args)
         elif args.command == "delete-source-variant":
             result = _run_delete_source_variant(args)
+        elif args.command == "rebuild-dataset-manifest":
+            result = _dataset_manifest(
+                Path(args.dataset_root).resolve(), args.scope, args.dataset_id
+            )
         elif args.command == "prepare-negative-review":
             rows = [row for path in args.candidate_labels for row in read_jsonl(Path(path))]
             result = prepare_negative_review(Path(args.dataset_root), args.negative_dataset_id, rows)

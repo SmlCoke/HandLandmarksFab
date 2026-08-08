@@ -19,11 +19,14 @@ if [[ ! -f "$REPO_DIR/Makefile" ]]; then
     echo "ERROR: Repository Makefile does not exist: $REPO_DIR/Makefile" >&2
     exit 2
 fi
-mapfile -d '' SOURCE_FILES < <(
-    find "$BASE_DIR" -mindepth 2 -maxdepth 2 -type f -name source.json -print0 | sort -z
-)
-if (( ${#SOURCE_FILES[@]} == 0 )); then
-    echo "ERROR: No registered Eval capture sources found under $BASE_DIR" >&2
+SOURCE_DIRS=()
+while IFS= read -r -d '' source_dir; do
+    if [[ -d "$source_dir/images" ]]; then
+        SOURCE_DIRS+=("$source_dir")
+    fi
+done < <(find "$BASE_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+if (( ${#SOURCE_DIRS[@]} == 0 )); then
+    echo "ERROR: No Eval capture sources with images/ found under $BASE_DIR" >&2
     exit 2
 fi
 mkdir -p "$LOG_DIR"
@@ -32,16 +35,15 @@ TOTAL=0
 SUCCESS=0
 FAILED=0
 printf 'Eval batch: dataset=%s variant=%s backend=%s sources=%d
-'     "$DATASET_ID" "$PROPOSAL_VARIANT" "$HAND_LANDMARK_BACKEND" "${#SOURCE_FILES[@]}"
+'     "$DATASET_ID" "$PROPOSAL_VARIANT" "$HAND_LANDMARK_BACKEND" "${#SOURCE_DIRS[@]}"
 
-for source_file in "${SOURCE_FILES[@]}"; do
-    source_dir="$(dirname "$source_file")"
+for source_dir in "${SOURCE_DIRS[@]}"; do
     CAPTURE_SOURCE_ID="$(basename "$source_dir")"
     TOTAL=$((TOTAL + 1))
     LOG_FILE="$LOG_DIR/${CAPTURE_SOURCE_ID}.log"
     : > "$LOG_FILE"
     printf '[%d/%d] %s
-' "$TOTAL" "${#SOURCE_FILES[@]}" "$CAPTURE_SOURCE_ID"
+' "$TOTAL" "${#SOURCE_DIRS[@]}" "$CAPTURE_SOURCE_ID"
 
     if ! make -C "$REPO_DIR" eval-autolabel         PYTHON="$PYTHON_BIN"         HAND_DATASET_ROOT="$HAND_DATASET_ROOT"         DATASET_SCOPE=eval         DATASET_ID="$DATASET_ID"         CAPTURE_SOURCE_ID="$CAPTURE_SOURCE_ID"         PROPOSAL_VARIANT="$PROPOSAL_VARIANT"         HAND_LANDMARK_BACKEND="$HAND_LANDMARK_BACKEND"         >> "$LOG_FILE" 2>&1; then
         echo "  eval-autolabel FAILED: $LOG_FILE"

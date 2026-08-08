@@ -788,6 +788,44 @@ class DatasetV3Tests(unittest.TestCase):
         cfg["evaluation_limits"]["max_raw_images_per_split"] = 2600
         _validate_evaluation_limits(prospective, cfg)
 
+    def test_dataset_manifest_excludes_unpublished_capture_source(self) -> None:
+        source = source_root(self.root, "eval", "eval-r1", CAPTURE_VAL)
+        source.mkdir(parents=True)
+        write_json(
+            source / "source.json",
+            {
+                "schema_version": "hlmf_dataset_v1",
+                "scope": "eval",
+                "dataset_id": "eval-r1",
+                "capture_source_id": CAPTURE_VAL,
+                "split": "val",
+                "raw_image_count": 1,
+            },
+        )
+
+        unpublished = _dataset_manifest(self.root, "eval", "eval-r1")
+        self.assertEqual([], unpublished["capture_sources"])
+
+        report_dir = source / "qc" / "p01"
+        report_dir.mkdir(parents=True)
+        write_json(
+            report_dir / "source_publish_report.json",
+            {
+                "capture_source_id": CAPTURE_VAL,
+                "proposal_variant": "p01",
+                "rois": 1,
+            },
+        )
+        published = _dataset_manifest(self.root, "eval", "eval-r1")
+        self.assertEqual(
+            [CAPTURE_VAL],
+            [row["capture_source_id"] for row in published["capture_sources"]],
+        )
+
+        with self.assertRaisesRegex(DatasetContractError, "dataset_id must use"):
+            _dataset_manifest(self.root, "eval", "../outside")
+        self.assertFalse((self.root / "outside" / "dataset_manifest.json").exists())
+
     def test_standalone_roi_visualization_reuses_existing_draft(self) -> None:
         source = source_root(self.root, "pretrain", "national-r1", CAPTURE_TRAIN)
         paths = proposal_paths(source, "p01")
@@ -982,7 +1020,22 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertIn("source-variant-delete:", makefile)
         self.assertIn("batch-eval-autolabel:", makefile)
         self.assertIn("batch-train-autolabel:", makefile)
+        self.assertIn("batch-autolabel-visualizations-clean:", makefile)
+        self.assertIn("batch-source-variant-delete:", makefile)
+        self.assertIn("dataset-manifest-rebuild:", makefile)
         self.assertEqual({"hlmf.py"}, {path.name for path in (root / "scripts").glob("*.py")})
+        self.assertEqual(
+            {
+                "batch_autolabel_visualizations_clean.sh",
+                "batch_eval_autolabel.sh",
+                "batch_source_variant_delete.sh",
+                "batch_train_autolabel.sh",
+            },
+            {path.name for path in (root / "scripts").glob("*.sh")},
+        )
+        batch_eval = (root / "scripts" / "batch_eval_autolabel.sh").read_text(encoding="utf-8")
+        self.assertIn('[[ -d "$source_dir/images" ]]', batch_eval)
+        self.assertNotIn("-name source.json", batch_eval)
         self.assertEqual(
             {"autolabel.yaml", "review.yaml", "datasets.yaml", "cvat_label.json"},
             {path.name for path in (root / "configs").iterdir() if path.is_file()},
