@@ -10,6 +10,10 @@ RTMPose runtime ROI 已接入新的 MobileNetV3-Small 双头 HCF。模型路径�
 
 当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 的 `P(has_hand)` 阈值为 `0.5`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝；连接对长度门控默认开启，并按 `near/mid/far` 使用独立阈值。连接长度严格超过阈值时以 `rtmpose_connection_length_gate` 进入 `ignored.jsonl`，等于阈值及长度 0 通过。关闭该开关不影响其余三条门控。Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界/连接长度门控。
 
+RTMPose Train 几何补救现已默认开启：RTMPose 点触发边界或已开启的连接长度门控时，独立 `hlmf-mp-tflite` 环境批量运行 `hand_landmark_full.tflite`；补救点通过两项几何复检才替换原点。TFLite 的 presence/handedness 被丢弃，HCF 仍是唯一置信度来源。补救失败保留原 RTMPose 点。该能力有独立开关，不改变四条门控及拒绝优先级。
+
+服务器已部署 Python 3.11 `venv` 与 `tflite-runtime 2.14.0`。真实只读 ROI 冒烟输出 21 个有限坐标；端到端补救冒烟中，伪造 RTMPose 行同时触发边界和两条连接长度错误，TFLite 复检错误清零，HCF presence/handedness 保持不变，最终以 1 条 positive、0 条 ignored 完成分流。
+
 Presence 阈值分析放在仓库外的 `/root/hcf_presence_threshold_0807/`。分析使用复制出的 `FullEnhanceVal0801` 人工复核 ROI，没有写入现有数据集。有效样本共 7,907 条：7,892 条 hand、15 条 no_hand。正样本 `P(has_hand)` 均值为 `0.993917`，no_hand 最大值为 `0.0192493`。正式阈值 `0.5` 与模型 argmax 决策边界一致，拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。全局 recall 约束产生的候选阈值 `0.843369` 虽仍保留 99.0117% 的全局 hand，却把一个来源的 hand recall 降至 88.24%，因此未采用；`0.5` 在该来源的已知 recall 为 94.75%，这部分低置信 ROI 在 Train 中会被拒绝，Eval 仍由人工复核纠正。
 
 连接长度统计使用 `FullEnhanceVal0801:eos-1.0` 与 `FullEnhanceVal0808:eos_1.0-gate_r2` 的 13 个已发布来源，共 9,868 条有效 gold hand。阈值为各距离/连接的 `ceil(P99.95 × 1.05)`；gold 回放保留 9,832/9,868（99.635%），RTMPose 草标命中 366 条，其中 352 条后来确有人工修点。可复现工具位于 `tools/analyze_rtmpose_connection_lengths.py`，简洁统计资产位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
@@ -49,15 +53,16 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 
 ## 验收状态
 
-- `make compile`：30 个 Python 文件语法检查通过；
-- `make test`：46 项测试通过；
+- `make compile`：33 个 Python 文件语法检查通过；
+- `make test`：54 项测试通过；
 - `make help`：通过；
 - 4 个 Bash 批处理脚本均通过 `bash -n`；未注册 Eval 来源发现测试识别 3/3 个仅含 `images/` 的来源；
 - 数据集级可视化清理与永久变体删除均在隔离临时数据仓库通过，永久删除后 dataset manifest 已重建；
 - 新 HCF ONNX 接口验证通过：动态 batch、`input`、`handedness`、`hand_presence`、float32 与双 `[N,2]` 输出均符合契约；
 - 真实 RTMPose+双头 HCF runtime ROI 冒烟通过：21 个有限坐标、有效 handedness 与 `P(has_hand)`；
+- 真实 MediaPipe TFLite worker 与 RTMPose 几何补救冒烟通过：21 个有限坐标、补救复检通过、HCF 字段保持且发布为 positive；
 - `FullEnhance0801/eos-1.0` 批量删除 95/95 成功，7 类目标路径均清零，dataset manifest 已重建且 Registry 为 `retired:95`；
 - `FullEnhance0801/eos_1.0-gate` 的 95 个发布来源完整保留；
 - `FullEnhanceVal0808/eos_1.0-gate_r2` 的 CVAT 导入、发布和 dataset manifest 均已完成；
 - 连接长度统计工具对正式 Eval 只读运行，报告与 YAML 的 60 个阈值一致；
-- `requirements.txt` 未改变，无需重建 `anfab` 环境。
+- `requirements.txt` 未改变，无需重建 `anfab`；TFLite 使用独立的 `requirements-mediapipe-tflite.txt` 和 Python 3.11 环境。

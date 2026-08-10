@@ -844,6 +844,12 @@ def apply_label_provenance(
         source = str(source_row.get("source") or "")
         if source == "rtmpose_m_hand5_onnx":
             return "rtmpose", "rtmpose_m_hand5_v1", "rtmpose-m_hand5_256x256_onnx"
+        if source == "mediapipe_hand_landmarker_full_tflite_rtmpose_rescue":
+            return (
+                "mediapipe",
+                "mediapipe_tflite_rescue_v1",
+                "mediapipe-hand-landmark-full-tflite",
+            )
         if source == "eos_negative_candidate_unassessed":
             return "unresolved", "unlabeled_v1", None
         return "mediapipe", "mediapipe_v1", "mediapipe_hand_landmarker_task"

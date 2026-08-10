@@ -97,6 +97,7 @@ human_reviewed
 human_modified_landmark_ids
 human_modified_handedness
 human_modified_presence
+rtmpose_geometry_rescue (optional)
 ```
 
 ### MediaPipe
@@ -118,6 +119,31 @@ human_modified_presence
 
 HCF runtime 输入为 `[N,1,256,256]` float32；灰度除以 255 后按 `mean=0.485/std=0.229` 归一化。模型必须暴露动态 batch 的 `input`，以及 `handedness`、`hand_presence` 两个 `[N,2]` float 输出。该 HCF 只用于 RTMPose runtime ROI，Train 和 Eval 都执行；输出是教师伪标签，不等价于人工真值。Eval 经 CVAT 导入后，人工 presence 的 `score` 可为 null，教师身份由 provenance 字段保留。
 
+### RTMPose 的 MediaPipe TFLite 几何补救
+
+该补救只处理 RTMPose Train runtime 中未通过边界或已开启连接长度门控的行。成功时：
+
+- `source=mediapipe_hand_landmarker_full_tflite_rtmpose_rescue`；
+- `label_origin=mediapipe`、`annotation_style=mediapipe_tflite_rescue_v1`；
+- `teacher_model_id=mediapipe-hand-landmark-full-tflite`；
+- presence、handedness 及两个 classifier teacher ID 仍为原 HCF 输出。
+
+尝试过补救的行包含：
+
+```json
+{
+  "rtmpose_geometry_rescue": {
+    "attempted": true,
+    "accepted": true,
+    "trigger_errors": [],
+    "result_errors": [],
+    "model_id": "mediapipe-hand-landmark-full-tflite"
+  }
+}
+```
+
+补救失败时 `accepted=false`，保留原 RTMPose 坐标和 provenance。TFLite 的 handflag、handedness、world landmarks 不进入标签。
+
 ### 未推理 candidate
 
 low-score candidate 的关键点为空，handedness 为 `{label: unknown, score: null}`，`hand_presence={present:false}`，`handedness_teacher_model_id=null`、`hand_presence_teacher_model_id=null`，provenance 为 `unresolved/unlabeled_v1`。它不运行 RTMPose/HCF，不得伪装成任何教师标签。
@@ -134,6 +160,7 @@ hand_classifier_model_id
 hand_classifier_runtime_rois_labeled
 runtime_rois_labeled
 negative_candidates_skipped
+mediapipe_tflite_rescue.enabled/model_id/attempted/accepted/rejected
 ```
 
 MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 的实际 ONNX provider、HCF 模型 ID 和 HCF 推理数。
@@ -147,8 +174,9 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 - Train positive 的 handedness score 低于 `quality.handedness_review_threshold`：`ignore_reason=automatic_positive_failed_quality_gate`。
 - RTMPose Train runtime 的 42 个 crop x/y 值中，精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`：quality error 为 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，`ignore_reason=rtmpose_boundary_coordinate_gate`。
 - `quality.rtmpose_train_connection_length_gate_enabled` 为布尔开关，缺省及正式配置均为 `true`。开启时按 capture source 距离读取 `quality.rtmpose_train_connection_length_thresholds_px.<distance>`；任一连接长度严格超过阈值时，quality error 为 `rtmpose_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，`ignore_reason=rtmpose_connection_length_gate`。21 点无效时 error 为 `rtmpose_connection_length_landmarks_invalid`。等于阈值和长度为 0 均通过；关闭时不解析距离或阈值。
+- `quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 缺省及正式配置均为 `true`。开启时，边界或已开启的连接长度门控失败会触发 TFLite 重预测；两项几何复检通过才替换关键点。关闭时不读取 `mediapipe_tflite` 配置、模型或独立环境。它不是新的门控，不改变既有 quality error 与 `ignore_reason`。
 
-当前 presence 阈值为 `0.5`，边界阈值为 2；0–1 个边界值通过。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 或 Eos negative candidate。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
+当前 presence 阈值为 `0.5`，边界阈值为 2；0–1 个边界值通过。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 主链路或 Eos negative candidate；成功补救行仍属于 RTMPose Train runtime 链路，继续应用三条 RTMPose 专用门控。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
 
 双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
 

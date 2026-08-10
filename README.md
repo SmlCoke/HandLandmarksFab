@@ -20,9 +20,10 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 - 单次切换：`HAND_LANDMARK_BACKEND=rtmpose_onnx`。
 - RTMPose：原始 SimCC logits 直接 argmax，除以固定 `2.0`；runtime ROI 总是输出 21 点。
 - HCF：`models/handedness-handpresence-0807/model.onnx`，输入灰度 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits；仅运行于 RTMPose runtime ROI。旧 handedness-only 资产保存在 `models/handedness-0806/`。
+- MediaPipe TFLite 补救：仅当 RTMPose Train runtime 未通过边界或已开启的连接长度门控时，使用纯 Hand Landmarker TFLite 重预测 21 点；presence/handedness 仍只采用 HCF。
 - Eos low-score candidate 不运行 RTMPose/HCF，保持 `unknown/null`，进入人工候选链路。
 
-ONNX 模型遵循仓库现有忽略策略，不纳入 Git；代码和配置通过 Git 同步，模型需在执行环境中单独部署。
+ONNX/TFLite 模型遵循仓库现有忽略策略，不纳入 Git；代码和配置通过 Git 同步，模型需在执行环境中单独部署。
 
 ## 常用命令
 
@@ -77,6 +78,8 @@ RTMPose Train runtime 行满足以下任一条件时整行进入 `ignored.jsonl`
 
 连接长度门控由 `quality.rtmpose_train_connection_length_gate_enabled` 独立控制并默认开启；关闭时不解析距离或阈值。其阈值来自 9,868 条人工复核 gold hand 的 `ceil(P99.95 × 1.05)`，完整统计见 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
 
+`quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 默认开启。RTMPose 触发边界或已开启的连接长度门控时，程序批量调用 `models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite`；补救结果通过两项几何检查才替换关键点，否则保留原 RTMPose 点并继续拒绝。关闭后不读取 TFLite 模型或独立环境配置。该补救不是第五条门控，也不使用 TFLite 的 presence/handedness 输出。
+
 Presence、边界和连接长度门控只作用于 RTMPose Train runtime；handedness 门控还适用于 MediaPipe Train positive。四条门控均不改变 Eval 发布，Eos low-score candidate 也不应用 RTMPose 门控。HCF presence 是教师伪标签，Eval 正式真值仍以 CVAT 人工复核为准。
 
-依赖仍由现有 `requirements.txt` 管理，本次集成没有新增 Python 依赖。
+主环境仍由 `requirements.txt` 管理；TFLite 补救使用独立 Python 3.11 环境和 `requirements-mediapipe-tflite.txt`，无需修改 `anfab`。

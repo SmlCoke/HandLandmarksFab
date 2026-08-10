@@ -57,6 +57,10 @@ rtmpose:
   model_onnx_path: models/rtmpose/rtmpose-m_hand5_256x256.onnx
   simcc_split_ratio: 2.0
 
+mediapipe_tflite:
+  model_asset_path: models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
+  python_executable: "${HLMF_MEDIAPIPE_TFLITE_PYTHON:-/root/miniconda3/envs/hlmf-mp-tflite/bin/python}"
+
 hand_classifier:
   model_onnx_path: models/handedness-handpresence-0807/model.onnx
 
@@ -65,6 +69,8 @@ quality:
   # P(has_hand); derived from 7,907 human-reviewed FullEnhanceVal0801 ROIs.
   rtmpose_train_hand_presence_threshold: 0.5
   rtmpose_train_boundary_coordinate_reject_threshold: 2
+  # Retry RTMPose Train rows that fail a geometry gate with the landmark-only TFLite model.
+  rtmpose_train_mediapipe_tflite_rescue_enabled: true
   # Strictly greater than one of these crop-pixel limits rejects an RTMPose Train runtime row.
   rtmpose_train_connection_length_gate_enabled: true
   rtmpose_train_connection_length_thresholds_px:

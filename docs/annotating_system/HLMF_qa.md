@@ -310,8 +310,8 @@ make train-autolabel \
 - 教师认为 present 且通过质量门控：进入 `hand_training_labels.jsonl`。
 - Train low-score candidate：进入 `candidate_negatives.jsonl`，等待负样本人工复核。
 - `ignore_for_training=true` 或 positive 未通过质量门控：进入 `ignored.jsonl`。
-- HCF handedness 分数低于当前阈值 `0.7` 时，整个 positive 行进入 ignored。
-- 仅 RTMPose Train runtime 行统计 42 个 crop x/y 值；精确为 `0.0/255.0` 的值达到 3 个时进入 ignored，1–2 个仍通过。
+- 当前共有 presence、boundary、connection length 和 handedness 四条 Train 质量门控，具体顺序与适用范围见 Q5。
+- 当前 boundary 阈值为 `2`：42 个 crop x/y 值中精确等于 `0.0/255.0` 的值达到 2 个时进入 ignored，0–1 个通过。
 
 输出：
 
@@ -595,3 +595,43 @@ HAND_DATASET_ROOT/Selections/<selection_id>/published/
 - 困难样本检查 `selection.jsonl` 的 `published_relpath`。
 - 确认 `review/` 已被程序删除。
 - 再执行源变体删除也不会影响已发布副本；但删除前必须先完成 prepare，因为 retired ROI 不能再进入新的复核批次。
+
+---
+
+## Q5：当前系统有哪些质量门控，按什么顺序判定，分别作用于哪些数据？
+
+当前实现有四条 Train 正样本质量门控：
+
+| 门控 | 当前判定 | 使用范围 | 拒绝后的 `ignore_reason` |
+|---|---|---|---|
+| Hand presence | `hand_presence.score` 缺失、非有限值或小于 `0.5` 时拒绝；等于阈值通过 | 仅 RTMPose Train runtime | `rtmpose_hand_presence_gate` |
+| Boundary coordinate | 21 点的 42 个 crop x/y 值中，精确等于 `0.0` 或 `255.0` 的数量达到 `2` 时拒绝 | 仅 RTMPose Train runtime | `rtmpose_boundary_coordinate_gate` |
+| Connection length | 按 near/mid/far 阈值检查 20 条连接的 crop 像素欧氏距离；严格超过阈值时拒绝，等于阈值或长度为 0 时通过 | 仅 RTMPose Train runtime；默认开启，可独立关闭 | `rtmpose_connection_length_gate` |
+| Handedness | handedness 分数小于 `0.7` 时标记 `needs_review`，Train positive 因此进入 ignored；等于阈值通过 | 所有 Train positive，包括 RTMPose 和 MediaPipe | `automatic_positive_failed_quality_gate` |
+
+Connection length 门控由 `quality.rtmpose_train_connection_length_gate_enabled` 控制，配置值和代码缺省值均为 `true`。关闭后完全跳过连接长度计算、距离档位解析和阈值校验，不影响其他三条门控。
+
+MediaPipe Hand Landmarker TFLite 是几何补救器，不是第五条门控。`quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 默认开启：RTMPose Train runtime 触发 boundary 或已开启的 connection-length 门控时，程序用 TFLite 重预测 21 点；两项几何复检均通过才替换 RTMPose 点。补救失败保留 RTMPose 点并照常拒绝。TFLite 的 presence/handedness 不使用，HCF 始终是这两个字段的唯一来源。
+
+### 判定执行顺序
+
+草标阶段先执行：RTMPose/HCF → boundary/connection-length 几何预检 → 必要时 TFLite 补救与几何复检。随后系统在 `quality_gate` 中按“通用完整性 → boundary → connection length → presence → handedness/其他”汇总最终标签的问题；不会因某条失败而停止，因此同一行可以保留多个 error 或 warning。
+
+发布分流再从已汇总的问题中确定一个主要拒绝原因，优先级是：
+
+```text
+presence → boundary → connection length → handedness/其他自动质量问题
+```
+
+因此，计算顺序与最终 `ignore_reason` 的优先级不是一回事。例如一行同时触发 presence 和 boundary，两个错误都会保留，但 `ignore_reason` 为 `rtmpose_hand_presence_gate`。自动门控之后才处理显式的 `ignore_for_training=true`；该字段是人工/流程排除标记，不属于上述四条自动门控。
+
+### 使用范围速查
+
+| 数据路径 | TFLite 几何补救 | Presence | Boundary | Connection length | Handedness |
+|---|---:|---:|---:|---:|---:|
+| RTMPose Train runtime positive | 几何失败时（可关闭） | 是 | 是 | 是（可关闭） | 是 |
+| MediaPipe Train positive | 否 | 否 | 否 | 否 | 是 |
+| Eos low-score negative candidate | 否 | 否 | 否 | 否 | 否 |
+| Eval（val/test） | 否 | 否 | 否 | 否 | 否 |
+
+这些门控不作用于 Eos candidate，也不改变 Eval 人工复核与发布流程。除四条正式门控外，系统还会检查关键点数量、坐标越界、多手等通用质量问题；它们可能使 Train positive 以 `automatic_positive_failed_quality_gate` 进入 ignored，但不属于四条可配置门控。

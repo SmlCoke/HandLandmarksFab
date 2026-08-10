@@ -12,8 +12,15 @@ from .handedness_classifier import (
 )
 from .formats import make_hand_id, merge_label_with_manifest, resolve_path
 from .image_io import read_image, to_uint8_gray
+from .mediapipe_tflite_rescue import (
+    MEDIAPIPE_TFLITE_MODEL_ID,
+    MEDIAPIPE_TFLITE_RESCUE_SOURCE,
+    MediaPipeTFLiteRescueClient,
+    mediapipe_tflite_rescue_enabled,
+)
 from .progress import track_progress
 from .projection import landmark_dicts_from_norm
+from .quality_checks import rtmpose_geometry_gate_errors
 
 
 RTMPOSE_INPUT_NAME = "input"
@@ -244,6 +251,7 @@ def label_roi_manifest_rtmpose(
     rows: List[Dict[str, Any]] = []
     runtime_labeled = 0
     candidates_skipped = 0
+    rescue_enabled = mediapipe_tflite_rescue_enabled(cfg)
     for manifest in track_progress(
         manifest_rows,
         enabled=show_progress,
@@ -265,10 +273,63 @@ def label_roi_manifest_rtmpose(
             raise RuntimeError(f"unreadable runtime Hand ROI for RTMPose: {crop_path}")
         if hand_classifier is None:
             raise RuntimeError("Hand classifier was not initialized for a runtime ROI")
-        rows.append(
-            label_one_roi_rtmpose(manifest, image, detector, hand_classifier, cfg)
+        labeled_row = label_one_roi_rtmpose(
+            manifest, image, detector, hand_classifier, cfg
         )
+        # The shared geometry gates route on these manifest fields. The public
+        # pipeline attaches them again after labeling, but rescue must run first.
+        for key in ("capture_source_id", "split", "proposal_kind"):
+            labeled_row.setdefault(key, manifest.get(key))
+        rows.append(labeled_row)
         runtime_labeled += 1
+
+    rescue_candidates: List[tuple[int, Dict[str, Any], List[str]]] = []
+    if rescue_enabled:
+        for index, row in enumerate(rows):
+            geometry_errors = rtmpose_geometry_gate_errors(row, cfg)
+            if geometry_errors:
+                rescue_candidates.append((index, row, geometry_errors))
+
+    rescue_accepted = 0
+    rescue_rejected = 0
+    if rescue_candidates:
+        rescue_client = MediaPipeTFLiteRescueClient(cfg, root)
+        predictions = rescue_client.predict(
+            {
+                "crop_id": row.get("crop_id"),
+                "crop_path": row.get("crop_path"),
+            }
+            for _, row, _ in rescue_candidates
+        )
+        for index, original_row, trigger_errors in rescue_candidates:
+            crop_id = str(original_row.get("crop_id"))
+            prediction = predictions[crop_id]
+            candidate = dict(original_row)
+            candidate["landmarks_crop_px"] = list(
+                prediction["landmarks_crop_px"]
+            )
+            candidate["landmarks_crop_norm"] = list(
+                prediction["landmarks_crop_norm"]
+            )
+            candidate["landmarks_image_px"] = landmark_dicts_from_norm(
+                candidate["landmarks_crop_norm"], candidate["roi_corners_px"]
+            )
+            result_errors = rtmpose_geometry_gate_errors(candidate, cfg)
+            rescue_metadata = {
+                "attempted": True,
+                "accepted": not result_errors,
+                "trigger_errors": list(trigger_errors),
+                "result_errors": list(result_errors),
+                "model_id": MEDIAPIPE_TFLITE_MODEL_ID,
+            }
+            if result_errors:
+                original_row["rtmpose_geometry_rescue"] = rescue_metadata
+                rescue_rejected += 1
+                continue
+            candidate["source"] = MEDIAPIPE_TFLITE_RESCUE_SOURCE
+            candidate["rtmpose_geometry_rescue"] = rescue_metadata
+            rows[index] = candidate
+            rescue_accepted += 1
     return rows, {
         "backend": "rtmpose_onnx",
         "mode": "rtmpose_onnx",
@@ -282,4 +343,9 @@ def label_roi_manifest_rtmpose(
         "hand_classifier_runtime_rois_labeled": runtime_labeled,
         "runtime_rois_labeled": runtime_labeled,
         "negative_candidates_skipped": candidates_skipped,
+        "mediapipe_tflite_rescue_enabled": rescue_enabled,
+        "mediapipe_tflite_rescue_model_id": MEDIAPIPE_TFLITE_MODEL_ID,
+        "mediapipe_tflite_rescue_attempted": len(rescue_candidates),
+        "mediapipe_tflite_rescue_accepted": rescue_accepted,
+        "mediapipe_tflite_rescue_rejected": rescue_rejected,
     }

@@ -462,6 +462,21 @@ def _run_mediapipe(
         ),
         "runtime_rois_labeled": backend_info["runtime_rois_labeled"],
         "negative_candidates_skipped": backend_info["negative_candidates_skipped"],
+        "mediapipe_tflite_rescue": {
+            "enabled": bool(
+                backend_info.get("mediapipe_tflite_rescue_enabled", False)
+            ),
+            "model_id": backend_info.get("mediapipe_tflite_rescue_model_id"),
+            "attempted": int(
+                backend_info.get("mediapipe_tflite_rescue_attempted", 0)
+            ),
+            "accepted": int(
+                backend_info.get("mediapipe_tflite_rescue_accepted", 0)
+            ),
+            "rejected": int(
+                backend_info.get("mediapipe_tflite_rescue_rejected", 0)
+            ),
+        },
         "total": stats["total"],
         "positive": stats["positive"],
         "teacher_abstain": stats["negative"],

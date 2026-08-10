@@ -19,6 +19,10 @@ RTMPOSE_CONNECTION_PAIRS = (
     (0, 17), (17, 18), (18, 19), (19, 20),
 )
 RTMPOSE_CONNECTION_DISTANCES = ("near", "mid", "far")
+RTMPOSE_TRAIN_RUNTIME_SOURCES = {
+    "rtmpose_m_hand5_onnx",
+    "mediapipe_hand_landmarker_full_tflite_rtmpose_rescue",
+}
 
 
 def validate_image_file(path: Path, expected_width: int, expected_height: int) -> Dict[str, Any]:
@@ -102,8 +106,26 @@ def _is_rtmpose_train_runtime(row: Mapping[str, Any]) -> bool:
     return (
         str(row.get("split")) == "train"
         and str(row.get("proposal_kind")) == "runtime"
-        and str(row.get("source")) == "rtmpose_m_hand5_onnx"
+        and str(row.get("source")) in RTMPOSE_TRAIN_RUNTIME_SOURCES
     )
+
+
+def validate_rtmpose_boundary_threshold(cfg: Mapping[str, Any]) -> int:
+    try:
+        threshold = int(
+            cfg.get("quality", {}).get(
+                "rtmpose_train_boundary_coordinate_reject_threshold", 3
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "quality.rtmpose_train_boundary_coordinate_reject_threshold must be an integer"
+        ) from exc
+    if threshold < 1:
+        raise ValueError(
+            "quality.rtmpose_train_boundary_coordinate_reject_threshold must be >= 1"
+        )
+    return threshold
 
 
 def _rtmpose_boundary_coordinate_count(
@@ -267,6 +289,24 @@ def _rtmpose_connection_length_gate_errors(
     return errors
 
 
+def rtmpose_geometry_gate_errors(
+    row: Mapping[str, Any], cfg: Mapping[str, Any]
+) -> List[str]:
+    """Return the unchanged boundary/connection errors for an RTMPose Train row."""
+
+    if not _is_rtmpose_train_runtime(row):
+        return []
+    errors: List[str] = []
+    boundary_threshold = validate_rtmpose_boundary_threshold(cfg)
+    boundary_count = _rtmpose_boundary_coordinate_count(row, cfg)
+    if boundary_count >= boundary_threshold:
+        errors.append(
+            f"rtmpose_boundary_coordinate_values:{boundary_count}>={boundary_threshold}"
+        )
+    errors.extend(_rtmpose_connection_length_gate_errors(row, cfg))
+    return errors
+
+
 def _rtmpose_hand_presence_gate_error(
     row: Mapping[str, Any], cfg: Mapping[str, Any]
 ) -> str | None:
@@ -319,29 +359,12 @@ def label_issues(row: Mapping[str, Any], cfg: Mapping[str, Any]) -> tuple[List[s
     if out_count:
         warnings.append(f"crop_points_out_of_bounds:{out_count}")
         needs_review = True
-    try:
-        boundary_threshold = int(
-            cfg.get("quality", {}).get(
-                "rtmpose_train_boundary_coordinate_reject_threshold", 3
-            )
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "quality.rtmpose_train_boundary_coordinate_reject_threshold must be an integer"
-        ) from exc
-    if boundary_threshold < 1:
-        raise ValueError(
-            "quality.rtmpose_train_boundary_coordinate_reject_threshold must be >= 1"
-        )
-    boundary_count = _rtmpose_boundary_coordinate_count(row, cfg)
-    if boundary_count >= boundary_threshold:
-        errors.append(
-            f"rtmpose_boundary_coordinate_values:{boundary_count}>={boundary_threshold}"
-        )
-        needs_review = True
-    connection_errors = _rtmpose_connection_length_gate_errors(row, cfg)
-    if connection_errors:
-        errors.extend(connection_errors)
+    # Preserve the existing eager validation even for rows outside the RTMPose
+    # Train route, while sharing the exact gate implementation with rescue.
+    validate_rtmpose_boundary_threshold(cfg)
+    geometry_errors = rtmpose_geometry_gate_errors(row, cfg)
+    if geometry_errors:
+        errors.extend(geometry_errors)
         needs_review = True
     presence_gate_error = _rtmpose_hand_presence_gate_error(row, cfg)
     if presence_gate_error is not None:

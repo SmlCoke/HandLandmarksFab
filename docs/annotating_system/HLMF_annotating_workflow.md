@@ -25,13 +25,21 @@ make compile
 make test
 ```
 
-代码依赖以 `requirements.txt` 为准。本轮继续使用现有 ONNX Runtime、OpenCV 和 FFmpeg 支持，无新增依赖。
+主环境依赖以 `requirements.txt` 为准。MediaPipe TFLite 补救不向 `anfab` 增加 TensorFlow，而是使用独立轻量环境：
+
+```bash
+/root/miniconda3/envs/anfab/bin/python -m venv \
+  /root/miniconda3/envs/hlmf-mp-tflite
+/root/miniconda3/envs/hlmf-mp-tflite/bin/python -m pip install \
+  -r requirements-mediapipe-tflite.txt
+```
 
 Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略，需要在执行环境单独部署。当前双头 HCF 与上一版归档路径为：
 
 ```text
 models/handedness-handpresence-0807/model.onnx
 models/handedness-0806/
+models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
 ```
 
 代码只读取新路径；旧目录仅用于保留 handedness-only 模型和指标，不参与推理。
@@ -44,12 +52,16 @@ hand_landmark:
 rtmpose:
   model_onnx_path: models/rtmpose/rtmpose-m_hand5_256x256.onnx
   simcc_split_ratio: 2.0
+mediapipe_tflite:
+  model_asset_path: models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
+  python_executable: /root/miniconda3/envs/hlmf-mp-tflite/bin/python
 hand_classifier:
   model_onnx_path: models/handedness-handpresence-0807/model.onnx
 quality:
   handedness_review_threshold: 0.7
   rtmpose_train_hand_presence_threshold: 0.5
   rtmpose_train_boundary_coordinate_reject_threshold: 2
+  rtmpose_train_mediapipe_tflite_rescue_enabled: true
   rtmpose_train_connection_length_gate_enabled: true
   # rtmpose_train_connection_length_thresholds_px 在配置中按 near/mid/far
   # 分别给出 20 条连接的 crop 像素阈值。
@@ -60,7 +72,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：MediaPipe 保持全局默认；命令行后端只覆盖当前执行。SimCC split ratio 与模型绑定为 `2.0`。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。其阈值是 `256×256` crop 像素长度的上限，严格超过才拒绝，等于阈值及长度为 0 均通过。
+配置原则：MediaPipe Tasks 保持全局默认；命令行后端只覆盖当前执行。SimCC split ratio 与模型绑定为 `2.0`。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
 
 ## 3. 来源注册与图像检查
 
@@ -103,9 +115,9 @@ make train-autolabel \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
-输入：已注册原图、Eos/RTMPose/HCF 模型和 `configs/autolabel.yaml`。
+输入：已注册原图、Eos/RTMPose/HCF 模型、TFLite 补救资产和 `configs/autolabel.yaml`。
 
-处理：Eos 生成 runtime 与 low-score candidate proposal；程序把原图解码后转换为单通道 `uint8`，再构造固定 `256×256` ROI；runtime ROI 运行所选 Hand landmark 后端。RTMPose runtime ROI 同时运行 HCF；candidate 不运行 RTMPose/HCF。Train 自动完成质量分流和发布。
+处理：Eos 生成 runtime 与 low-score candidate proposal；程序构造固定 `256×256` 灰度 ROI；RTMPose runtime ROI 同时运行 RTMPose 与 HCF。Train 行若未通过边界或已开启的连接长度门控，则把失败 ROI 一次性提交给独立 TFLite worker；补救点通过两项几何门控才替换 RTMPose 点。candidate 不运行 RTMPose/HCF/TFLite。Train 最后按原四条门控分流发布。
 
 输出：
 
@@ -132,6 +144,8 @@ RTMPose 灰度 ROI 复制为 RGB，使用官方 mean/std，输出两个 `[N,21,5
 
 RTMPose runtime ROI 固定输出 21 点，并在 Train 与 Eval 都运行一次双头 HCF；`hand_presence.present` 和 `hand_presence.score` 是 HCF 教师输出，不是人工真值。Eos low-score candidate 不运行 RTMPose/HCF，关键点为空、handedness 为 `unknown/null`、两个 HCF provenance ID 均为 null，继续进入 `candidate_negatives.jsonl` 人工链路。
 
+TFLite worker 输入为灰度 ROI，经 `224×224` 双线性缩放、三通道复制和 `/255` 后送入 `hand_landmark_full.tflite`。坐标按 `raw/224×256` 解码；模型输出的 handflag、handedness 和 world landmarks 不进入 HLMF。补救成功行的关键点教师为 `mediapipe-hand-landmark-full-tflite`，HCF 的 presence/handedness 及其 teacher ID 原样保留。补救失败时保留 RTMPose 点，并在 `rtmpose_geometry_rescue` 中记录触发错误和 TFLite 结果错误。
+
 ## 6. Train 质量门控
 
 质量门控只改变发布分流，不改变 Palm 或 ROI：
@@ -141,7 +155,9 @@ RTMPose runtime ROI 固定输出 21 点，并在 Train 与 Eval 都运行一次�
 3. **边界坐标门控**：仅对 RTMPose Train runtime 统计 21 点的 42 个 crop x/y 值。精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，并以 `ignore_reason=rtmpose_boundary_coordinate_gate` 进入 `ignored.jsonl`。
 4. **连接对长度门控**：仅在 `quality.rtmpose_train_connection_length_gate_enabled=true` 时对 RTMPose Train runtime 生效。程序按 capture source 的 `near/mid/far` 选择阈值，计算 20 条连接的 crop 像素欧氏距离；任一长度严格超过阈值时写入 `rtmpose_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，并以 `ignore_reason=rtmpose_connection_length_gate` 进入 `ignored.jsonl`。等于阈值及长度为 0 均通过；关闭开关时不解析距离或阈值。
 
-当前 presence 阈值为 `0.5`，边界阈值为 2，因此 0–1 个边界值通过。Presence、边界和连接长度门控只作用于 `split=train`、`proposal_kind=runtime`、`source=rtmpose_m_hand5_onnx`；Eval、MediaPipe 和 Eos low-score candidate 不应用这三条 RTMPose 专用门控。
+当前 presence 阈值为 `0.5`，边界阈值为 2，因此 0–1 个边界值通过。Presence、边界和连接长度门控作用于 RTMPose Train runtime 链路，包括成功采用 TFLite 补救点的行；Eval、MediaPipe 主链路和 Eos low-score candidate 不应用这三条 RTMPose 专用门控。
+
+TFLite 补救不是第五条门控。执行顺序为：RTMPose/HCF → 几何预检 → 必要时 TFLite 重预测并复检 → 四条质量门控发布分流。补救后的 presence/handedness 仍只来自 HCF；最终拒绝原因优先级保持 `presence → boundary → connection length → handedness/其他`。
 
 Presence 阈值应使用与正式标注隔离的人工复核 ROI 副本重新校准。当前选择规则同时考虑：与模型 `no_hand/has_hand` 的 argmax 决策一致、拒绝人工 no_hand、尽量保留人工 hand，并避免更高阈值在单一来源上过度丢样本。当前校准中 `0.5` 拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。曾评估“全局 hand recall 至少 99% 时取最高阈值”的 `0.843369`，但它在 `complex-near-bright-random-val-s01-peak` 上只保留 88.24% 的 hand，因此未采用。
 
