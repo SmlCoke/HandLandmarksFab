@@ -155,7 +155,10 @@ low-score candidate 的关键点为空，handedness 为 `{label: unknown, score:
 ```text
 hand_landmark_backend
 execution_provider
+execution_provider_fallback_reason
 hand_classifier_provider
+hand_classifier_provider_fallback_reason
+onnx_batch_size
 hand_classifier_model_id
 hand_classifier_runtime_rois_labeled
 runtime_rois_labeled
@@ -163,7 +166,9 @@ negative_candidates_skipped
 mediapipe_tflite_rescue.enabled/model_id/attempted/accepted/rejected
 ```
 
-MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 的实际 ONNX provider、HCF 模型 ID 和 HCF 推理数。
+MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 的实际 ONNX provider、fallback 原因、batch size、HCF 模型 ID 和 HCF 推理数。Palm 的 `palm_detection_report.json.onnx_runtime` 记录 provider、fallback 原因及固定 batch 1 的原因。
+
+`onnx_runtime.provider` 及 `onnx_runtime.model_providers.{palm,rtmpose,hand_classifier}` 只接受 `auto|cuda|cpu`；`auto` 为 CUDA 优先并允许 CPU fallback，`cuda` 在 CUDA provider 未激活时失败，`cpu` 固定 CPU。`onnx_runtime.batch_size` 必须是正整数。当前模型路径为 `models/hand_classifier/handedness-handpresence-0807/model.onnx`。
 
 ## 7. Train 发布分流
 
@@ -179,6 +184,8 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 当前 presence 阈值为 `0.5`，边界阈值为 2；0–1 个边界值通过。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 主链路或 Eos negative candidate；成功补救行仍属于 RTMPose Train runtime 链路，继续应用三条 RTMPose 专用门控。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
 
 双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
+
+`source_publish_report.json.quality_gate_rejections` 固定包含 `hand_presence`、`boundary_coordinate`、`connection_length`、`handedness` 四个非负整数。计数按发布拒绝优先级互斥归因，因此一行最多计入一项；其他自动质量错误不计入四项。`quality_gate_counting_policy` 固定为 `exclusive_by_publish_routing_priority`。
 
 ## 8. Eval、CVAT 与发布
 
@@ -237,6 +244,9 @@ Registry 中 raw/ROI 元数据和 retired tombstone
 
 ```text
 GoldSource/NegativeSamples/<negative_dataset_id>/review/images/
+GoldSource/NegativeSamples/<negative_dataset_id>/review/candidate_manifest.jsonl
+GoldSource/NegativeSamples/<negative_dataset_id>/review/precheck_excluded.jsonl
+GoldSource/NegativeSamples/<negative_dataset_id>/review/README.json
 GoldSource/NegativeSamples/<negative_dataset_id>/published/images/
 GoldSource/NegativeSamples/<negative_dataset_id>/published/negative_labels.jsonl
 ```
@@ -249,11 +259,13 @@ Selections/<selection_id>/published/images/
 Selections/<selection_id>/published/selection.jsonl
 ```
 
+`negative_review.hand_presence_threshold` 必须是 `[0,1]` 内有限数，缺省及正式配置为 `0.5`。`candidate_manifest.jsonl` 仅含 `P(has_hand)<threshold` 的行；`precheck_excluded.jsonl` 保存其余行。两者的 `negative_review_precheck` 包含 `hand_presence_score`、`threshold`、`selected_for_human_review` 和 `model_id`。人工发布前仍必须复核所选图片。
+
 review 与 published 图片都是普通复制产生的独立文件，不是硬链接。困难样本记录保留原始 `source_crop_relpath`，并增加可直接读取的 `published_relpath`。删除源变体不会破坏已经发布的负样本/困难样本。
 
 ## 12. Dataset manifest 与完整性
 
-dataset manifest 只聚合含至少一个 `qc/<proposal_variant>/source_publish_report.json` 的 source 及其 published variant，保存 split、raw/ROI/label 数量和发布标签相对路径。仅有 `source.json`、自动标注 draft 或 CVAT 导出文件的来源不进入 manifest；未完成 CVAT 导入和 `source-publish` 的 Eval 来源因此不会被按 manifest 消费数据的下游 HLML 读取。
+dataset manifest 只聚合含至少一个 `qc/<proposal_variant>/source_publish_report.json` 的 source 及其 published variant，保存 split、raw/ROI/label 数量和发布标签相对路径。每个 capture source 的 `quality_gate_rejections` 聚合其已发布 variants；顶层 `quality_gate_rejections` 为 dataset 合计，`quality_gate_rejections_by_capture_source_id` 为 source ID 到四项计数的映射，`quality_gate_counting_policy` 固定为互斥发布归因策略。仅有 `source.json`、自动标注 draft 或 CVAT 导出文件的来源不进入 manifest；未完成 CVAT 导入和 `source-publish` 的 Eval 来源因此不会被按 manifest 消费数据的下游 HLML 读取。
 
 删除变体后立即重建 dataset manifest；数据集级批量删除在全部单来源操作后额外重建一次。
 

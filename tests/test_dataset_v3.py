@@ -42,6 +42,7 @@ from scripts.hlmf import (
     _load_public_configs,
     _parser,
     _partition_labels,
+    _quality_gate_rejection_counts,
     _run_delete_source_variant,
     _run_existing_original_image_visualization,
     _run_existing_roi_visualization,
@@ -666,7 +667,32 @@ class DatasetV3Tests(unittest.TestCase):
 
     def test_negative_review_publishes_independent_copies_and_unique_registry(self) -> None:
         crop, row = self._registered_roi()
-        result = prepare_negative_review(self.root, "neg-r1", [row])
+        cfg = load_yaml_config(
+            Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml"
+        )
+        classifier = SimpleNamespace(
+            model_id="hand-classifier-handedness-handpresence-0807",
+            provider="CPUExecutionProvider",
+            fallback_reason=None,
+            classify_batch=lambda images: [
+                {
+                    "handedness": {"label": "Right", "score": 0.9},
+                    "hand_presence": {"present": False, "score": 0.49},
+                }
+                for _ in images
+            ],
+        )
+        with patch(
+            "hand_autolabel.dataset_v3.HandClassifierONNX",
+            return_value=classifier,
+        ):
+            result = prepare_negative_review(
+                self.root,
+                "neg-r1",
+                [row],
+                cfg,
+                Path(__file__).resolve().parents[1],
+            )
         review_image = next(Path(result["review_root"]).glob("images/*/*"))
         self.assertNotEqual(os.stat(crop).st_ino, os.stat(review_image).st_ino)
         self.assertEqual(crop.read_bytes(), review_image.read_bytes())
@@ -689,8 +715,111 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertFalse(crop.exists())
         self.assertTrue(published.is_file())
         self.assertGreater(published.stat().st_size, 0)
-        with self.assertRaises(DatasetContractError):
-            prepare_negative_review(self.root, "neg-r1", [row])
+        with patch(
+            "hand_autolabel.dataset_v3.HandClassifierONNX",
+            return_value=classifier,
+        ), self.assertRaises(DatasetContractError):
+            prepare_negative_review(
+                self.root,
+                "neg-r1",
+                [row],
+                cfg,
+                Path(__file__).resolve().parents[1],
+            )
+
+    def test_negative_review_precheck_uses_strict_threshold_and_writes_excluded_manifest(self) -> None:
+        crop, row = self._registered_roi()
+        second_crop = crop.with_name("crop2.png")
+        cv2.imwrite(str(second_crop), np.ones((256, 256), dtype=np.uint8))
+        second = dict(
+            row,
+            roi_id="roi_test002",
+            proposal_slot=1,
+            crop_relpath=str(second_crop.relative_to(self.root)).replace("\\", "/"),
+        )
+        WarehouseRegistry(self.root).register_rois([second])
+        cfg = load_yaml_config(
+            Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml"
+        )
+        classifier = SimpleNamespace(
+            model_id="hand-classifier-handedness-handpresence-0807",
+            provider="CUDAExecutionProvider",
+            fallback_reason=None,
+            classify_batch=lambda _images: [
+                {
+                    "handedness": {"label": "Right", "score": 0.9},
+                    "hand_presence": {"present": False, "score": 0.499},
+                },
+                {
+                    "handedness": {"label": "Right", "score": 0.9},
+                    "hand_presence": {"present": True, "score": 0.5},
+                },
+            ],
+        )
+        with patch(
+            "hand_autolabel.dataset_v3.HandClassifierONNX",
+            return_value=classifier,
+        ):
+            result = prepare_negative_review(
+                self.root,
+                "neg-threshold",
+                [row, second],
+                cfg,
+                Path(__file__).resolve().parents[1],
+            )
+        review_root = Path(result["review_root"])
+        selected = read_jsonl(review_root / "candidate_manifest.jsonl")
+        excluded = read_jsonl(review_root / "precheck_excluded.jsonl")
+        self.assertEqual(1, result["candidate_count"])
+        self.assertEqual(1, result["precheck_excluded_count"])
+        self.assertEqual("roi_test001", selected[0]["roi_id"])
+        self.assertEqual("roi_test002", excluded[0]["roi_id"])
+        self.assertFalse(
+            excluded[0]["negative_review_precheck"]["selected_for_human_review"]
+        )
+
+    def test_quality_gate_rejection_statistics_are_exclusive_and_aggregated(self) -> None:
+        ignored = [
+            {"ignore_reason": "rtmpose_hand_presence_gate", "quality_gate": {}},
+            {"ignore_reason": "rtmpose_boundary_coordinate_gate", "quality_gate": {}},
+            {"ignore_reason": "rtmpose_connection_length_gate", "quality_gate": {}},
+            {
+                "ignore_reason": "automatic_positive_failed_quality_gate",
+                "quality_gate": {"warnings": ["low_handedness_score:0.600"]},
+            },
+            {
+                "ignore_reason": "automatic_positive_failed_quality_gate",
+                "quality_gate": {"warnings": ["multiple_hands_in_one_crop"]},
+            },
+        ]
+        counts = _quality_gate_rejection_counts(ignored)
+        self.assertEqual(
+            {
+                "hand_presence": 1,
+                "boundary_coordinate": 1,
+                "connection_length": 1,
+                "handedness": 1,
+            },
+            counts,
+        )
+        source, _ = self._validated_source()
+        report_dir = source / "qc" / "p01"
+        report_dir.mkdir(parents=True)
+        write_json(
+            report_dir / "source_publish_report.json",
+            {
+                "capture_source_id": CAPTURE_TRAIN,
+                "proposal_variant": "p01",
+                "rois": 5,
+                "quality_gate_rejections": counts,
+            },
+        )
+        manifest = _dataset_manifest(self.root, "pretrain", "national-r1")
+        self.assertEqual(counts, manifest["quality_gate_rejections"])
+        self.assertEqual(
+            counts,
+            manifest["quality_gate_rejections_by_capture_source_id"][CAPTURE_TRAIN],
+        )
 
     def test_selection_review_publishes_independent_images(self) -> None:
         crop, row = self._registered_roi()

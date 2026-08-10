@@ -9,6 +9,8 @@ cd /root/HandLandmarksFab
 source /root/miniconda3/etc/profile.d/conda.sh
 conda activate anfab
 export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
+/root/miniconda3/envs/anfab/bin/python -m pip uninstall -y onnxruntime
+/root/miniconda3/envs/anfab/bin/python -m pip install -r requirements.txt
 make compile
 make test
 ```
@@ -22,9 +24,10 @@ make test
   -r requirements-mediapipe-tflite.txt
 mkdir -p models/mediapipe/hand_landmarker_tflite
 # 将 hand_landmark_full.tflite 部署到上述目录。
+# 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0807/model.onnx。
 ```
 
-输出：代码和环境检查结果。
+输出：代码和环境检查结果。默认设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU；RTMPose/HCF batch 为 64。
 
 ## 2. 注册来源
 
@@ -50,7 +53,7 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
-输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 与可选 TFLite 补救记录的 draft、三类发布 JSONL 和 QC；补救关闭时保持原 RTMPose 分流，连接长度门控关闭时其余三条门控仍正常工作。
+输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 与可选 TFLite 补救记录的 draft、三类发布 JSONL 和 QC；source report 记录四条门控互斥淘汰数，dataset manifest 记录 dataset 总计及各 capture source 明细。补救关闭时保持原 RTMPose 分流，连接长度门控关闭时其余三条门控仍正常工作。
 
 批量处理全部含 `images/` 的 train 来源；无需预先运行 `source-check`：
 
@@ -155,7 +158,7 @@ make hard-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   SELECTION_ID=hard-0801
 ```
 
-输出：review/published 独立图片副本和对应 manifest。
+输出：HCF 预审进度、仅含 `P(has_hand)<0.5` 的 review 独立图片副本、`candidate_manifest.jsonl`、`precheck_excluded.jsonl`，以及人工复核后的 published 独立副本和 manifest。
 
 ## 8. 永久删除一个来源变体
 

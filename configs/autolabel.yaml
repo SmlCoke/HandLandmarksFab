@@ -14,6 +14,18 @@ paths:
   qc_dir: data/qc/eos-1.0
   palm_model_onnx: models/palm_detector/eos-1.0/model_opt.onnx
 
+onnx_runtime:
+  # auto prefers CUDAExecutionProvider and falls back to CPU when CUDA is unavailable.
+  provider: auto
+  # Per-model overrides are chosen from server CPU/GPU benchmarks.
+  model_providers:
+    palm: auto
+    # GPU changed decoded keypoints and slightly reduced reviewed-Eval accuracy.
+    rtmpose: cpu
+    hand_classifier: auto
+  # RTMPose and Hand Classifier use this dynamic batch size; Palm is fixed at batch 1.
+  batch_size: 64
+
 image:
   width: 1280
   height: 720
@@ -62,7 +74,11 @@ mediapipe_tflite:
   python_executable: "${HLMF_MEDIAPIPE_TFLITE_PYTHON:-/root/miniconda3/envs/hlmf-mp-tflite/bin/python}"
 
 hand_classifier:
-  model_onnx_path: models/handedness-handpresence-0807/model.onnx
+  model_onnx_path: models/hand_classifier/handedness-handpresence-0807/model.onnx
+
+negative_review:
+  # Only candidates with P(has_hand) strictly below this value enter manual review.
+  hand_presence_threshold: 0.5
 
 quality:
   handedness_review_threshold: 0.7

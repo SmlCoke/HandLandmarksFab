@@ -49,6 +49,45 @@ from hand_autolabel.roi_geometry import build_roi_rect_from_palm, crop_image_by_
 from tools.png_to_video import create_video
 
 
+QUALITY_GATE_STAT_KEYS = (
+    "hand_presence",
+    "boundary_coordinate",
+    "connection_length",
+    "handedness",
+)
+
+
+def _empty_quality_gate_counts() -> Dict[str, int]:
+    return {key: 0 for key in QUALITY_GATE_STAT_KEYS}
+
+
+def _add_quality_gate_counts(
+    target: Dict[str, int], source: Mapping[str, Any]
+) -> None:
+    for key in QUALITY_GATE_STAT_KEYS:
+        target[key] += int(source.get(key, 0))
+
+
+def _quality_gate_rejection_counts(
+    ignored_rows: Iterable[Mapping[str, Any]],
+) -> Dict[str, int]:
+    counts = _empty_quality_gate_counts()
+    for row in ignored_rows:
+        reason = str(row.get("ignore_reason") or "")
+        if reason == "rtmpose_hand_presence_gate":
+            counts["hand_presence"] += 1
+        elif reason == "rtmpose_boundary_coordinate_gate":
+            counts["boundary_coordinate"] += 1
+        elif reason == "rtmpose_connection_length_gate":
+            counts["connection_length"] += 1
+        elif reason == "automatic_positive_failed_quality_gate" and any(
+            str(warning).startswith("low_handedness_score:")
+            for warning in (row.get("quality_gate") or {}).get("warnings", [])
+        ):
+            counts["handedness"] += 1
+    return counts
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="HLMF 3.0 Hand ROI dataset warehouse")
     parser.add_argument("--autolabel-config", default="configs/autolabel.yaml")
@@ -224,9 +263,17 @@ def _run_palm(
     backend = str(cfg["palm"].get("backend", "aethersign_onnx"))
     if backend == "aethersign_onnx":
         model = resolve_path(ROOT, cfg["paths"]["palm_model_onnx"])
-        rows = run_onnx_palm_detector(images, cfg, model, show_progress=show_progress)
+        runtime_info: Dict[str, Any] = {}
+        rows = run_onnx_palm_detector(
+            images,
+            cfg,
+            model,
+            show_progress=show_progress,
+            runtime_info=runtime_info,
+        )
         backend_mode = "onnx"
     elif backend == "mediapipe_official":
+        runtime_info = {}
         rows, backend_mode = run_mediapipe_palm_detector(
             images,
             cfg,
@@ -250,6 +297,7 @@ def _run_palm(
         "proposal_variant": args.proposal_variant,
         "backend": backend,
         "backend_mode": backend_mode,
+        "onnx_runtime": runtime_info or None,
         "images": len(rows),
         "detections": sum(len(row.get("detections") or []) for row in rows),
         "negative_candidates": sum(len(row.get("negative_candidates") or []) for row in rows),
@@ -455,7 +503,14 @@ def _run_mediapipe(
         "hand_landmark_backend": backend,
         "hand_landmark_mode": backend_info["mode"],
         "execution_provider": backend_info["provider"],
+        "execution_provider_fallback_reason": backend_info.get(
+            "provider_fallback_reason"
+        ),
         "hand_classifier_provider": backend_info.get("hand_classifier_provider"),
+        "hand_classifier_provider_fallback_reason": backend_info.get(
+            "hand_classifier_provider_fallback_reason"
+        ),
+        "onnx_batch_size": backend_info.get("onnx_batch_size"),
         "hand_classifier_model_id": backend_info.get("hand_classifier_model_id"),
         "hand_classifier_runtime_rois_labeled": backend_info.get(
             "hand_classifier_runtime_rois_labeled", 0
@@ -721,6 +776,8 @@ def _dataset_manifest(
     bucket = "PretrainSource" if scope == "pretrain" else "EValSource"
     root = dataset_root / bucket / dataset_id
     sources = []
+    dataset_gate_counts = _empty_quality_gate_counts()
+    gate_counts_by_source: Dict[str, Dict[str, int]] = {}
     for descriptor_path in sorted(root.glob("*/source.json")):
         descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
         capture_root = descriptor_path.parent
@@ -740,12 +797,24 @@ def _dataset_manifest(
             published.sort(key=lambda report: str(report.get("proposal_variant")))
         if published:
             descriptor["published_variants"] = published
+            source_gate_counts = _empty_quality_gate_counts()
+            for report in published:
+                _add_quality_gate_counts(
+                    source_gate_counts, report.get("quality_gate_rejections") or {}
+                )
+            descriptor["quality_gate_rejections"] = source_gate_counts
+            capture_source_id = str(descriptor.get("capture_source_id"))
+            gate_counts_by_source[capture_source_id] = source_gate_counts
+            _add_quality_gate_counts(dataset_gate_counts, source_gate_counts)
             sources.append(descriptor)
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "dataset_id": dataset_id,
         "scope": scope,
         "capture_sources": sources,
+        "quality_gate_rejections": dataset_gate_counts,
+        "quality_gate_rejections_by_capture_source_id": gate_counts_by_source,
+        "quality_gate_counting_policy": "exclusive_by_publish_routing_priority",
         "content_sha256": "not_computed",
     }
     if write:
@@ -868,6 +937,7 @@ def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[s
         if not rows:
             raise DatasetContractError("Val/Test publication requires reviewed CVAT labels")
     positives, candidates, ignored = _partition_labels(rows, split, cfg)
+    quality_gate_rejections = _quality_gate_rejection_counts(ignored)
     labels_file = paths["labels"] / ("hand_training_labels.jsonl" if split == "train" else "hand_evaluation_labels.jsonl")
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -880,6 +950,8 @@ def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[s
         "published_labels": len(positives),
         "candidate_negatives": len(candidates),
         "ignored": len(ignored),
+        "quality_gate_rejections": quality_gate_rejections,
+        "quality_gate_counting_policy": "exclusive_by_publish_routing_priority",
         "labels_relpath": str(labels_file.relative_to(Path(args.dataset_root).resolve())).replace("\\", "/"),
         "palm_output_human_modified": False,
         "evaluation_scope": "fixed_hand_roi_only" if split in {"val", "test"} else None,
@@ -957,7 +1029,14 @@ def main() -> None:
             )
         elif args.command == "prepare-negative-review":
             rows = [row for path in args.candidate_labels for row in read_jsonl(Path(path))]
-            result = prepare_negative_review(Path(args.dataset_root), args.negative_dataset_id, rows)
+            result = prepare_negative_review(
+                Path(args.dataset_root),
+                args.negative_dataset_id,
+                rows,
+                cfg,
+                ROOT,
+                show_progress=True,
+            )
         elif args.command == "publish-negative-review":
             result = publish_negative_review(Path(args.dataset_root), args.negative_dataset_id)
         elif args.command == "prepare-selection-review":

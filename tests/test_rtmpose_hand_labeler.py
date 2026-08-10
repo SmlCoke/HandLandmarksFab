@@ -14,9 +14,11 @@ from hand_autolabel.rtmpose_hand_labeler import (
     RTMPOSE_MEAN,
     RTMPOSE_STD,
     decode_simcc,
+    decode_simcc_batch,
     label_one_roi_rtmpose,
     label_roi_manifest_rtmpose,
     preprocess_rtmpose_image,
+    preprocess_rtmpose_images,
 )
 from scripts.hlmf import _partition_labels
 
@@ -130,6 +132,25 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
         x[0, 0, 0] = np.nan
         with self.assertRaisesRegex(ValueError, "non-finite"):
             decode_simcc(x, y, split_ratio=2.0)
+
+    def test_batch_preprocess_and_decode_preserve_each_roi(self) -> None:
+        tensor = preprocess_rtmpose_images(
+            [
+                np.zeros((256, 256), dtype=np.uint8),
+                np.full((256, 256), 255, dtype=np.uint8),
+            ]
+        )
+        self.assertEqual((2, 3, 256, 256), tensor.shape)
+        x = np.zeros((2, 21, 512), dtype=np.float32)
+        y = np.zeros((2, 21, 512), dtype=np.float32)
+        x[0, :, 20] = 1.0
+        y[0, :, 40] = 1.0
+        x[1, :, 60] = 1.0
+        y[1, :, 80] = 1.0
+        decoded = decode_simcc_batch(x, y, split_ratio=2.0)
+        self.assertEqual(2, len(decoded))
+        self.assertTrue(np.all(decoded[0][0] == [10.0, 20.0]))
+        self.assertTrue(np.all(decoded[1][0] == [30.0, 40.0]))
 
     def test_runtime_roi_gets_21_points_and_handedness_classification(self) -> None:
         detector = _FakeDetector()

@@ -22,7 +22,10 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, MutableMapping,
 import cv2
 import numpy as np
 
-from .formats import read_jsonl, write_json, write_jsonl
+from .formats import read_jsonl, resolve_path, write_json, write_jsonl
+from .handedness_classifier import HandClassifierONNX
+from .image_io import read_image
+from .onnx_runtime import onnx_provider_for, onnx_runtime_settings
 from .progress import track_progress
 
 
@@ -1050,21 +1053,89 @@ def prepare_negative_review(
     dataset_root: Path,
     negative_dataset_id: str,
     candidate_rows: Sequence[Mapping[str, Any]],
+    cfg: Mapping[str, Any],
+    model_root: Path,
+    *,
+    show_progress: bool = False,
 ) -> Dict[str, Any]:
-    registry = WarehouseRegistry(dataset_root)
-    registry.reserve_negative_dataset(negative_dataset_id)
-    batch_root = Path(dataset_root).resolve() / "GoldSource" / "NegativeSamples" / negative_dataset_id
+    dataset_root = Path(dataset_root).resolve()
+    negative_dataset_id = require_safe_id(negative_dataset_id, "negative_dataset_id")
+    batch_root = dataset_root / "GoldSource" / "NegativeSamples" / negative_dataset_id
     review_root = batch_root / "review"
     if review_root.exists() or (batch_root / "published").exists():
         raise DatasetContractError(f"negative dataset workspace already exists: {batch_root}")
-    materialized: List[Dict[str, Any]] = []
-    for row in candidate_rows:
+    review_cfg = cfg.get("negative_review") or {}
+    try:
+        threshold = float(review_cfg.get("hand_presence_threshold", 0.5))
+    except (TypeError, ValueError) as exc:
+        raise DatasetContractError(
+            "negative_review.hand_presence_threshold must be a finite number in [0, 1]"
+        ) from exc
+    if not np.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+        raise DatasetContractError(
+            "negative_review.hand_presence_threshold must be a finite number in [0, 1]"
+        )
+    _default_provider, batch_size = onnx_runtime_settings(cfg)
+    provider_preference = onnx_provider_for(cfg, "hand_classifier")
+    classifier_cfg = cfg.get("hand_classifier") or {}
+    model_path = resolve_path(model_root, classifier_cfg.get("model_onnx_path", ""))
+    registry = WarehouseRegistry(dataset_root)
+    validated: List[tuple[Dict[str, Any], Path]] = []
+    for raw in candidate_rows:
+        row = dict(raw)
         if str(row.get("split")) != "train":
             raise DatasetContractError("negative review accepts Train candidates only")
         registry.assert_roi_reference(row)
-        source = Path(dataset_root).resolve() / str(row["crop_relpath"])
+        source = dataset_root / str(row["crop_relpath"])
         if not source.is_file():
             raise DatasetContractError(f"candidate ROI does not exist: {source}")
+        validated.append((row, source))
+    if not validated:
+        raise DatasetContractError("negative review requires at least one candidate")
+
+    classifier = HandClassifierONNX(model_path, provider_preference)
+    selected: List[tuple[Dict[str, Any], Path]] = []
+    excluded: List[Dict[str, Any]] = []
+    for offset in track_progress(
+        range(0, len(validated), batch_size),
+        enabled=show_progress,
+        description="Negative pre-review HCF",
+        unit="batch",
+    ):
+        chunk = validated[offset : offset + batch_size]
+        images = []
+        for _, source in chunk:
+            image = read_image(source)
+            if image is None:
+                raise DatasetContractError(f"candidate ROI is unreadable: {source}")
+            images.append(image)
+        predictions = classifier.classify_batch(images)
+        if len(predictions) != len(chunk):
+            raise DatasetContractError(
+                "Hand classifier output count does not match negative candidates"
+            )
+        for (row, source), prediction in zip(chunk, predictions):
+            score = float(prediction["hand_presence"]["score"])
+            precheck = {
+                "hand_presence_score": score,
+                "threshold": threshold,
+                "selected_for_human_review": score < threshold,
+                "model_id": classifier.model_id,
+            }
+            item = dict(row)
+            item["negative_review_precheck"] = precheck
+            if score < threshold:
+                selected.append((item, source))
+            else:
+                excluded.append(item)
+    if not selected:
+        raise DatasetContractError(
+            "negative pre-review selected no candidates below the hand-presence threshold"
+        )
+
+    registry.reserve_negative_dataset(negative_dataset_id)
+    materialized: List[Dict[str, Any]] = []
+    for row, source in selected:
         capture_id = str(row["capture_source_id"])
         destination = review_root / "images" / capture_id / source.name
         _copy_image(source, destination)
@@ -1072,15 +1143,33 @@ def prepare_negative_review(
         item["review_relpath"] = str(destination.relative_to(batch_root)).replace("\\", "/")
         materialized.append(item)
     write_jsonl(review_root / "candidate_manifest.jsonl", materialized)
+    write_jsonl(review_root / "precheck_excluded.jsonl", excluded)
     write_json(
         review_root / "README.json",
         {
             "negative_dataset_id": negative_dataset_id,
             "instruction": "Delete every image containing a hand or any uncertain content; keep only true background negatives.",
+            "input_candidate_count": len(validated),
             "candidate_count": len(materialized),
+            "precheck_excluded_count": len(excluded),
+            "hand_presence_threshold": threshold,
+            "selection_rule": "P(has_hand) < threshold",
+            "hand_classifier_model_id": classifier.model_id,
+            "onnx_provider": classifier.provider,
+            "onnx_provider_fallback_reason": classifier.fallback_reason,
+            "onnx_batch_size": batch_size,
         },
     )
-    return {"negative_dataset_id": negative_dataset_id, "candidate_count": len(materialized), "review_root": str(review_root)}
+    return {
+        "negative_dataset_id": negative_dataset_id,
+        "input_candidate_count": len(validated),
+        "candidate_count": len(materialized),
+        "precheck_excluded_count": len(excluded),
+        "hand_presence_threshold": threshold,
+        "onnx_provider": classifier.provider,
+        "onnx_batch_size": batch_size,
+        "review_root": str(review_root),
+    }
 
 
 def publish_negative_review(dataset_root: Path, negative_dataset_id: str) -> Dict[str, Any]:

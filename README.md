@@ -13,17 +13,20 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 - [数据契约](docs/annotating_system/HLMF_data_contract.md)
 - [当前状态](docs/annotating_system/HLMF_current_status.md)
 - [常见问题与解答](docs/annotating_system/HLMF_qa.md)
+- [ONNX CPU/GPU 性能报告](assets/device_perf/onnx_cpu_gpu_benchmark.md)
 
 ## 当前教师后端
 
 - 默认后端：`hand_landmark.backend: mediapipe_tasks`。
 - 单次切换：`HAND_LANDMARK_BACKEND=rtmpose_onnx`。
 - RTMPose：原始 SimCC logits 直接 argmax，除以固定 `2.0`；runtime ROI 总是输出 21 点。
-- HCF：`models/handedness-handpresence-0807/model.onnx`，输入灰度 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits；仅运行于 RTMPose runtime ROI。旧 handedness-only 资产保存在 `models/handedness-0806/`。
+- HCF：`models/hand_classifier/handedness-handpresence-0807/model.onnx`，输入灰度 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits；仅运行于 RTMPose runtime ROI。旧 handedness-only 资产保存在 `models/handedness-0806/`。
 - MediaPipe TFLite 补救：仅当 RTMPose Train runtime 未通过边界或已开启的连接长度门控时，使用纯 Hand Landmarker TFLite 重预测 21 点；presence/handedness 仍只采用 HCF。
 - Eos low-score candidate 不运行 RTMPose/HCF，保持 `unknown/null`，进入人工候选链路。
 
 ONNX/TFLite 模型遵循仓库现有忽略策略，不纳入 Git；代码和配置通过 Git 同步，模型需在执行环境中单独部署。
+
+ONNX Runtime 使用逐模型 provider：Palm 与 HCF 默认 `auto`（CUDA 可用时使用 GPU，否则回退 CPU），RTMPose 固定 CPU；后者是因为 GPU 虽更快，但在人工复核 Eval 上轻微降低了关键点精度。RTMPose/HCF 动态 batch 默认为 `64`，Palm 模型输入固定为 batch 1。可在 `onnx_runtime.model_providers` 中改为 `auto|cuda|cpu`，实测依据见性能报告。
 
 ## 常用命令
 
@@ -57,6 +60,9 @@ make batch-train-autolabel DATASET_ID=demo PROPOSAL_VARIANT=eos-2.0 \
 make batch-eval-autolabel DATASET_ID=demo-eval PROPOSAL_VARIANT=eos-2.0 \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
 
+make negative-review NEGATIVE_DATASET_ID=background-neg-0801 \
+  NEGATIVE_CANDIDATE_LABELS=/abs/candidate_negatives.jsonl
+
 make registry-check
 make compile
 make test
@@ -82,4 +88,6 @@ RTMPose Train runtime 行满足以下任一条件时整行进入 `ignored.jsonl`
 
 Presence、边界和连接长度门控只作用于 RTMPose Train runtime；handedness 门控还适用于 MediaPipe Train positive。四条门控均不改变 Eval 发布，Eos low-score candidate 也不应用 RTMPose 门控。HCF presence 是教师伪标签，Eval 正式真值仍以 CVAT 人工复核为准。
 
-主环境仍由 `requirements.txt` 管理；TFLite 补救使用独立 Python 3.11 环境和 `requirements-mediapipe-tflite.txt`，无需修改 `anfab`。
+发布报告会按既有发布优先级对四条门控做互斥计数：单来源写入 `source_publish_report.json`，dataset 总计及 `capture_source_id` 明细写入 `dataset_manifest.json`。
+
+主环境由 `requirements.txt` 管理，当前使用 `onnxruntime-gpu==1.18.0`，并为其 ABI 约束 NumPy `<2`、OpenCV `<4.11`；既有 `anfab` 需移除 CPU 包 `onnxruntime` 后更新依赖。TFLite 补救仍使用独立 Python 3.11 环境和 `requirements-mediapipe-tflite.txt`。

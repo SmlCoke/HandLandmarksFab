@@ -8,16 +8,9 @@ import numpy as np
 
 from .formats import make_palm_det_id, normalize_detection_schema
 from .image_io import read_image, to_uint8_gray
+from .onnx_runtime import create_onnx_session, onnx_provider_for
 from .palm_decode import candidate_to_schema, decode_onnx_outputs
 from .progress import track_progress
-
-
-def _load_onnxruntime():
-    try:
-        import onnxruntime as ort
-    except Exception as exc:  # pragma: no cover - depends on user environment.
-        raise RuntimeError("onnxruntime is required for palm.backend=aethersign_onnx.") from exc
-    return ort
 
 
 def preprocess_for_onnx(image: np.ndarray, input_size: int, input_type: str = "tensor(float)") -> np.ndarray:
@@ -34,11 +27,23 @@ def run_onnx_palm_detector(
     model_path: Path,
     *,
     show_progress: bool = False,
+    runtime_info: Dict[str, Any] | None = None,
 ) -> List[Dict[str, Any]]:
-    ort = _load_onnxruntime()
     if not Path(model_path).exists():
         raise FileNotFoundError(f"Palm ONNX model not found: {model_path}")
-    session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+    provider_preference = onnx_provider_for(cfg, "palm")
+    session, provider, fallback_reason = create_onnx_session(
+        model_path, provider_preference
+    )
+    if runtime_info is not None:
+        runtime_info.update(
+            {
+                "provider": provider,
+                "provider_fallback_reason": fallback_reason,
+                "batch_size": 1,
+                "batch_size_reason": "Palm ONNX input has a fixed batch dimension of 1",
+            }
+        )
     input_meta = session.get_inputs()[0]
     input_name = input_meta.name
     input_type = getattr(input_meta, "type", "tensor(float)")

@@ -4,11 +4,13 @@
 
 HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。MediaPipe Tasks 仍是全局默认 Hand landmark 后端，RTMPose-m Hand5 可通过单次参数启用。
 
-RTMPose runtime ROI 已接入新的 MobileNetV3-Small 双头 HCF。模型路径为 `models/handedness-handpresence-0807/model.onnx`，模型 ID 为 `hand-classifier-handedness-handpresence-0807`；旧 handedness-only 资产保存在 `models/handedness-0806/`，不再参与推理。新模型输入为 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits。服务器 ONNX Runtime 当前只激活 CPU；真实双模型冒烟中 RTMPose 与 HCF 均使用 `CPUExecutionProvider`，RTMPose 输出 21 个有限坐标，HCF 两个分类头均输出有限概率。Eos low-score candidate 不运行两模型，保持未解析状态。
+RTMPose runtime ROI 已接入 MobileNetV3-Small 双头 HCF。模型已移动到 `models/hand_classifier/handedness-handpresence-0807/model.onnx`，模型 ID 为 `hand-classifier-handedness-handpresence-0807`；旧 handedness-only 资产保存在 `models/handedness-0806/`，不再参与推理。服务器主环境现使用 `onnxruntime-gpu==1.18.0`。逐模型实测后，Palm/HCF 默认 CUDA 且不可用时回退 CPU，RTMPose 因 GPU 在 9,868 条人工 gold 上平均点误差增加 `0.0145 px` 而固定 CPU；RTMPose/HCF batch 为 64。完整设备性能与一致性报告位于 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。Eos low-score candidate 仍不运行 RTMPose/HCF。
 
 新 HCF 自带验证集指标：presence accuracy `0.991279`、presence ROC AUC `0.999312`；handedness accuracy `0.992248`、handedness ROC AUC `0.996689`。presence 混淆矩阵为 `[[322,3],[9,1042]]`（0=no_hand，1=has_hand）。
 
 当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 的 `P(has_hand)` 阈值为 `0.5`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝；连接对长度门控默认开启，并按 `near/mid/far` 使用独立阈值。连接长度严格超过阈值时以 `rtmpose_connection_length_gate` 进入 `ignored.jsonl`，等于阈值及长度 0 通过。关闭该开关不影响其余三条门控。Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界/连接长度门控。
+
+发布时已新增四门控互斥统计：每个 `source_publish_report.json` 记录当前 capture source/variant 的四项淘汰数，`dataset_manifest.json` 记录 dataset 总计和每个 `capture_source_id` 合计；多门控同时失败时按既有 `presence → boundary → connection length → handedness/其他` 优先级只归因一次。
 
 RTMPose Train 几何补救现已默认开启：RTMPose 点触发边界或已开启的连接长度门控时，独立 `hlmf-mp-tflite` 环境批量运行 `hand_landmark_full.tflite`；补救点通过两项几何复检才替换原点。TFLite 的 presence/handedness 被丢弃，HCF 仍是唯一置信度来源。补救失败保留原 RTMPose 点。该能力有独立开关，不改变四条门控及拒绝优先级。
 
@@ -24,7 +26,7 @@ Presence 阈值分析放在仓库外的 `/root/hcf_presence_threshold_0807/`。�
 
 服务器 Hand ROI 像素域审查覆盖 Pretrain/Eval 的 71,779 张原图 TIFF，全部为单通道 8-bit、`1280×720`；`FullEnhanceVal0801/eos-1.0` 的 8,248 张 ROI 全部为单通道 8-bit、`256×256` PNG。跨 10 个来源抽查 50 个 ROI，无损 PNG 与无损 TIFF 往返后逐像素一致。Python OpenCV 与板端 C++ 双线性采样的对比中，3,276,800 个像素仅 242 个相差 1 灰度级（0.0074%），差异来自插值舍入而非文件格式；现有 ROI、人工复核结果和发布资产均不重建。
 
-负样本和困难样本的 review/published 图片均使用独立复制；困难样本 published 记录包含 `published_relpath`，不依赖源变体存活。当前服务器存在 `background-neg-0801` review 工作区，以及已发布 1,543 条记录/图片的 `background-neg-0801-full`；本轮均未修改。
+`negative-review` 现先用 HCF 批量预审并显示进度，只复制 `P(has_hand)<0.5` 的候选，同时保存 selected/excluded 清单和分数；人工复核及 `negative-publish` 契约不变。负样本和困难样本的 review/published 图片均使用独立复制；困难样本 published 记录包含 `published_relpath`，不依赖源变体存活。当前服务器既有 `background-neg-0801` review 工作区，以及已发布 1,543 条记录/图片的 `background-neg-0801-full`；本轮均未修改。
 
 ## 服务器数据仓库
 
@@ -54,7 +56,7 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 ## 验收状态
 
 - `make compile`：33 个 Python 文件语法检查通过；
-- `make test`：54 项测试通过；
+- `make test`：59 项测试通过；
 - `make help`：通过；
 - 4 个 Bash 批处理脚本均通过 `bash -n`；未注册 Eval 来源发现测试识别 3/3 个仅含 `images/` 的来源；
 - 数据集级可视化清理与永久变体删除均在隔离临时数据仓库通过，永久删除后 dataset manifest 已重建；
@@ -65,4 +67,6 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 - `FullEnhance0801/eos_1.0-gate` 的 95 个发布来源完整保留；
 - `FullEnhanceVal0808/eos_1.0-gate_r2` 的 CVAT 导入、发布和 dataset manifest 均已完成；
 - 连接长度统计工具对正式 Eval 只读运行，报告与 YAML 的 60 个阈值一致；
-- `requirements.txt` 未改变，无需重建 `anfab`；TFLite 使用独立的 `requirements-mediapipe-tflite.txt` 和 Python 3.11 环境。
+- 三个 ONNX 模型完成 CPU/GPU 吞吐对比；Palm 4.65×、RTMPose 27.07×、HCF 15.52×，并按精度回放结果选择逐模型默认设备；
+- 隔离临时仓库真实流水线验证 provider 为 Palm CUDA / RTMPose CPU / HCF CUDA，10 条 runtime ROI 使用 batch 64；负样本 HCF 预审、进度条和两级门控统计字段均通过，临时目录已删除；
+- `requirements.txt` 已从 CPU Runtime 改为 `onnxruntime-gpu==1.18.0`，并固定兼容的 NumPy `<2`、OpenCV `<4.11`；服务器 `anfab` 已更新且 `pip check` 通过。TFLite 继续使用独立的 `requirements-mediapipe-tflite.txt` 和 Python 3.11 环境。

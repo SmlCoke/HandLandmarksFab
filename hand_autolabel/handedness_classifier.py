@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from .image_io import to_uint8_gray
+from .onnx_runtime import create_onnx_session
 
 
 HAND_CLASSIFIER_INPUT_NAME = "input"
@@ -31,6 +32,14 @@ def preprocess_hand_classifier_image(image: np.ndarray) -> np.ndarray:
     if tensor.shape != (1, 1, height, width) or not np.isfinite(tensor).all():
         raise ValueError("Hand classifier preprocessing produced an invalid input tensor")
     return np.ascontiguousarray(tensor, dtype=np.float32)
+
+
+def preprocess_hand_classifier_images(images: Sequence[np.ndarray]) -> np.ndarray:
+    if not images:
+        raise ValueError("Hand classifier batch must contain at least one image")
+    return np.concatenate(
+        [preprocess_hand_classifier_image(image) for image in images], axis=0
+    )
 
 
 def _softmax_probabilities(logits: np.ndarray, *, output_name: str) -> np.ndarray:
@@ -75,6 +84,31 @@ def decode_hand_classifier_logits(
     }
 
 
+def decode_hand_classifier_batch(
+    handedness_logits: np.ndarray,
+    hand_presence_logits: np.ndarray,
+) -> list[Dict[str, Dict[str, Any]]]:
+    handedness = np.asarray(handedness_logits)
+    presence = np.asarray(hand_presence_logits)
+    if (
+        handedness.ndim != 2
+        or presence.ndim != 2
+        or handedness.shape[1:] != (2,)
+        or presence.shape != handedness.shape
+        or handedness.shape[0] < 1
+    ):
+        raise ValueError(
+            "unexpected Hand classifier batch output shapes: "
+            f"handedness={handedness.shape}, hand_presence={presence.shape}"
+        )
+    return [
+        decode_hand_classifier_logits(
+            handedness[index : index + 1], presence[index : index + 1]
+        )
+        for index in range(handedness.shape[0])
+    ]
+
+
 def _shape_matches(actual: Sequence[Any], expected: Sequence[int | None]) -> bool:
     if len(actual) != len(expected):
         return False
@@ -89,25 +123,14 @@ def _shape_matches(actual: Sequence[Any], expected: Sequence[int | None]) -> boo
 
 
 class HandClassifierONNX:
-    def __init__(self, model_path: Path) -> None:
-        try:
-            import onnxruntime as ort
-        except Exception as exc:  # pragma: no cover - environment dependent.
-            raise RuntimeError("onnxruntime is required for the Hand classifier") from exc
-
+    def __init__(self, model_path: Path, provider_preference: str = "auto") -> None:
         model_path = Path(model_path)
         if not model_path.is_file():
             raise FileNotFoundError(f"Hand classifier ONNX model does not exist: {model_path}")
-        available = ort.get_available_providers()
-        providers = ["CPUExecutionProvider"]
-        if "CUDAExecutionProvider" in available:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        self.session = ort.InferenceSession(str(model_path), providers=providers)
+        self.session, self.provider, self.fallback_reason = create_onnx_session(
+            model_path, provider_preference
+        )
         self._validate_model_interface()
-        active = self.session.get_providers()
-        if not active:
-            raise RuntimeError("ONNX Runtime did not activate a Hand classifier execution provider")
-        self.provider = str(active[0])
         self.model_id = HAND_CLASSIFIER_MODEL_ID
 
     @staticmethod
@@ -139,11 +162,16 @@ class HandClassifierONNX:
             )
 
     def classify(self, image: np.ndarray) -> Dict[str, Dict[str, Any]]:
-        tensor = preprocess_hand_classifier_image(image)
+        return self.classify_batch([image])[0]
+
+    def classify_batch(
+        self, images: Sequence[np.ndarray]
+    ) -> list[Dict[str, Dict[str, Any]]]:
+        tensor = preprocess_hand_classifier_images(images)
         outputs = self.session.run(
             list(HAND_CLASSIFIER_OUTPUT_NAMES),
             {HAND_CLASSIFIER_INPUT_NAME: tensor},
         )
         if len(outputs) != 2:
             raise ValueError(f"Hand classifier ONNX returned {len(outputs)} outputs, expected 2")
-        return decode_hand_classifier_logits(outputs[0], outputs[1])
+        return decode_hand_classifier_batch(outputs[0], outputs[1])
