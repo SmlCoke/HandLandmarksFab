@@ -39,7 +39,7 @@ class _FakeDetector:
 
 class _FakeHandClassifier:
     provider = "FakeExecutionProvider"
-    model_id = "hand-classifier-handedness-handpresence-0807"
+    model_id = "hand-classifier-handedness-handpresence-0809"
 
     def __init__(self) -> None:
         self.calls = 0
@@ -167,11 +167,11 @@ class RTMPoseHandLabelerTests(unittest.TestCase):
         self.assertEqual({"present": True, "score": 0.98}, row["hand_presence"])
         self.assertEqual({"label": "Right", "score": 0.93}, row["handedness"])
         self.assertEqual(
-            "hand-classifier-handedness-handpresence-0807",
+            "hand-classifier-handedness-handpresence-0809",
             row["handedness_teacher_model_id"],
         )
         self.assertEqual(
-            "hand-classifier-handedness-handpresence-0807",
+            "hand-classifier-handedness-handpresence-0809",
             row["hand_presence_teacher_model_id"],
         )
         self.assertEqual(21, len(row["landmarks_crop_norm"]))

@@ -1166,6 +1166,7 @@ def prepare_negative_review(
         "candidate_count": len(materialized),
         "precheck_excluded_count": len(excluded),
         "hand_presence_threshold": threshold,
+        "hand_classifier_model_id": classifier.model_id,
         "onnx_provider": classifier.provider,
         "onnx_batch_size": batch_size,
         "review_root": str(review_root),

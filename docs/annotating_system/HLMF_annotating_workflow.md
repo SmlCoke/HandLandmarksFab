@@ -40,7 +40,7 @@ Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略�
 
 ```text
 models/palm_detector/eos-2.0/model_384x224_opt.onnx
-models/hand_classifier/handedness-handpresence-0807/model.onnx
+models/hand_classifier/handedness-handpresence-0809/model.onnx
 models/handedness-0806/
 models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
 ```
@@ -78,12 +78,12 @@ mediapipe_tflite:
   model_asset_path: models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
   python_executable: /root/miniconda3/envs/hlmf-mp-tflite/bin/python
 hand_classifier:
-  model_onnx_path: models/hand_classifier/handedness-handpresence-0807/model.onnx
+  model_onnx_path: models/hand_classifier/handedness-handpresence-0809/model.onnx
 negative_review:
   hand_presence_threshold: 0.5
 quality:
   handedness_review_threshold: 0.7
-  rtmpose_train_hand_presence_threshold: 0.5
+  rtmpose_train_hand_presence_threshold: 0.025
   rtmpose_train_boundary_coordinate_reject_threshold: 2
   rtmpose_train_mediapipe_tflite_rescue_enabled: true
   rtmpose_train_connection_length_gate_enabled: true
@@ -96,7 +96,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：Eos-2.0 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。`0.25` 是本次确认的召回/候选量折中值；ROI scale `1.8/1.8` 用于保持旧 Eval 与连接门控兼容。MediaPipe Tasks 保持 Hand landmark 全局默认；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.0 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。`negative_review.hand_presence_threshold` 只用于负样本预审，严格低于阈值才进入人工 review。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
+配置原则：Eos-2.0 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。`0.25` 是本次确认的召回/候选量折中值；ROI scale `1.8/1.8` 用于保持旧 Eval 与连接门控兼容。MediaPipe Tasks 保持 Hand landmark 全局默认；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.0 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。HCF 模型 ID 自动由 `model_onnx_path` 的父目录生成，切换版本时只需修改该路径，但版本目录必须使用安全名称。`negative_review.hand_presence_threshold=0.5` 只用于负样本预审，严格低于模型 argmax 分界的候选才进入人工 review。`rtmpose_train_hand_presence_threshold=0.025` 是针对 0809 校准的 RTMPose Train runtime 最小 `P(has_hand)`；低于阈值、缺失或非有限时整行拒绝，等于阈值通过。两项阈值用途不同，不应联动修改。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
 
 ## 3. 来源注册与图像检查
 
@@ -179,13 +179,13 @@ TFLite worker 输入为灰度 ROI，经 `224×224` 双线性缩放、三通道�
 3. **边界坐标门控**：仅对 RTMPose Train runtime 统计 21 点的 42 个 crop x/y 值。精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，并以 `ignore_reason=rtmpose_boundary_coordinate_gate` 进入 `ignored.jsonl`。
 4. **连接对长度门控**：仅在 `quality.rtmpose_train_connection_length_gate_enabled=true` 时对 RTMPose Train runtime 生效。程序按 capture source 的 `near/mid/far` 选择阈值，计算 20 条连接的 crop 像素欧氏距离；任一长度严格超过阈值时写入 `rtmpose_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，并以 `ignore_reason=rtmpose_connection_length_gate` 进入 `ignored.jsonl`。等于阈值及长度为 0 均通过；关闭开关时不解析距离或阈值。
 
-当前 presence 阈值为 `0.5`，边界阈值为 2，因此 0–1 个边界值通过。Presence、边界和连接长度门控作用于 RTMPose Train runtime 链路，包括成功采用 TFLite 补救点的行；Eval、MediaPipe 主链路和 Eos low-score candidate 不应用这三条 RTMPose 专用门控。
+当前 RTMPose Train presence 阈值为 `0.025`，边界阈值为 2，因此 0–1 个边界值通过。Presence、边界和连接长度门控作用于 RTMPose Train runtime 链路，包括成功采用 TFLite 补救点的行；Eval、MediaPipe 主链路和 Eos low-score candidate 不应用这三条 RTMPose 专用门控。
 
 TFLite 补救不是第五条门控。执行顺序为：RTMPose/HCF → 几何预检 → 必要时 TFLite 重预测并复检 → 四条质量门控发布分流。补救后的 presence/handedness 仍只来自 HCF；最终拒绝原因优先级保持 `presence → boundary → connection length → handedness/其他`。
 
 `source-publish` 按上述发布优先级为每条 rejected 行只归因一次，并把四项互斥计数写入 `source_publish_report.json.quality_gate_rejections`。`dataset_manifest.json` 同时保存 dataset 合计、每个 `capture_source_id` 合计及 `quality_gate_counting_policy=exclusive_by_publish_routing_priority`；其他通用质量问题不计入四项统计。
 
-Presence 阈值应使用与正式标注隔离的人工复核 ROI 副本重新校准。当前选择规则同时考虑：与模型 `no_hand/has_hand` 的 argmax 决策一致、拒绝人工 no_hand、尽量保留人工 hand，并避免更高阈值在单一来源上过度丢样本。当前校准中 `0.5` 拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。曾评估“全局 hand recall 至少 99% 时取最高阈值”的 `0.843369`，但它在 `complex-near-bright-random-val-s01-peak` 上只保留 88.24% 的 hand，因此未采用。
+Presence 阈值应在每次 HCF 更新后使用与正式标注隔离的人工复核 ROI 副本重新校准。0809 在 7,892 条 hand、15 条 no_hand 上沿用 `0.5` 只保留 97.149% 的 hand，最弱来源为 76.97%，说明同结构重训也不能继承旧权重的分数阈值。Train 门控最终采用 `0.025`：保留 99.582% 的 hand，最弱来源为 96.58%，同时拒绝全部人工 no_hand。`negative_review.hand_presence_threshold=0.5` 仍表示负候选的模型 argmax 分界，两项阈值用途不同。
 
 连接长度阈值来自 `FullEnhanceVal0801:eos-1.0` 与 `FullEnhanceVal0808:eos_1.0-gate_r2` 的 9,868 条人工复核 gold hand，按距离和连接取 `ceil(P99.95 × 1.05)`。Eos-2.0 通过旧 gold 只读投影回放后暂时保留这些值；这只是兼容过渡，不是正式重算。完整分布、阈值与回放结果位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`，Eos-2.0 回放依据位于 `assets/palm_detector/eos_2_0_adaptation.md`。首个代表性 Eos-2.0 Eval 人工复核并发布后，必须将下列 dataset 参数换成新 variant 后重新执行：
 
@@ -240,7 +240,7 @@ Dataset manifest 只聚合至少存在一个 `qc/<variant>/source_publish_report
 
 - MediaPipe：`label_origin=mediapipe`、`annotation_style=mediapipe_v1`。
 - RTMPose：`label_origin=rtmpose`、`annotation_style=rtmpose_m_hand5_v1`、`teacher_model_id=rtmpose-m_hand5_256x256_onnx`。
-- 双头 HCF：`handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 均为 `hand-classifier-handedness-handpresence-0807`。
+- 双头 HCF：`handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 均由模型版本目录生成；当前为 `hand-classifier-handedness-handpresence-0809`。
 - 人工复核记录 `human_reviewed`、`human_modified_landmark_ids`、`human_modified_handedness` 和 `human_modified_presence`；修点后使用 `*_human_corrected/project_consensus_v1`。
 - 未推理 candidate：两个 HCF teacher ID 均为 null，provenance 为 `unresolved/unlabeled_v1`，不伪装为教师标签。
 
@@ -322,7 +322,7 @@ make hard-review SELECTION_ID=hard-0801 MINING_REQUEST=/abs/request.jsonl
 make hard-publish SELECTION_ID=hard-0801
 ```
 
-`negative-review` 先用 HCF 批量计算每个候选的 `P(has_hand)`，终端显示进度；仅严格低于 `negative_review.hand_presence_threshold` 的 ROI 被复制到 `review/images/`。`candidate_manifest.jsonl` 保存所选行及 `negative_review_precheck`，`precheck_excluded.jsonl` 保存未复制行及其分数，`README.json` 汇总阈值、数量、provider 与 batch。人工仍需删除有手或不确定图片，再执行 `negative-publish`；预审不是正式负标签，等于阈值的候选不进入 review。
+`negative-review` 从同一 `hand_classifier.model_onnx_path` 加载当前 HCF（现为 0809），批量计算每个候选的 `P(has_hand)` 并显示进度；仅严格低于 `negative_review.hand_presence_threshold` 的 ROI 被复制到 `review/images/`。`candidate_manifest.jsonl` 保存所选行及 `negative_review_precheck`，`precheck_excluded.jsonl` 保存未复制行及其分数，两者都记录实际 `model_id`；`README.json` 汇总模型 ID、阈值、数量、provider 与 batch。人工仍需删除有手或不确定图片，再执行 `negative-publish`；预审不是正式负标签，等于阈值的候选不进入 review。
 
 review 和 published 图片都使用普通独立复制，不创建硬链接。困难样本 published 目录拥有自己的图片副本，`selection.jsonl` 同时保存 `source_crop_relpath` 与 `published_relpath`；因此源变体被删除后，已发布负样本/困难样本仍可读取。
 

@@ -671,7 +671,7 @@ class DatasetV3Tests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml"
         )
         classifier = SimpleNamespace(
-            model_id="hand-classifier-handedness-handpresence-0807",
+            model_id="hand-classifier-handedness-handpresence-0809",
             provider="CPUExecutionProvider",
             fallback_reason=None,
             classify_batch=lambda images: [
@@ -694,6 +694,10 @@ class DatasetV3Tests(unittest.TestCase):
                 Path(__file__).resolve().parents[1],
             )
         review_image = next(Path(result["review_root"]).glob("images/*/*"))
+        self.assertEqual(
+            "hand-classifier-handedness-handpresence-0809",
+            result["hand_classifier_model_id"],
+        )
         self.assertNotEqual(os.stat(crop).st_ino, os.stat(review_image).st_ino)
         self.assertEqual(crop.read_bytes(), review_image.read_bytes())
         manifest = publish_negative_review(self.root, "neg-r1")
@@ -742,7 +746,7 @@ class DatasetV3Tests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml"
         )
         classifier = SimpleNamespace(
-            model_id="hand-classifier-handedness-handpresence-0807",
+            model_id="hand-classifier-handedness-handpresence-0809",
             provider="CUDAExecutionProvider",
             fallback_reason=None,
             classify_batch=lambda _images: [
@@ -774,6 +778,14 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertEqual(1, result["precheck_excluded_count"])
         self.assertEqual("roi_test001", selected[0]["roi_id"])
         self.assertEqual("roi_test002", excluded[0]["roi_id"])
+        self.assertEqual(
+            "hand-classifier-handedness-handpresence-0809",
+            selected[0]["negative_review_precheck"]["model_id"],
+        )
+        self.assertEqual(
+            "hand-classifier-handedness-handpresence-0809",
+            excluded[0]["negative_review_precheck"]["model_id"],
+        )
         self.assertFalse(
             excluded[0]["negative_review_precheck"]["selected_for_human_review"]
         )

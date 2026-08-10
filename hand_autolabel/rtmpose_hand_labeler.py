@@ -6,10 +6,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 import cv2
 import numpy as np
 
-from .handedness_classifier import (
-    HAND_CLASSIFIER_MODEL_ID,
-    HandClassifierONNX,
-)
+from .handedness_classifier import HandClassifierONNX
 from .formats import make_hand_id, merge_label_with_manifest, resolve_path
 from .image_io import read_image, to_uint8_gray
 from .mediapipe_tflite_rescue import (
@@ -222,7 +219,18 @@ def label_one_roi_rtmpose(
 
     coordinates, _scores = detector.detect(image)
     classification = hand_classifier.classify(image)
-    return _label_rtmpose_outputs(manifest, coordinates, classification, cfg)
+    hand_classifier_model_id = str(
+        getattr(hand_classifier, "model_id", "")
+    ).strip()
+    if not hand_classifier_model_id:
+        raise ValueError("Hand classifier runtime must expose a non-empty model_id")
+    return _label_rtmpose_outputs(
+        manifest,
+        coordinates,
+        classification,
+        cfg,
+        hand_classifier_model_id=hand_classifier_model_id,
+    )
 
 
 def _label_rtmpose_outputs(
@@ -230,6 +238,8 @@ def _label_rtmpose_outputs(
     coordinates: np.ndarray,
     classification: Mapping[str, Any],
     cfg: Mapping[str, Any],
+    *,
+    hand_classifier_model_id: str,
 ) -> Dict[str, Any]:
     output_size = manifest.get("output_size") or [
         cfg["hand_roi"]["output_width"],
@@ -263,8 +273,8 @@ def _label_rtmpose_outputs(
         "hand_id": make_hand_id(str(manifest["crop_id"])),
         "hand_presence": classification["hand_presence"],
         "handedness": classification["handedness"],
-        "handedness_teacher_model_id": HAND_CLASSIFIER_MODEL_ID,
-        "hand_presence_teacher_model_id": HAND_CLASSIFIER_MODEL_ID,
+        "handedness_teacher_model_id": hand_classifier_model_id,
+        "hand_presence_teacher_model_id": hand_classifier_model_id,
         "human_modified_handedness": False,
         "human_modified_presence": False,
         "landmarks_crop_norm": crop_norm,
@@ -351,7 +361,11 @@ def label_roi_manifest_rtmpose(
                 chunk, pose_outputs, classifications
             ):
                 labeled_row = _label_rtmpose_outputs(
-                    manifest, coordinates, classification, cfg
+                    manifest,
+                    coordinates,
+                    classification,
+                    cfg,
+                    hand_classifier_model_id=hand_classifier.model_id,
                 )
                 # The shared geometry gates route on these manifest fields. The public
                 # pipeline attaches them again after labeling, but rescue must run first.

@@ -11,10 +11,10 @@ import numpy as np
 
 from hand_autolabel.handedness_classifier import (
     HAND_CLASSIFIER_MEAN,
-    HAND_CLASSIFIER_MODEL_ID,
     HAND_CLASSIFIER_STD,
     HandClassifierONNX,
     decode_hand_classifier_logits,
+    hand_classifier_model_id_from_path,
     preprocess_hand_classifier_image,
 )
 
@@ -93,16 +93,31 @@ class HandClassifierTests(unittest.TestCase):
             InferenceSession=_FakeSession,
         )
         with tempfile.TemporaryDirectory() as temporary:
-            model = Path(temporary) / "model.onnx"
+            model = Path(temporary) / "handedness-handpresence-0809" / "model.onnx"
+            model.parent.mkdir()
             model.write_bytes(b"test")
             with patch.dict(sys.modules, {"onnxruntime": fake_ort}):
                 classifier = HandClassifierONNX(model)
                 result = classifier.classify(np.zeros((256, 256), dtype=np.uint8))
         self.assertEqual("CUDAExecutionProvider", classifier.provider)
-        self.assertEqual(HAND_CLASSIFIER_MODEL_ID, classifier.model_id)
+        self.assertEqual(
+            "hand-classifier-handedness-handpresence-0809", classifier.model_id
+        )
         self.assertEqual("Right", result["handedness"]["label"])
         self.assertTrue(result["hand_presence"]["present"])
         self.assertAlmostEqual(0.880797, result["hand_presence"]["score"], places=6)
+
+    def test_model_id_is_derived_from_version_directory(self) -> None:
+        self.assertEqual(
+            "hand-classifier-handedness-handpresence-0809",
+            hand_classifier_model_id_from_path(
+                Path("models/hand_classifier/handedness-handpresence-0809/model.onnx")
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "safely named"):
+            hand_classifier_model_id_from_path(
+                Path("models/hand_classifier/bad version/model.onnx")
+            )
 
     def test_interface_rejects_static_batch_and_wrong_outputs(self) -> None:
         session = _FakeSession("unused", ["CPUExecutionProvider"])

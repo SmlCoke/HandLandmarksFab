@@ -80,3 +80,11 @@ These five documents serve as the primary interface documentation for the reposi
 ### 4.4 Principle of Environment Dependency
 
 - Whenever you modify the code or add a new model, remember to check if the repository's environment dependencies have changed. If they have, update `requirements.txt` and remind me to update the `anfab` environment.
+
+### 4.5 Principle of Model-version Recalibration
+
+1. Treat thresholds, ROI geometry, and device-selection conclusions as model-version-specific calibration assets. A replacement model must not inherit them merely because its architecture and ONNX interface are unchanged; retrained weights can change score calibration and output geometry.
+2. When updating the Hand Classifier, rerun read-only evaluation on representative human-reviewed labels. Revalidate the RTMPose Train hand-presence threshold, negative-candidate review threshold, handedness quality threshold, CPU/GPU output consistency, and CPU/GPU throughput. Keep thresholds with different purposes independent, and update model provenance so labels identify the model version actually used.
+3. When updating Eos or another Palm Detector, rerun score and NMS sweeps and revalidate the score threshold, negative-candidate threshold, NMS IoU threshold, maximum detections, decoded geometry, ROI scale/shift, CPU/GPU consistency, and throughput. Historical Eval may be used for compatibility replay, but it does not replace a representative human-reviewed Eval produced with the new Palm model.
+4. Recompute geometry-dependent quality thresholds whenever an upstream model or ROI rule can change crop geometry. This includes RTMPose connection-pair length thresholds after Eos, ROI, or Hand Landmarker updates. Use newly produced, human-reviewed, published representative Eval labels for the formal recomputation, then replay both gold and draft labels before adopting the thresholds.
+5. Keep the formal `HAND_DATASET_ROOT` read-only during calibration analysis unless the user explicitly authorizes a dataset operation. Use isolated temporary outputs, record the dataset/model/method/results and final parameters in the applicable `assets/` report, remove disposable temporary assets, and synchronize configuration plus the four core interface documents when the adopted model or thresholds change.

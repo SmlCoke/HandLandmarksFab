@@ -25,7 +25,7 @@ make test
 mkdir -p models/mediapipe/hand_landmarker_tflite
 # 将 Eos-2.0 部署到 models/palm_detector/eos-2.0/model_384x224_opt.onnx。
 # 将 hand_landmark_full.tflite 部署到上述目录。
-# 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0807/model.onnx。
+# 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0809/model.onnx。
 ```
 
 输出：代码和环境检查结果。默认 Eos-2.0 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，默认 proposal variant 为 `eos-2.0`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
@@ -45,7 +45,7 @@ make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 ## 3. Train 自动标注
 
-输入：已注册 train 来源、Eos、RTMPose、双头 HCF 和 TFLite 补救资产；当前 presence 阈值为 `0.5`，连接长度门控及 `rtmpose_train_mediapipe_tflite_rescue_enabled` 均默认开启。分别设为 `false` 可独立关闭连接长度门控或补救。
+输入：已注册 train 来源、Eos、RTMPose、双头 HCF 和 TFLite 补救资产；当前 RTMPose Train presence 阈值为 `0.025`，连接长度门控及 `rtmpose_train_mediapipe_tflite_rescue_enabled` 均默认开启。分别设为 `false` 可独立关闭连接长度门控或补救。
 
 ```bash
 make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
@@ -159,7 +159,7 @@ make hard-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   SELECTION_ID=hard-0801
 ```
 
-输出：HCF 预审进度、仅含 `P(has_hand)<0.5` 的 review 独立图片副本、`candidate_manifest.jsonl`、`precheck_excluded.jsonl`，以及人工复核后的 published 独立副本和 manifest。
+输出：当前 0809 HCF 的预审进度、仅含 `P(has_hand)<0.5` 的 review 独立图片副本、带实际模型 ID 的 `candidate_manifest.jsonl`/`precheck_excluded.jsonl`，以及人工复核后的 published 独立副本和 manifest。
 
 ## 8. 永久删除一个来源变体
 

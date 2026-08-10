@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, Sequence
 
@@ -16,7 +17,15 @@ HAND_CLASSIFIER_INPUT_SIZE = (256, 256)
 HANDEDNESS_LABELS = ("Left", "Right")
 HAND_CLASSIFIER_MEAN = 0.485
 HAND_CLASSIFIER_STD = 0.229
-HAND_CLASSIFIER_MODEL_ID = "hand-classifier-handedness-handpresence-0807"
+
+
+def hand_classifier_model_id_from_path(model_path: Path) -> str:
+    version = Path(model_path).parent.name.strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", version):
+        raise ValueError(
+            "Hand classifier model must be stored in a safely named version directory"
+        )
+    return f"hand-classifier-{version}"
 
 
 def preprocess_hand_classifier_image(image: np.ndarray) -> np.ndarray:
@@ -127,11 +136,11 @@ class HandClassifierONNX:
         model_path = Path(model_path)
         if not model_path.is_file():
             raise FileNotFoundError(f"Hand classifier ONNX model does not exist: {model_path}")
+        self.model_id = hand_classifier_model_id_from_path(model_path)
         self.session, self.provider, self.fallback_reason = create_onnx_session(
             model_path, provider_preference
         )
         self._validate_model_interface()
-        self.model_id = HAND_CLASSIFIER_MODEL_ID
 
     @staticmethod
     def _validate_tensor_type(node: Any, *, description: str) -> None:

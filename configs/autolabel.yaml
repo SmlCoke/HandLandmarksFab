@@ -89,7 +89,7 @@ mediapipe_tflite:
   python_executable: "${HLMF_MEDIAPIPE_TFLITE_PYTHON:-/root/miniconda3/envs/hlmf-mp-tflite/bin/python}"
 
 hand_classifier:
-  model_onnx_path: models/hand_classifier/handedness-handpresence-0807/model.onnx
+  model_onnx_path: models/hand_classifier/handedness-handpresence-0809/model.onnx
 
 negative_review:
   # Only candidates with P(has_hand) strictly below this value enter manual review.
@@ -98,7 +98,7 @@ negative_review:
 quality:
   handedness_review_threshold: 0.7
   # P(has_hand); derived from 7,907 human-reviewed FullEnhanceVal0801 ROIs.
-  rtmpose_train_hand_presence_threshold: 0.5
+  rtmpose_train_hand_presence_threshold: 0.025
   rtmpose_train_boundary_coordinate_reject_threshold: 2
   # Retry RTMPose Train rows that fail a geometry gate with the landmark-only TFLite model.
   rtmpose_train_mediapipe_tflite_rescue_enabled: true

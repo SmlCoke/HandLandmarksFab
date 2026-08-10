@@ -33,7 +33,7 @@ class _Detector:
 
 class _Classifier:
     provider = "FakeExecutionProvider"
-    model_id = "hand-classifier-handedness-handpresence-0807"
+    model_id = "hand-classifier-handedness-handpresence-0809"
 
     def __init__(self, *, presence_score: float = 0.98) -> None:
         self.presence_score = presence_score
@@ -256,7 +256,7 @@ class RTMPoseTFLiteRescueTests(unittest.TestCase):
             "mediapipe-hand-landmark-full-tflite", published["teacher_model_id"]
         )
         self.assertEqual(
-            "hand-classifier-handedness-handpresence-0807",
+            "hand-classifier-handedness-handpresence-0809",
             published["hand_presence_teacher_model_id"],
         )
         positives, candidates, ignored = _partition_labels([published], "train", cfg)
