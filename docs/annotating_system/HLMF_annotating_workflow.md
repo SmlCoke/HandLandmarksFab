@@ -36,9 +36,10 @@ make test
   -r requirements-mediapipe-tflite.txt
 ```
 
-Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略，需要在执行环境单独部署。当前双头 HCF 与上一版归档路径为：
+Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略，需要在执行环境单独部署。当前默认 Eos-2.0、双头 HCF 与上一版归档路径为：
 
 ```text
+models/palm_detector/eos-2.0/model_384x224_opt.onnx
 models/hand_classifier/handedness-handpresence-0807/model.onnx
 models/handedness-0806/
 models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
@@ -49,6 +50,18 @@ models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
 关键配置：
 
 ```yaml
+palm:
+  model_id: eos-2.0
+  input_width: 384
+  input_height: 224
+  score_threshold: 0.25
+  nms_iou_threshold: 0.10
+  max_detections: 2
+hand_roi:
+  scale_x: 1.8
+  scale_y: 1.8
+  shift_x: 0.0
+  shift_y: -0.1
 hand_landmark:
   backend: mediapipe_tasks
 onnx_runtime:
@@ -83,7 +96,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：MediaPipe Tasks 保持全局默认；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。`negative_review.hand_presence_threshold` 只用于负样本预审，严格低于阈值才进入人工 review。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
+配置原则：Eos-2.0 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。`0.25` 是本次确认的召回/候选量折中值；ROI scale `1.8/1.8` 用于保持旧 Eval 与连接门控兼容。MediaPipe Tasks 保持 Hand landmark 全局默认；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.0 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。`negative_review.hand_presence_threshold` 只用于负样本预审，严格低于阈值才进入人工 review。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
 
 ## 3. 来源注册与图像检查
 
@@ -174,7 +187,7 @@ TFLite 补救不是第五条门控。执行顺序为：RTMPose/HCF → 几何预
 
 Presence 阈值应使用与正式标注隔离的人工复核 ROI 副本重新校准。当前选择规则同时考虑：与模型 `no_hand/has_hand` 的 argmax 决策一致、拒绝人工 no_hand、尽量保留人工 hand，并避免更高阈值在单一来源上过度丢样本。当前校准中 `0.5` 拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。曾评估“全局 hand recall 至少 99% 时取最高阈值”的 `0.843369`，但它在 `complex-near-bright-random-val-s01-peak` 上只保留 88.24% 的 hand，因此未采用。
 
-连接长度阈值来自 `FullEnhanceVal0801:eos-1.0` 与 `FullEnhanceVal0808:eos_1.0-gate_r2` 的 9,868 条人工复核 gold hand，按距离和连接取 `ceil(P99.95 × 1.05)`。完整分布、阈值与回放结果位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。新增代表性 Eval 数据，或更新 Eos/ROI 几何后，应重新执行：
+连接长度阈值来自 `FullEnhanceVal0801:eos-1.0` 与 `FullEnhanceVal0808:eos_1.0-gate_r2` 的 9,868 条人工复核 gold hand，按距离和连接取 `ceil(P99.95 × 1.05)`。Eos-2.0 通过旧 gold 只读投影回放后暂时保留这些值；这只是兼容过渡，不是正式重算。完整分布、阈值与回放结果位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`，Eos-2.0 回放依据位于 `assets/palm_detector/eos_2_0_adaptation.md`。首个代表性 Eos-2.0 Eval 人工复核并发布后，必须将下列 dataset 参数换成新 variant 后重新执行：
 
 ```bash
 python -B tools/analyze_rtmpose_connection_lengths.py   --dataset-root /root/autodl-tmp/DatesetFab   --dataset FullEnhanceVal0801:eos-1.0   --dataset FullEnhanceVal0808:eos_1.0-gate_r2   --config configs/autolabel.yaml   --output assets/quality_gate/rtmpose_connection_length_distribution.md

@@ -68,6 +68,30 @@ ROI ID 不包含图片扩展名，但 `crop_path/crop_relpath` 是精确文件�
 
 Eos 产生 `proposal_kind=runtime|negative_candidate`。ROI manifest 至少保存 dataset/source/split、raw/ROI ID、proposal variant/slot/kind、Palm score、`palm_valid`、crop 路径与尺寸、ROI rect/corners 和 ROI contract version。
 
+默认 Palm 模型为 Eos-2.0，proposal variant 为 `eos-2.0`。输入契约是灰度 `uint8 → INTER_AREA 384×224 → float32/[0,1] → NCHW [1,1,224,384]`；输出为 `14×24` 与 `7×12` 两级 regression/classification，共 840 anchors。配置接口为：
+
+```yaml
+paths:
+  palm_model_onnx: models/palm_detector/eos-2.0/model_384x224_opt.onnx
+palm:
+  model_id: eos-2.0
+  input_width: 384
+  input_height: 224
+  onnx_output_layout: nchw
+  feature_levels: [...]  # 每级 name/height/width/两个 anchor_sizes
+  score_threshold: 0.25
+  nms_iou_threshold: 0.10
+  max_detections: 2
+  negative_candidate_threshold: 0.15
+hand_roi:
+  scale_x: 1.8
+  scale_y: 1.8
+  shift_x: 0.0
+  shift_y: -0.1
+```
+
+所有 level 的候选合并后执行一次全局 NMS；旧 `cross_head_suppress_iou` 不再属于配置契约。HLMF 原图仍必须是实际 `1280×720` upright 图像，不接受在 Palm 预处理阶段临时旋转 portrait 输入。
+
 Palm bbox、p0、p9 与 ROI 几何是程序输出，CVAT 不得修改。所有 Hand ROI 固定为单通道 `uint8 256×256`，以无损 PNG 保存。模型输入契约是图片解码后的灰度像素数组，不是 PNG/TIFF 容器；相同 `uint8` 数组使用无损 PNG 或无损 TIFF 编解码后像素一致。板端从摄像头 `SSNE_Y_8` 内存构造 ROI，不读取 TIFF 文件作为 Hand Landmarker 输入。
 
 原图若是 `uint16`、彩色、不同有效动态范围或经过有损编码，必须重新审查灰度转换与归一化，不能沿用当前 8-bit 单通道数据域结论。
@@ -168,7 +192,9 @@ mediapipe_tflite_rescue.enabled/model_id/attempted/accepted/rejected
 
 MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 的实际 ONNX provider、fallback 原因、batch size、HCF 模型 ID 和 HCF 推理数。Palm 的 `palm_detection_report.json.onnx_runtime` 记录 provider、fallback 原因及固定 batch 1 的原因。
 
-`onnx_runtime.provider` 及 `onnx_runtime.model_providers.{palm,rtmpose,hand_classifier}` 只接受 `auto|cuda|cpu`；`auto` 为 CUDA 优先并允许 CPU fallback，`cuda` 在 CUDA provider 未激活时失败，`cpu` 固定 CPU。`onnx_runtime.batch_size` 必须是正整数。当前模型路径为 `models/hand_classifier/handedness-handpresence-0807/model.onnx`。
+`palm_detection_report.json.onnx_runtime.model_contract` 记录 Eos model ID/相对路径、输入名称/形状/类型、四个输出名称/形状、预处理、layout、feature levels、anchor 总数及 score/NMS/max/negative 阈值。运行前模型输入输出必须与配置完全匹配；不匹配时明确终止，不产生 Palm manifest。
+
+`onnx_runtime.provider` 及 `onnx_runtime.model_providers.{palm,rtmpose,hand_classifier}` 只接受 `auto|cuda|cpu`；`auto` 为 CUDA 优先并允许 CPU fallback，`cuda` 在 CUDA provider 未激活时失败，`cpu` 固定 CPU。`onnx_runtime.batch_size` 必须是正整数。当前 HCF 模型路径为 `models/hand_classifier/handedness-handpresence-0807/model.onnx`。
 
 ## 7. Train 发布分流
 

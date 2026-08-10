@@ -4,6 +4,10 @@
 
 HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。MediaPipe Tasks 仍是全局默认 Hand landmark 后端，RTMPose-m Hand5 可通过单次参数启用。
 
+默认 Palm Detector 已升级为 Eos-2.0：模型路径 `models/palm_detector/eos-2.0/model_384x224_opt.onnx`，默认 proposal variant `eos-2.0`，输入 `[1,1,224,384]`，score `0.25`、全局 NMS IoU `0.10`、最多 2 手。两个矩形 feature level 为 `14×24/7×12`，共 840 anchors。ROI 兼容性优先，继续使用 `scale_x=scale_y=1.8、shift_x=0、shift_y=-0.1`。
+
+Eos-2.0 TensorFlow 参考模型参数量为 `1,367,620`，ONNX full checker 通过；17 组随机/真实输入的 TF↔ONNX raw 最大差 `5.4e-7`，CPU↔GPU 为 `5.6e-7`，score `0.15/0.25` 解码数量一致。Eos-2.0 Palm CPU/GPU 吞吐为 `175.0/426.2 images/s`，因此保持 GPU 优先、CPU fallback。完整审计位于 `assets/palm_detector/eos_2_0_adaptation.md`。
+
 RTMPose runtime ROI 已接入 MobileNetV3-Small 双头 HCF。模型已移动到 `models/hand_classifier/handedness-handpresence-0807/model.onnx`，模型 ID 为 `hand-classifier-handedness-handpresence-0807`；旧 handedness-only 资产保存在 `models/handedness-0806/`，不再参与推理。服务器主环境现使用 `onnxruntime-gpu==1.18.0`。逐模型实测后，Palm/HCF 默认 CUDA 且不可用时回退 CPU，RTMPose 因 GPU 在 9,868 条人工 gold 上平均点误差增加 `0.0145 px` 而固定 CPU；RTMPose/HCF batch 为 64。完整设备性能与一致性报告位于 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。Eos low-score candidate 仍不运行 RTMPose/HCF。
 
 新 HCF 自带验证集指标：presence accuracy `0.991279`、presence ROC AUC `0.999312`；handedness accuracy `0.992248`、handedness ROC AUC `0.996689`。presence 混淆矩阵为 `[[322,3],[9,1042]]`（0=no_hand，1=has_hand）。
@@ -18,7 +22,7 @@ RTMPose Train 几何补救现已默认开启：RTMPose 点触发边界或已开�
 
 Presence 阈值分析放在仓库外的 `/root/hcf_presence_threshold_0807/`。分析使用复制出的 `FullEnhanceVal0801` 人工复核 ROI，没有写入现有数据集。有效样本共 7,907 条：7,892 条 hand、15 条 no_hand。正样本 `P(has_hand)` 均值为 `0.993917`，no_hand 最大值为 `0.0192493`。正式阈值 `0.5` 与模型 argmax 决策边界一致，拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。全局 recall 约束产生的候选阈值 `0.843369` 虽仍保留 99.0117% 的全局 hand，却把一个来源的 hand recall 降至 88.24%，因此未采用；`0.5` 在该来源的已知 recall 为 94.75%，这部分低置信 ROI 在 Train 中会被拒绝，Eval 仍由人工复核纠正。
 
-连接长度统计使用 `FullEnhanceVal0801:eos-1.0` 与 `FullEnhanceVal0808:eos_1.0-gate_r2` 的 13 个已发布来源，共 9,868 条有效 gold hand。阈值为各距离/连接的 `ceil(P99.95 × 1.05)`；gold 回放保留 9,832/9,868（99.635%），RTMPose 草标命中 366 条，其中 352 条后来确有人工修点。可复现工具位于 `tools/analyze_rtmpose_connection_lengths.py`，简洁统计资产位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
+连接长度统计使用 `FullEnhanceVal0801:eos-1.0` 与 `FullEnhanceVal0808:eos_1.0-gate_r2` 的 13 个已发布来源，共 9,868 条有效 gold hand。阈值为各距离/连接的 `ceil(P99.95 × 1.05)`；gold 回放保留 9,832/9,868（99.635%），RTMPose 草标命中 366 条，其中 352 条后来确有人工修点。Eos-2.0 以旧 gold 做只读兼容回放：9,176 条关联 hand 在 scale `1.8` 下整手入框率为 99.902%，旧门控命中 52 条（0.567%），因此暂留旧阈值并保持门控开启；首个 Eos-2.0 人工复核 Eval 发布后必须正式重算。可复现工具位于 `tools/analyze_rtmpose_connection_lengths.py` 与 `tools/analyze_eos2_adaptation.py`。
 
 原图可视化默认生成按 PNG 文件名字典序排列的 30 FPS MP4；RTMPose ROI 可视化只抽样 runtime ROI。可视化可以独立清理。Registry 使用 source/variant active/retired 状态表，删除变体会留下永久 tombstone。
 
@@ -67,6 +71,7 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 - `FullEnhance0801/eos_1.0-gate` 的 95 个发布来源完整保留；
 - `FullEnhanceVal0808/eos_1.0-gate_r2` 的 CVAT 导入、发布和 dataset manifest 均已完成；
 - 连接长度统计工具对正式 Eval 只读运行，报告与 YAML 的 60 个阈值一致；
-- 三个 ONNX 模型完成 CPU/GPU 吞吐对比；Palm 4.65×、RTMPose 27.07×、HCF 15.52×，并按精度回放结果选择逐模型默认设备；
+- 三个 ONNX 模型完成 CPU/GPU 吞吐对比；Eos-2.0 Palm 2.43×、RTMPose 27.07×、HCF 15.52×，并按精度回放结果选择逐模型默认设备；
+- Eos-2.0 模型结构、H5/ONNX 数值和 CPU/GPU 解码一致性通过；307 张测试 TIFF 在 score `0.25`、NMS `0.10` 下得到 543 个 detection、8 张零检测，旧 Eval 兼容回放全程只读；
 - 隔离临时仓库真实流水线验证 provider 为 Palm CUDA / RTMPose CPU / HCF CUDA，10 条 runtime ROI 使用 batch 64；负样本 HCF 预审、进度条和两级门控统计字段均通过，临时目录已删除；
 - `requirements.txt` 已从 CPU Runtime 改为 `onnxruntime-gpu==1.18.0`，并固定兼容的 NumPy `<2`、OpenCV `<4.11`；服务器 `anfab` 已更新且 `pip check` 通过。TFLite 继续使用独立的 `requirements-mediapipe-tflite.txt` 和 Python 3.11 环境。

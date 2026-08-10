@@ -1,6 +1,6 @@
 # HandLandmarkerFab（HLMF 3.0）
 
-HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。系统从 Eos Palm Detector 的 bbox、p0、p9 构造固定 `256×256` Hand ROI，再由 MediaPipe Tasks 或 RTMPose-m Hand5 生成 21 点草标；RTMPose runtime ROI 的 Left/Right 与 hand presence 由独立双头 HCF ONNX 分类器给出。
+HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。系统默认从 Eos-2.0 Palm Detector 的 bbox、p0、p9 构造固定 `256×256` Hand ROI，再由 MediaPipe Tasks 或 RTMPose-m Hand5 生成 21 点草标；RTMPose runtime ROI 的 Left/Right 与 hand presence 由独立双头 HCF ONNX 分类器给出。
 
 本仓库只制作 Hand Landmarker 数据。Palm 几何不能人工修改，人工复核对象是程序生成的 Hand ROI、21 个关键点、handedness 以及 `no_hand/ignore_for_training` 状态。
 
@@ -13,10 +13,12 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 - [数据契约](docs/annotating_system/HLMF_data_contract.md)
 - [当前状态](docs/annotating_system/HLMF_current_status.md)
 - [常见问题与解答](docs/annotating_system/HLMF_qa.md)
+- [Eos-2.0 审计与适配报告](assets/palm_detector/eos_2_0_adaptation.md)
 - [ONNX CPU/GPU 性能报告](assets/device_perf/onnx_cpu_gpu_benchmark.md)
 
 ## 当前教师后端
 
+- Palm：默认 Eos-2.0，输入灰度 `[1,1,224,384]`，score `0.25`、全局 NMS IoU `0.10`、840 anchors；ROI scale 保持 `1.8/1.8`。默认 proposal variant 为 `eos-2.0`。
 - 默认后端：`hand_landmark.backend: mediapipe_tasks`。
 - 单次切换：`HAND_LANDMARK_BACKEND=rtmpose_onnx`。
 - RTMPose：原始 SimCC logits 直接 argmax，除以固定 `2.0`；runtime ROI 总是输出 21 点。
@@ -26,7 +28,7 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 
 ONNX/TFLite 模型遵循仓库现有忽略策略，不纳入 Git；代码和配置通过 Git 同步，模型需在执行环境中单独部署。
 
-ONNX Runtime 使用逐模型 provider：Palm 与 HCF 默认 `auto`（CUDA 可用时使用 GPU，否则回退 CPU），RTMPose 固定 CPU；后者是因为 GPU 虽更快，但在人工复核 Eval 上轻微降低了关键点精度。RTMPose/HCF 动态 batch 默认为 `64`，Palm 模型输入固定为 batch 1。可在 `onnx_runtime.model_providers` 中改为 `auto|cuda|cpu`，实测依据见性能报告。
+ONNX Runtime 使用逐模型 provider：Eos-2.0 Palm 与 HCF 默认 `auto`（CUDA 可用时使用 GPU，否则回退 CPU），RTMPose 固定 CPU；后者是因为 GPU 虽更快，但在人工复核 Eval 上轻微降低了关键点精度。RTMPose/HCF 动态 batch 默认为 `64`，Palm 模型输入固定为 batch 1。可在 `onnx_runtime.model_providers` 中改为 `auto|cuda|cpu`，实测依据见性能报告。
 
 ## 常用命令
 
@@ -82,7 +84,7 @@ RTMPose Train runtime 行满足以下任一条件时整行进入 `ignored.jsonl`
 - 42 个 crop 坐标值中，精确边界值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`（当前 `2`）；
 - 开启连接长度门控时，任一指定连接的 crop 像素长度严格超过当前 `near/mid/far` 阈值。
 
-连接长度门控由 `quality.rtmpose_train_connection_length_gate_enabled` 独立控制并默认开启；关闭时不解析距离或阈值。其阈值来自 9,868 条人工复核 gold hand 的 `ceil(P99.95 × 1.05)`，完整统计见 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
+连接长度门控由 `quality.rtmpose_train_connection_length_gate_enabled` 独立控制并默认开启；关闭时不解析距离或阈值。其阈值来自 Eos-1.x ROI 上 9,868 条人工复核 gold hand 的 `ceil(P99.95 × 1.05)`。Eos-2.0 兼容回放暂时支持继续使用旧值；首个代表性 Eos-2.0 Eval 人工复核并发布后必须正式重算。完整统计见 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
 
 `quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 默认开启。RTMPose 触发边界或已开启的连接长度门控时，程序批量调用 `models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite`；补救结果通过两项几何检查才替换关键点，否则保留原 RTMPose 点并继续拒绝。关闭后不读取 TFLite 模型或独立环境配置。该补救不是第五条门控，也不使用 TFLite 的 presence/handedness 输出。
 

@@ -2,7 +2,7 @@
 
 ## 1. 环境检查
 
-输入：仓库、现有 `anfab` 环境和已部署的 Eos/Hand landmark ONNX；RTMPose 模式还需要双头 HCF，以及默认开启的 MediaPipe TFLite 补救模型和独立环境。
+输入：仓库、现有 `anfab` 环境、`models/palm_detector/eos-2.0/model_384x224_opt.onnx` 和 Hand landmark ONNX；RTMPose 模式还需要双头 HCF，以及默认开启的 MediaPipe TFLite 补救模型和独立环境。
 
 ```bash
 cd /root/HandLandmarksFab
@@ -23,11 +23,12 @@ make test
 /root/miniconda3/envs/hlmf-mp-tflite/bin/python -m pip install \
   -r requirements-mediapipe-tflite.txt
 mkdir -p models/mediapipe/hand_landmarker_tflite
+# 将 Eos-2.0 部署到 models/palm_detector/eos-2.0/model_384x224_opt.onnx。
 # 将 hand_landmark_full.tflite 部署到上述目录。
 # 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0807/model.onnx。
 ```
 
-输出：代码和环境检查结果。默认设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU；RTMPose/HCF batch 为 64。
+输出：代码和环境检查结果。默认 Eos-2.0 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，默认 proposal variant 为 `eos-2.0`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
 
 ## 2. 注册来源
 

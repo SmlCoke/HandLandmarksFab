@@ -5,7 +5,7 @@ set -uo pipefail
 : "${DATASET_ID:?DATASET_ID is required}"
 : "${CONFIRM_DELETE:?CONFIRM_DELETE is required}"
 DATASET_SCOPE="${DATASET_SCOPE:-pretrain}"
-PROPOSAL_VARIANT="${PROPOSAL_VARIANT:-eos-1.0}"
+PROPOSAL_VARIANT="${PROPOSAL_VARIANT:-eos-2.0}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"

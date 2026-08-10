@@ -6,6 +6,8 @@
 
 本次共统计 **9,868** 条有效 gold hand。阈值采用 `ceil(P99.95 × 1.05)`；历史 gold 回放保留 **9,832/9,868**，RTMPose 草标命中 **366** 条，其中 **352** 条后来确有人工修点。
 
+当前默认 Palm 已升级为 Eos-2.0，但 ROI scale 暂保持 `1.8/1.8`。旧 gold 投影兼容回放见 `assets/palm_detector/eos_2_0_adaptation.md`；本表阈值作为过渡值继续启用，不等价于 Eos-2.0 正式重算。
+
 ## 数据集
 
 | Dataset | Variant | 距离 | 来源数 | 有效 hand |
@@ -138,4 +140,4 @@ python -B tools/analyze_rtmpose_connection_lengths.py \
   --config configs/autolabel.yaml --output assets/quality_gate/rtmpose_connection_length_distribution.md
 ```
 
-出现以下任一情况时重新统计：新增有代表性的人工复核 Eval 数据；更新 Eos 后 proposal/ROI 几何发生变化；调整 ROI 构造参数。重算前应确认所有输入来源均已人工复核并发布；重算后审查回放保留率、更新 YAML 阈值并运行完整测试。增加数据集时追加 `--dataset <dataset_id>:<proposal_variant>`。该工具只读取数据仓库，只写指定报告。
+出现以下任一情况时重新统计：新增有代表性的人工复核 Eval 数据；更新 Eos 后 proposal/ROI 几何发生变化；调整 ROI 构造参数。首个代表性 Eos-2.0 Eval 人工复核并发布后必须执行本步骤。重算前应确认所有输入来源均已人工复核并发布；重算后审查回放保留率、更新 YAML 阈值并运行完整测试。增加数据集时追加 `--dataset <dataset_id>:<proposal_variant>`。该工具只读取数据仓库，只写指定报告。
