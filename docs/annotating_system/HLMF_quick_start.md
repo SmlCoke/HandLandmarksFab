@@ -30,7 +30,7 @@ make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 ## 3. Train 自动标注
 
-输入：已注册 train 来源、Eos、RTMPose 和双头 HCF；`configs/autolabel.yaml` 当前使用 `rtmpose_train_hand_presence_threshold: 0.5`。
+输入：已注册 train 来源、Eos、RTMPose 和双头 HCF；`configs/autolabel.yaml` 当前使用 presence 阈值 `0.5`，并默认开启 RTMPose 连接对长度门控。将 `rtmpose_train_connection_length_gate_enabled` 设为 `false` 可只关闭第四条门控。
 
 ```bash
 make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
@@ -39,7 +39,7 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
-输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 的 draft、`hand_training_labels.jsonl`、`candidate_negatives.jsonl`、`ignored.jsonl` 和 QC；低 presence 的 RTMPose Train runtime 行进入 `ignored.jsonl`。
+输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 的 draft、`hand_training_labels.jsonl`、`candidate_negatives.jsonl`、`ignored.jsonl` 和 QC；任一 Train 质量门控失败的行进入 `ignored.jsonl`。连接长度门控关闭时，presence、handedness 和边界坐标门控仍正常工作。
 
 批量处理全部含 `images/` 的 train 来源；无需预先运行 `source-check`：
 

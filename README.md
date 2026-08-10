@@ -72,8 +72,11 @@ RTMPose Train runtime 行满足以下任一条件时整行进入 `ignored.jsonl`
 
 - `hand_presence.score=P(has_hand)` 缺失、非有限，或低于 `quality.rtmpose_train_hand_presence_threshold`（当前 `0.5`）；
 - HCF handedness 分数低于 `quality.handedness_review_threshold`（当前 `0.7`）；
-- 42 个 crop 坐标值中，精确等于 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`（当前 `2`）。
+- 42 个 crop 坐标值中，精确边界值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`（当前 `2`）；
+- 开启连接长度门控时，任一指定连接的 crop 像素长度严格超过当前 `near/mid/far` 阈值。
 
-Presence 阈值来自 7,907 条人工复核 Eval ROI：`0.5` 拒绝全部 15 条 no_hand，同时保留 7,856/7,892 条正样本（99.5438%），并与模型 `no_hand/has_hand` 的 argmax 决策边界一致。等于阈值时 quality gate 通过；0–1 个边界值通过。这些门控不作用于 Eval、MediaPipe 或 low-score candidate。HCF presence 是教师伪标签，Eval 正式真值仍以 CVAT 人工复核为准。
+连接长度门控由 `quality.rtmpose_train_connection_length_gate_enabled` 独立控制并默认开启；关闭时不解析距离或阈值。其阈值来自 9,868 条人工复核 gold hand 的 `ceil(P99.95 × 1.05)`，完整统计见 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
+
+Presence、边界和连接长度门控只作用于 RTMPose Train runtime；handedness 门控还适用于 MediaPipe Train positive。四条门控均不改变 Eval 发布，Eos low-score candidate 也不应用 RTMPose 门控。HCF presence 是教师伪标签，Eval 正式真值仍以 CVAT 人工复核为准。
 
 依赖仍由现有 `requirements.txt` 管理，本次集成没有新增 Python 依赖。

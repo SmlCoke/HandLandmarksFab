@@ -50,6 +50,9 @@ quality:
   handedness_review_threshold: 0.7
   rtmpose_train_hand_presence_threshold: 0.5
   rtmpose_train_boundary_coordinate_reject_threshold: 2
+  rtmpose_train_connection_length_gate_enabled: true
+  # rtmpose_train_connection_length_thresholds_px 在配置中按 near/mid/far
+  # 分别给出 20 条连接的 crop 像素阈值。
 visualization:
   roi_enabled: false
   original_image_enabled: false
@@ -57,7 +60,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：MediaPipe 保持全局默认；命令行后端只覆盖当前执行。SimCC split ratio 与模型绑定为 `2.0`。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。
+配置原则：MediaPipe 保持全局默认；命令行后端只覆盖当前执行。SimCC split ratio 与模型绑定为 `2.0`。`rtmpose_train_hand_presence_threshold` 是 RTMPose Train runtime 的最小 `P(has_hand)`，低于阈值、缺失或非有限时整行拒绝；等于阈值通过。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。其阈值是 `256×256` crop 像素长度的上限，严格超过才拒绝，等于阈值及长度为 0 均通过。
 
 ## 3. 来源注册与图像检查
 
@@ -133,13 +136,22 @@ RTMPose runtime ROI 固定输出 21 点，并在 Train 与 Eval 都运行一次�
 
 质量门控只改变发布分流，不改变 Palm 或 ROI：
 
-1. 仅对 `split=train`、`proposal_kind=runtime`、`source=rtmpose_m_hand5_onnx` 的行读取 `hand_presence.score=P(has_hand)`。分数缺失、非有限或低于 `quality.rtmpose_train_hand_presence_threshold` 时，写入明确 quality error，并以 `ignore_reason=rtmpose_hand_presence_gate` 进入 `ignored.jsonl`；等于阈值通过。
-2. 所有 Train positive 若 handedness 分数低于 `quality.handedness_review_threshold`，以 `ignore_reason=automatic_positive_failed_quality_gate` 进入 `ignored.jsonl`。
-3. 仅对 RTMPose Train runtime 行统计 21 点的 42 个 crop x/y 值。每个精确等于 `0.0` 或 `255.0` 的值计一次；计数达到 `rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，并以 `ignore_reason=rtmpose_boundary_coordinate_gate` 进入 `ignored.jsonl`。
-4. 当前 presence 阈值为 `0.5`，边界阈值为 2，因此 0–1 个边界值通过。
-5. Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界门控。
+1. **Hand presence 置信度门控**：仅对 RTMPose Train runtime 读取 `hand_presence.score=P(has_hand)`。分数缺失、非有限或严格低于 `quality.rtmpose_train_hand_presence_threshold` 时，以 `ignore_reason=rtmpose_hand_presence_gate` 进入 `ignored.jsonl`；等于阈值通过。
+2. **Handedness 置信度门控**：所有 Train positive 的 handedness 分数严格低于 `quality.handedness_review_threshold` 时，以 `ignore_reason=automatic_positive_failed_quality_gate` 进入 `ignored.jsonl`。该规则同时适用于 RTMPose 与 MediaPipe。
+3. **边界坐标门控**：仅对 RTMPose Train runtime 统计 21 点的 42 个 crop x/y 值。精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，并以 `ignore_reason=rtmpose_boundary_coordinate_gate` 进入 `ignored.jsonl`。
+4. **连接对长度门控**：仅在 `quality.rtmpose_train_connection_length_gate_enabled=true` 时对 RTMPose Train runtime 生效。程序按 capture source 的 `near/mid/far` 选择阈值，计算 20 条连接的 crop 像素欧氏距离；任一长度严格超过阈值时写入 `rtmpose_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，并以 `ignore_reason=rtmpose_connection_length_gate` 进入 `ignored.jsonl`。等于阈值及长度为 0 均通过；关闭开关时不解析距离或阈值。
+
+当前 presence 阈值为 `0.5`，边界阈值为 2，因此 0–1 个边界值通过。Presence、边界和连接长度门控只作用于 `split=train`、`proposal_kind=runtime`、`source=rtmpose_m_hand5_onnx`；Eval、MediaPipe 和 Eos low-score candidate 不应用这三条 RTMPose 专用门控。
 
 Presence 阈值应使用与正式标注隔离的人工复核 ROI 副本重新校准。当前选择规则同时考虑：与模型 `no_hand/has_hand` 的 argmax 决策一致、拒绝人工 no_hand、尽量保留人工 hand，并避免更高阈值在单一来源上过度丢样本。当前校准中 `0.5` 拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。曾评估“全局 hand recall 至少 99% 时取最高阈值”的 `0.843369`，但它在 `complex-near-bright-random-val-s01-peak` 上只保留 88.24% 的 hand，因此未采用。
+
+连接长度阈值来自 `FullEnhanceVal0801:eos-1.0` 与 `FullEnhanceVal0808:eos_1.0-gate_r2` 的 9,868 条人工复核 gold hand，按距离和连接取 `ceil(P99.95 × 1.05)`。完整分布、阈值与回放结果位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。新增代表性 Eval 数据，或更新 Eos/ROI 几何后，应重新执行：
+
+```bash
+python -B tools/analyze_rtmpose_connection_lengths.py   --dataset-root /root/autodl-tmp/DatesetFab   --dataset FullEnhanceVal0801:eos-1.0   --dataset FullEnhanceVal0808:eos_1.0-gate_r2   --config configs/autolabel.yaml   --output assets/quality_gate/rtmpose_connection_length_distribution.md
+```
+
+输入是已人工复核并发布的 Eval manifests/labels；输出只写仓库内的统计报告，不修改数据仓库。重算后必须审查 gold/draft 回放、更新 YAML 阈值并运行完整测试。
 
 HCF presence/handedness 是 Train 的教师伪标签；Eval draft 必须经过 CVAT 人工确认后才能成为正式真值。
 

@@ -146,14 +146,15 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 - RTMPose Train runtime 的 `P(has_hand)` 严格低于 `quality.rtmpose_train_hand_presence_threshold`：quality error 为 `rtmpose_hand_presence_score_below_threshold:{score}<{threshold}`，`ignore_reason=rtmpose_hand_presence_gate`。等于阈值时通过。
 - Train positive 的 handedness score 低于 `quality.handedness_review_threshold`：`ignore_reason=automatic_positive_failed_quality_gate`。
 - RTMPose Train runtime 的 42 个 crop x/y 值中，精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`：quality error 为 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，`ignore_reason=rtmpose_boundary_coordinate_gate`。
+- `quality.rtmpose_train_connection_length_gate_enabled` 为布尔开关，缺省及正式配置均为 `true`。开启时按 capture source 距离读取 `quality.rtmpose_train_connection_length_thresholds_px.<distance>`；任一连接长度严格超过阈值时，quality error 为 `rtmpose_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，`ignore_reason=rtmpose_connection_length_gate`。21 点无效时 error 为 `rtmpose_connection_length_landmarks_invalid`。等于阈值和长度为 0 均通过；关闭时不解析距离或阈值。
 
-当前 presence 阈值为 `0.5`，边界阈值为 2；0–1 个边界值通过。presence 与边界门控不应用于 Eval、MediaPipe 或 Eos negative candidate。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
+当前 presence 阈值为 `0.5`，边界阈值为 2；0–1 个边界值通过。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 或 Eos negative candidate。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。
 
 双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
 
 ## 8. Eval、CVAT 与发布
 
-Eval draft 不是正式真值，RTMPose Train presence 阈值也不作用于 Eval。CVAT frame 依据 ROI 图片完整 basename（包含扩展名）的字典序映射到 manifest；导入后也按完整 basename 精确匹配。因此擅自更换 ROI 后缀会使既有 CVAT XML 无法直接导入，即使稳定 ROI ID 没有变化。导入后产生 `hand_landmarks_reviewed.jsonl`。人工改变 presence 时设置 `human_modified_presence=true`，改变 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
+Eval draft 不是正式真值，RTMPose Train presence、边界和连接长度门控均不作用于 Eval。CVAT frame 依据 ROI 图片完整 basename（包含扩展名）的字典序映射到 manifest；导入后也按完整 basename 精确匹配。因此擅自更换 ROI 后缀会使既有 CVAT XML 无法直接导入，即使稳定 ROI ID 没有变化。导入后产生 `hand_landmarks_reviewed.jsonl`。人工改变 presence 时设置 `human_modified_presence=true`，改变 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
 
 Val/Test 发布输出 `hand_evaluation_labels.jsonl` 和 `ignored.jsonl`，不发布 negative candidate。Eval 限额按整个 split 的 prospective dataset manifest 统计，配置位于：
 

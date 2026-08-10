@@ -70,6 +70,7 @@ def _config() -> dict:
             "handedness_review_threshold": 0.7,
             "rtmpose_train_hand_presence_threshold": 0.5,
             "rtmpose_train_boundary_coordinate_reject_threshold": 3,
+            "rtmpose_train_connection_length_gate_enabled": False,
         },
     }
 

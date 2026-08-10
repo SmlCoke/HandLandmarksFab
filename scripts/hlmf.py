@@ -802,6 +802,10 @@ def _partition_labels(
             str(error).startswith("rtmpose_hand_presence_score_")
             for error in quality_errors
         )
+        connection_gate_failed = any(
+            str(error).startswith("rtmpose_connection_length_")
+            for error in quality_errors
+        )
         if split == "train" and presence_gate_failed:
             row["train_eligible"] = False
             row["ignore_reason"] = "rtmpose_hand_presence_gate"
@@ -813,6 +817,8 @@ def _partition_labels(
                 for error in quality_errors
             ):
                 row["ignore_reason"] = "rtmpose_boundary_coordinate_gate"
+            elif connection_gate_failed:
+                row["ignore_reason"] = "rtmpose_connection_length_gate"
             else:
                 row["ignore_reason"] = "automatic_positive_failed_quality_gate"
             ignored.append(row)

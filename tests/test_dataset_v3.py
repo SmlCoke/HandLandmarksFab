@@ -360,6 +360,7 @@ class DatasetV3Tests(unittest.TestCase):
             "split": "train",
             "proposal_kind": "runtime",
             "source": "rtmpose_m_hand5_onnx",
+            "capture_source_id": CAPTURE_TRAIN,
         }
         two_boundary = [dict(point) for point in one_boundary]
         two_boundary[1]["y"] = 255.0
@@ -446,6 +447,7 @@ class DatasetV3Tests(unittest.TestCase):
             "split": "train",
             "proposal_kind": "runtime",
             "source": "rtmpose_m_hand5_onnx",
+            "capture_source_id": CAPTURE_TRAIN,
         }
         non_finite = dict(
             base,
@@ -461,6 +463,131 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertTrue(
             all(row["ignore_reason"] == "rtmpose_hand_presence_gate" for row in ignored)
         )
+
+    def test_rtmpose_train_connection_length_gate_toggle_scope_and_validation(self) -> None:
+        cfg = load_yaml_config(Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml")
+        base_points = [
+            {"id": index, "x": 100.0, "y": 100.0} for index in range(21)
+        ]
+        base = {
+            "crop_id": "base",
+            "hand_presence": {"present": True, "score": 0.9},
+            "handedness": {"label": "Left", "score": 0.9},
+            "landmarks_crop_norm": [
+                {"id": index, "x": 0.4, "y": 0.4} for index in range(21)
+            ],
+            "landmarks_crop_px": base_points,
+            "width": 256,
+            "height": 256,
+            "split": "train",
+            "proposal_kind": "runtime",
+            "source": "rtmpose_m_hand5_onnx",
+            "capture_source_id": "white-near-bright-random-train-s01-peak",
+        }
+        at_threshold_points = [dict(point) for point in base_points]
+        at_threshold_points[20]["x"] = 152.0
+        over_threshold_points = [dict(point) for point in base_points]
+        over_threshold_points[20]["x"] = 152.01
+        zero_length = dict(base, crop_id="zero")
+        at_threshold = dict(
+            base, crop_id="at-threshold", landmarks_crop_px=at_threshold_points
+        )
+        over_threshold = dict(
+            base, crop_id="over-threshold", landmarks_crop_px=over_threshold_points
+        )
+        positives, candidates, ignored = _partition_labels(
+            [zero_length, at_threshold, over_threshold], "train", cfg
+        )
+        self.assertEqual(["zero", "at-threshold"], [row["crop_id"] for row in positives])
+        self.assertEqual([], candidates)
+        self.assertEqual(["over-threshold"], [row["crop_id"] for row in ignored])
+        self.assertEqual("rtmpose_connection_length_gate", ignored[0]["ignore_reason"])
+        self.assertTrue(
+            any(
+                error.startswith("rtmpose_connection_length_exceeded:19-20:")
+                for error in ignored[0]["quality_gate"]["errors"]
+            )
+        )
+
+        default_enabled = json.loads(json.dumps(cfg))
+        default_enabled["quality"].pop("rtmpose_train_connection_length_gate_enabled")
+        _, _, default_ignored = _partition_labels(
+            [over_threshold], "train", default_enabled
+        )
+        self.assertEqual("rtmpose_connection_length_gate", default_ignored[0]["ignore_reason"])
+
+        disabled = json.loads(json.dumps(cfg))
+        disabled["quality"]["rtmpose_train_connection_length_gate_enabled"] = False
+        disabled["quality"].pop("rtmpose_train_connection_length_thresholds_px")
+        disabled_row = dict(
+            over_threshold,
+            crop_id="disabled",
+            capture_source_id="not-a-valid-source-id",
+        )
+        disabled_positive, _, disabled_ignored = _partition_labels(
+            [disabled_row], "train", disabled
+        )
+        self.assertEqual(["disabled"], [row["crop_id"] for row in disabled_positive])
+        self.assertEqual([], disabled_ignored)
+
+        eval_row = dict(over_threshold, crop_id="eval", split="val")
+        eval_positive, _, eval_ignored = _partition_labels([eval_row], "val", cfg)
+        self.assertEqual(["eval"], [row["crop_id"] for row in eval_positive])
+        self.assertEqual([], eval_ignored)
+
+        mediapipe_row = dict(
+            over_threshold, crop_id="mediapipe", source="mediapipe_tasks"
+        )
+        mediapipe_positive, _, mediapipe_ignored = _partition_labels(
+            [mediapipe_row], "train", cfg
+        )
+        self.assertEqual(["mediapipe"], [row["crop_id"] for row in mediapipe_positive])
+        self.assertEqual([], mediapipe_ignored)
+
+        invalid_points = [dict(point) for point in base_points]
+        invalid_points[20]["id"] = 19
+        invalid_row = dict(
+            base, crop_id="invalid", landmarks_crop_px=invalid_points
+        )
+        _, _, invalid_ignored = _partition_labels([invalid_row], "train", cfg)
+        self.assertEqual("rtmpose_connection_length_gate", invalid_ignored[0]["ignore_reason"])
+        self.assertIn(
+            "rtmpose_connection_length_landmarks_invalid",
+            invalid_ignored[0]["quality_gate"]["errors"],
+        )
+        invalid_coordinate_points = [dict(point) for point in base_points]
+        invalid_coordinate_points[20]["x"] = "bad"
+        invalid_coordinate_row = dict(
+            base,
+            crop_id="invalid-coordinate",
+            landmarks_crop_px=invalid_coordinate_points,
+        )
+        _, _, invalid_coordinate_ignored = _partition_labels(
+            [invalid_coordinate_row], "train", cfg
+        )
+        self.assertEqual(
+            "rtmpose_connection_length_gate",
+            invalid_coordinate_ignored[0]["ignore_reason"],
+        )
+
+        bad_switch = json.loads(json.dumps(cfg))
+        bad_switch["quality"]["rtmpose_train_connection_length_gate_enabled"] = "false"
+        with self.assertRaisesRegex(ValueError, "must be a boolean"):
+            _partition_labels([base], "train", bad_switch)
+
+        missing_threshold = json.loads(json.dumps(cfg))
+        missing_threshold["quality"][
+            "rtmpose_train_connection_length_thresholds_px"
+        ]["near"].pop("19-20")
+        with self.assertRaisesRegex(ValueError, "must define exactly the 20"):
+            _partition_labels([base], "train", missing_threshold)
+
+        unknown_distance = dict(
+            base,
+            capture_source_id="white-unknown-bright-random-train-s01-peak",
+        )
+        with self.assertRaisesRegex(ValueError, "no thresholds for distance"):
+            _partition_labels([unknown_distance], "train", cfg)
 
     def test_visualization_clean_and_variant_delete_keep_tombstone(self) -> None:
         crop, row = self._registered_roi()

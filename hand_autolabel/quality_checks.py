@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping
 
 import numpy as np
 
+from .dataset_v3 import DatasetContractError, parse_capture_source_id
 from .image_io import image_shape_info, read_image
 from .roi_geometry import corners_all_far_from_image
+
+
+RTMPOSE_CONNECTION_PAIRS = (
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    (0, 9), (9, 10), (10, 11), (11, 12),
+    (0, 13), (13, 14), (14, 15), (15, 16),
+    (0, 17), (17, 18), (18, 19), (19, 20),
+)
+RTMPOSE_CONNECTION_DISTANCES = ("near", "mid", "far")
 
 
 def validate_image_file(path: Path, expected_width: int, expected_height: int) -> Dict[str, Any]:
@@ -68,9 +80,20 @@ def roi_manifest_issues(row: Mapping[str, Any], cfg: Mapping[str, Any]) -> tuple
 def _points_out_of_bounds(points: Iterable[Mapping[str, Any]], width: int, height: int) -> int:
     count = 0
     for p in points:
-        x = float(p.get("x", 0.0))
-        y = float(p.get("y", 0.0))
-        if x < 0.0 or y < 0.0 or x > float(width - 1) or y > float(height - 1):
+        try:
+            x = float(p.get("x", 0.0))
+            y = float(p.get("y", 0.0))
+        except (AttributeError, TypeError, ValueError):
+            count += 1
+            continue
+        if (
+            not math.isfinite(x)
+            or not math.isfinite(y)
+            or x < 0.0
+            or y < 0.0
+            or x > float(width - 1)
+            or y > float(height - 1)
+        ):
             count += 1
     return count
 
@@ -100,6 +123,148 @@ def _rtmpose_boundary_coordinate_count(
             if value == 0.0 or value == maximum:
                 count += 1
     return count
+
+
+def _rtmpose_connection_gate_enabled(cfg: Mapping[str, Any]) -> bool:
+    raw = cfg.get("quality", {}).get(
+        "rtmpose_train_connection_length_gate_enabled", True
+    )
+    if not isinstance(raw, bool):
+        raise ValueError(
+            "quality.rtmpose_train_connection_length_gate_enabled must be a boolean"
+        )
+    return raw
+
+
+def validate_rtmpose_connection_thresholds(
+    cfg: Mapping[str, Any],
+) -> Dict[str, Dict[tuple[int, int], float]]:
+    raw = cfg.get("quality", {}).get(
+        "rtmpose_train_connection_length_thresholds_px"
+    )
+    if not isinstance(raw, Mapping):
+        raise ValueError(
+            "quality.rtmpose_train_connection_length_thresholds_px must be a mapping"
+        )
+    actual_distances = {str(key) for key in raw}
+    expected_distances = set(RTMPOSE_CONNECTION_DISTANCES)
+    if actual_distances != expected_distances:
+        raise ValueError(
+            "quality.rtmpose_train_connection_length_thresholds_px must define "
+            "exactly near, mid and far"
+        )
+
+    expected_keys = {f"{start}-{end}" for start, end in RTMPOSE_CONNECTION_PAIRS}
+    validated: Dict[str, Dict[tuple[int, int], float]] = {}
+    for distance in RTMPOSE_CONNECTION_DISTANCES:
+        distance_values = raw.get(distance)
+        if not isinstance(distance_values, Mapping):
+            raise ValueError(
+                "quality.rtmpose_train_connection_length_thresholds_px."
+                f"{distance} must be a mapping"
+            )
+        actual_keys = {str(key) for key in distance_values}
+        if actual_keys != expected_keys:
+            missing = sorted(expected_keys - actual_keys)
+            extra = sorted(actual_keys - expected_keys)
+            raise ValueError(
+                "quality.rtmpose_train_connection_length_thresholds_px."
+                f"{distance} must define exactly the 20 configured connections; "
+                f"missing={missing}, extra={extra}"
+            )
+        validated[distance] = {}
+        for pair in RTMPOSE_CONNECTION_PAIRS:
+            key = f"{pair[0]}-{pair[1]}"
+            threshold = distance_values.get(key)
+            if isinstance(threshold, bool):
+                raise ValueError(
+                    f"connection threshold {distance}.{key} must be a finite number > 0"
+                )
+            try:
+                threshold_value = float(threshold)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"connection threshold {distance}.{key} must be a finite number > 0"
+                ) from exc
+            if not np.isfinite(threshold_value) or threshold_value <= 0.0:
+                raise ValueError(
+                    f"connection threshold {distance}.{key} must be a finite number > 0"
+                )
+            validated[distance][pair] = threshold_value
+    return validated
+
+
+def rtmpose_connection_lengths_px(
+    points: Iterable[Mapping[str, Any]],
+) -> Dict[tuple[int, int], float]:
+    raw_points = list(points)
+    if len(raw_points) != 21:
+        raise ValueError("RTMPose connection gate requires exactly 21 landmarks")
+    coordinates: Dict[int, tuple[float, float]] = {}
+    for point in raw_points:
+        if not isinstance(point, Mapping):
+            raise ValueError("RTMPose connection landmark must be a mapping")
+        raw_id = point.get("id")
+        if isinstance(raw_id, bool):
+            raise ValueError("RTMPose connection landmark id must be an integer")
+        try:
+            point_id = int(raw_id)
+            if float(raw_id) != float(point_id):
+                raise ValueError
+            x = float(point["x"])
+            y = float(point["y"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("RTMPose connection landmark is invalid") from exc
+        if point_id in coordinates or point_id < 0 or point_id > 20:
+            raise ValueError("RTMPose connection landmark ids must be unique 0..20")
+        if not math.isfinite(x) or not math.isfinite(y):
+            raise ValueError("RTMPose connection coordinates must be finite")
+        coordinates[point_id] = (x, y)
+    if set(coordinates) != set(range(21)):
+        raise ValueError("RTMPose connection landmark ids must be exactly 0..20")
+    return {
+        pair: math.hypot(
+            coordinates[pair[0]][0] - coordinates[pair[1]][0],
+            coordinates[pair[0]][1] - coordinates[pair[1]][1],
+        )
+        for pair in RTMPOSE_CONNECTION_PAIRS
+    }
+
+
+def _rtmpose_connection_length_gate_errors(
+    row: Mapping[str, Any], cfg: Mapping[str, Any]
+) -> List[str]:
+    if not _is_rtmpose_train_runtime(row):
+        return []
+    if not _rtmpose_connection_gate_enabled(cfg):
+        return []
+    thresholds = validate_rtmpose_connection_thresholds(cfg)
+    capture_source_id = row.get("capture_source_id")
+    try:
+        distance = parse_capture_source_id(str(capture_source_id))["distance"]
+    except DatasetContractError as exc:
+        raise ValueError(
+            "RTMPose connection gate requires a valid capture_source_id"
+        ) from exc
+    if distance not in thresholds:
+        raise ValueError(
+            f"RTMPose connection gate has no thresholds for distance {distance!r}"
+        )
+    try:
+        lengths = rtmpose_connection_lengths_px(row.get("landmarks_crop_px") or [])
+    except ValueError:
+        return ["rtmpose_connection_length_landmarks_invalid"]
+    errors: List[str] = []
+    for pair in RTMPOSE_CONNECTION_PAIRS:
+        length = lengths[pair]
+        threshold = thresholds[distance][pair]
+        if length > threshold:
+            errors.append(
+                "rtmpose_connection_length_exceeded:"
+                f"{pair[0]}-{pair[1]}:{length:.6f}>{threshold:.6f}:"
+                f"distance={distance}"
+            )
+    return errors
 
 
 def _rtmpose_hand_presence_gate_error(
@@ -173,6 +338,10 @@ def label_issues(row: Mapping[str, Any], cfg: Mapping[str, Any]) -> tuple[List[s
         errors.append(
             f"rtmpose_boundary_coordinate_values:{boundary_count}>={boundary_threshold}"
         )
+        needs_review = True
+    connection_errors = _rtmpose_connection_length_gate_errors(row, cfg)
+    if connection_errors:
+        errors.extend(connection_errors)
         needs_review = True
     presence_gate_error = _rtmpose_hand_presence_gate_error(row, cfg)
     if presence_gate_error is not None:

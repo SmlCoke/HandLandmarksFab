@@ -65,6 +65,72 @@ quality:
   # P(has_hand); derived from 7,907 human-reviewed FullEnhanceVal0801 ROIs.
   rtmpose_train_hand_presence_threshold: 0.5
   rtmpose_train_boundary_coordinate_reject_threshold: 2
+  # Strictly greater than one of these crop-pixel limits rejects an RTMPose Train runtime row.
+  rtmpose_train_connection_length_gate_enabled: true
+  rtmpose_train_connection_length_thresholds_px:
+    near:
+      "0-1": 139
+      "1-2": 88
+      "2-3": 65
+      "3-4": 70
+      "0-5": 180
+      "5-6": 99
+      "6-7": 53
+      "7-8": 50
+      "0-9": 169
+      "9-10": 112
+      "10-11": 62
+      "11-12": 54
+      "0-13": 157
+      "13-14": 108
+      "14-15": 70
+      "15-16": 61
+      "0-17": 146
+      "17-18": 84
+      "18-19": 44
+      "19-20": 52
+    mid:
+      "0-1": 85
+      "1-2": 74
+      "2-3": 60
+      "3-4": 62
+      "0-5": 146
+      "5-6": 72
+      "6-7": 48
+      "7-8": 39
+      "0-9": 140
+      "9-10": 83
+      "10-11": 55
+      "11-12": 42
+      "0-13": 132
+      "13-14": 80
+      "14-15": 52
+      "15-16": 44
+      "0-17": 122
+      "17-18": 61
+      "18-19": 38
+      "19-20": 42
+    far:
+      "0-1": 48
+      "1-2": 45
+      "2-3": 37
+      "3-4": 34
+      "0-5": 107
+      "5-6": 51
+      "6-7": 28
+      "7-8": 26
+      "0-9": 109
+      "9-10": 60
+      "10-11": 34
+      "11-12": 26
+      "0-13": 104
+      "13-14": 54
+      "14-15": 31
+      "15-16": 25
+      "0-17": 96
+      "17-18": 41
+      "18-19": 22
+      "19-20": 20
   high_palm_score_review_threshold: 0.8
 
 visualization:

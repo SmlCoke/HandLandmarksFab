@@ -1,4 +1,4 @@
-# HLMF 当前状态（2026-08-08）
+# HLMF 当前状态（2026-08-10）
 
 ## 代码与配置
 
@@ -8,9 +8,11 @@ RTMPose runtime ROI 已接入新的 MobileNetV3-Small 双头 HCF。模型路径�
 
 新 HCF 自带验证集指标：presence accuracy `0.991279`、presence ROC AUC `0.999312`；handedness accuracy `0.992248`、handedness ROC AUC `0.996689`。presence 混淆矩阵为 `[[322,3],[9,1042]]`（0=no_hand，1=has_hand）。
 
-当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 的 `P(has_hand)` 阈值为 `0.5`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝。presence 分数缺失、非有限或低于阈值时，以 `rtmpose_hand_presence_gate` 进入 `ignored.jsonl`。等于阈值通过。Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界门控。
+当前 Train 质量配置：handedness review threshold 为 `0.7`；RTMPose Train runtime 的 `P(has_hand)` 阈值为 `0.5`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝；连接对长度门控默认开启，并按 `near/mid/far` 使用独立阈值。连接长度严格超过阈值时以 `rtmpose_connection_length_gate` 进入 `ignored.jsonl`，等于阈值及长度 0 通过。关闭该开关不影响其余三条门控。Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界/连接长度门控。
 
 Presence 阈值分析放在仓库外的 `/root/hcf_presence_threshold_0807/`。分析使用复制出的 `FullEnhanceVal0801` 人工复核 ROI，没有写入现有数据集。有效样本共 7,907 条：7,892 条 hand、15 条 no_hand。正样本 `P(has_hand)` 均值为 `0.993917`，no_hand 最大值为 `0.0192493`。正式阈值 `0.5` 与模型 argmax 决策边界一致，拒绝全部 15 条 no_hand，并保留 7,856/7,892 条 hand（99.5438%）。全局 recall 约束产生的候选阈值 `0.843369` 虽仍保留 99.0117% 的全局 hand，却把一个来源的 hand recall 降至 88.24%，因此未采用；`0.5` 在该来源的已知 recall 为 94.75%，这部分低置信 ROI 在 Train 中会被拒绝，Eval 仍由人工复核纠正。
+
+连接长度统计使用 `FullEnhanceVal0801:eos-1.0` 与 `FullEnhanceVal0808:eos_1.0-gate_r2` 的 13 个已发布来源，共 9,868 条有效 gold hand。阈值为各距离/连接的 `ceil(P99.95 × 1.05)`；gold 回放保留 9,832/9,868（99.635%），RTMPose 草标命中 366 条，其中 352 条后来确有人工修点。可复现工具位于 `tools/analyze_rtmpose_connection_lengths.py`，简洁统计资产位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
 
 原图可视化默认生成按 PNG 文件名字典序排列的 30 FPS MP4；RTMPose ROI 可视化只抽样 runtime ROI。可视化可以独立清理。Registry 使用 source/variant active/retired 状态表，删除变体会留下永久 tombstone。
 
@@ -32,14 +34,14 @@ Pretrain 数据集 `FullEnhance0801` 当前有 95 个 train 来源：
 - `eos-1.0`：95 个来源的变体派生产物已全部删除，Registry 保留 95 个 retired tombstone；原始 `images/`、`raw_images.jsonl`、`source.json` 和既有 ROI Registry 元数据均保留；
 - `eos_1.0-gate`：95 个来源均完整发布，共 564,243 个 ROI、65,089 条 positive、492,017 条 candidate、7,137 条 ignored。
 
-Eval 数据集 `FullEnhanceVal0808` 当前有 3 个 val 来源，每个来源 600 张原图，均已使用 `eos_1.0-gate_r2 + rtmpose_onnx` 完成自动标注和 Hand ROI CVAT XML 导出：
+Eval 数据集 `FullEnhanceVal0808` 当前有 3 个 val 来源，每个来源 600 张原图，均已使用 `eos_1.0-gate_r2 + rtmpose_onnx` 完成人工复核和发布：
 
-- `white-far-dark-random-val-s03-soar`：880 个 ROI/draft；
-- `white-mid-dark-random-val-s03-soar`：727 个 ROI/draft；
-- `white-near-dark-random-val-s03-soar`：441 个 ROI/draft；
-- 合计 1,800 张原图、2,048 个 ROI/draft、3 份 `cvat_autolabel.xml`；RTMPose 与 HCF 均使用 `CPUExecutionProvider`。
+- `white-far-dark-random-val-s03-soar`：880 个 ROI，823 条发布标签、57 条 ignored；
+- `white-mid-dark-random-val-s03-soar`：727 个 ROI，726 条发布标签、1 条 ignored；
+- `white-near-dark-random-val-s03-soar`：441 个 ROI，440 条发布标签、1 条 ignored；
+- 合计 1,800 张原图、2,048 个 ROI、1,989 条发布标签和 59 条 ignored。
 
-该 Eval 数据集尚未导入人工复核 XML，也未执行 `source-publish`，因此当前没有 `dataset_manifest.json`，不会进入下游 HLML 的正式评估数据。
+该数据集已有 `dataset_manifest.json`，下游 HLML 可读取其正式评估标签。本次连接长度统计从其中排除 13 条 no_hand，使用 1,976 条有效 gold hand。
 
 本轮永久删除只作用于 `FullEnhance0801/eos-1.0`。`FullEnhance0801/eos_1.0-gate` 的 95 个 Palm/ROI/labels/发布报告以及所有既有 EValSource 变体均未被该删除操作修改。
 
@@ -47,8 +49,8 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 
 ## 验收状态
 
-- `make compile`：28 个 Python 文件语法检查通过；
-- `make test`：44 项测试通过；
+- `make compile`：30 个 Python 文件语法检查通过；
+- `make test`：46 项测试通过；
 - `make help`：通过；
 - 4 个 Bash 批处理脚本均通过 `bash -n`；未注册 Eval 来源发现测试识别 3/3 个仅含 `images/` 的来源；
 - 数据集级可视化清理与永久变体删除均在隔离临时数据仓库通过，永久删除后 dataset manifest 已重建；
@@ -56,6 +58,6 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 - 真实 RTMPose+双头 HCF runtime ROI 冒烟通过：21 个有限坐标、有效 handedness 与 `P(has_hand)`；
 - `FullEnhance0801/eos-1.0` 批量删除 95/95 成功，7 类目标路径均清零，dataset manifest 已重建且 Registry 为 `retired:95`；
 - `FullEnhance0801/eos_1.0-gate` 的 95 个发布来源完整保留；
-- `FullEnhanceVal0808/eos_1.0-gate_r2` 自动标注与 CVAT 导出 3/3 成功，日志无 `ERROR` 或 `FAILED`；
-- 阈值扫描程序、配置、复制 ROI 和结果全部位于仓库外；
+- `FullEnhanceVal0808/eos_1.0-gate_r2` 的 CVAT 导入、发布和 dataset manifest 均已完成；
+- 连接长度统计工具对正式 Eval 只读运行，报告与 YAML 的 60 个阈值一致；
 - `requirements.txt` 未改变，无需重建 `anfab` 环境。
