@@ -346,9 +346,9 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 
 1. 对于 Iris 模型的训练，我们训练了了辅助模型 Hand Classifier 进行手存在性和手性的判断，辅助配合 RTMPose 手指关键点检测模型进行数据标注。目前 Iris-1.1 已经完成 geometry 阶段的训练，平均像素误差降低到了 10px 左右（对比，分赛区决赛最终版本 geometry 阶段的像素误差是 19px）。目前暂时停止 multitask 阶段的训练，而是从以下方面进行优化：
     - [x] 补充 Hand Classifier 模型的训练数据集，增强泛化能力，优先保证数据标注链路能够提供高质量标签，尤其是提高 handedness 分类头的准确率
-    - 在 HLMF 系统中引入 MediaPipe 独立 Hand Landmark TFLite，开启第三个手指关键点检测后端。这个 Hand Landmarker TFLite 直接输入 Hand ROI，输出 21 个关键点坐标以及 handedness, hand presence 分类结果。与当前链路的普通 MediaPipe 不一致的是，该模型没有 Palm Detector 前端，只有 Hand Landmarker 后端；并且区别于 RTMPose-m，该模型可以直接输出 handedness 和 hand presence 置信度。除了作为独立的手指关键点检测后端外，它可以配合 Hand Classifier 模型，共同对 RTMPose 的输出结果给出 handedness 和 hand presence 的置信度。
-    - 数据自动化标注系统 HLML 继续增强 RTMPose 的门控能力，引入骨骼结构约束：每“一段手指”的在全部投影方向下有一个最大值，该最大值与拍摄时演示者距离摄像头的距离有关。
-    - 模型本身也引入骨骼结构约束：RTMPose 在进行预测时，似乎每个关键点是独立进行预测的，导致整体形状不一定符合手部 21 关键点的骨骼结构；目前的模型也是直接在一个回归头输出了 42 个数值，21 个坐标之间可以认为是“独立”预测的。而 MediaPipe 的 hand landmarker 模型在进行预测时，其输出时钟保持一个正常的手部骨骼结构形状。我们也可以尝试在模型中引入骨骼结构约束，确保输出的 21 个关键点符合手部骨骼结构。
+    - [x] 数据自动化标注系统 HLML 继续增强 RTMPose 的门控能力，引入骨骼结构约束：每“一段手指”的在全部投影方向下有一个最大值，该最大值与拍摄时演示者距离摄像头的距离有关。
+    - [ ] 在 HLMF 系统中引入 MediaPipe 独立 Hand Landmark TFLite，开启第三个手指关键点检测后端。这个 Hand Landmarker TFLite 直接输入 Hand ROI，输出 21 个关键点坐标以及 handedness, hand presence 分类结果。与当前链路的普通 MediaPipe 不一致的是，该模型没有 Palm Detector 前端，只有 Hand Landmarker 后端；并且区别于 RTMPose-m，该模型可以直接输出 handedness 和 hand presence 置信度。除了作为独立的手指关键点检测后端外，它可以配合 Hand Classifier 模型，共同对 RTMPose 的输出结果给出 handedness 和 hand presence 的置信度。
+    - [ ] 模型本身也引入骨骼结构约束：RTMPose 在进行预测时，似乎每个关键点是独立进行预测的，导致整体形状不一定符合手部 21 关键点的骨骼结构；目前的模型也是直接在一个回归头输出了 42 个数值，21 个坐标之间可以认为是“独立”预测的。而 MediaPipe 的 hand landmarker 模型在进行预测时，其输出时钟保持一个正常的手部骨骼结构形状。我们也可以尝试在模型中引入骨骼结构约束，确保输出的 21 个关键点符合手部骨骼结构。
 2. 孤立词分类的 OSD 显示已经在端侧调度程序中实现。
 
 **当前需要完成的工作**：
