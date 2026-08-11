@@ -10,6 +10,8 @@ HLMF 从 Eos Palm Detector 的 proposal 开始工作。程序原样使用 bbox�
 <background>-<distance>-<lighting>-<condition>-<split>-<session>-<performer>
 ```
 
+`distance` 是 Palm 模型能力门控字段。当前 Eos-2.0 只支持 `near|mid`；`far` 可以注册、保存和查看历史资产，但不能进入 Palm、ROI、Hand Landmark、CVAT 或发布阶段。Eos-1.0 的能力更弱，历史上仅适合作为 mid 兼容资产。新 Palm 模型必须先完成各距离覆盖评测，再更新配置中的支持列表。
+
 `split` 只能是 `train|val|test`，在注册来源时从 `capture_source_id` 解析并写入 `source.json`、raw manifest 和 dataset manifest；发布阶段不会随机划分。train 来源位于 `PretrainSource`，val/test 来源位于 `EValSource`。
 
 每次 proposal 配置使用一个 `PROPOSAL_VARIANT`。同一来源/变体在 Registry 中为 `active` 或 `retired`；retired 名称永久不能复用。
@@ -52,6 +54,7 @@ models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
 ```yaml
 palm:
   model_id: eos-2.0
+  supported_capture_distances: [near, mid]
   input_width: 384
   input_height: 224
   score_threshold: 0.25
@@ -98,6 +101,8 @@ visualization:
 
 配置原则：Eos-2.0 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。`0.25` 是本次确认的召回/候选量折中值；ROI scale `1.8/1.8` 用于保持旧 Eval 与连接门控兼容。MediaPipe Tasks 保持 Hand landmark 全局默认；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.0 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。HCF 模型 ID 自动由 `model_onnx_path` 的父目录生成，切换版本时只需修改该路径，但版本目录必须使用安全名称。`negative_review.hand_presence_threshold=0.5` 只用于负样本预审，严格低于模型 argmax 分界的候选才进入人工 review。`rtmpose_train_hand_presence_threshold=0.025` 是针对 0809 校准的 RTMPose Train runtime 最小 `P(has_hand)`；低于阈值、缺失或非有限时整行拒绝，等于阈值通过。两项阈值用途不同，不应联动修改。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
 
+`palm.supported_capture_distances` 是与 Palm 权重绑定的必填能力资产；缺失、为空或格式非法时，所有模型相关阶段在写入前终止。
+
 ## 3. 来源注册与图像检查
 
 输入目录：
@@ -116,6 +121,15 @@ make source-check \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
   PROPOSAL_VARIANT=eos-2.0
 ```
+
+可在自动标注前只读检查当前 Palm 是否支持该距离：
+
+```bash
+make palm-distance-check \
+  CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak
+```
+
+支持时返回 0；不支持时返回专用状态并显示 model、实际 distance 和支持列表；配置或 source ID 非法时返回配置错误。`source-check` 本身不应用该限制，因为 far 原图和 raw/source 元数据仍应保留。
 
 处理：校验来源 ID、TIFF、尺寸和方向，生成稳定 raw ID，登记 dataset/source/raw image，并在操作开始前拒绝 retired 变体名。
 
@@ -311,6 +325,23 @@ make batch-source-variant-delete \
 
 脚本从 `source.json` 发现全部已注册来源，逐来源执行永久退役与精确产物删除；`CONFIRM_DELETE` 不完全匹配时在任何删除前退出。所有来源处理结束后，无论是否有单来源失败，都会再执行一次 `dataset-manifest-rebuild`，使 manifest 与已完成的删除保持一致。批处理继续保留每个来源的原图、raw/source 元数据及 Registry ROI 元数据。
 
+若直接继续某个 active 变体已有的 near/mid 草稿，可沿用原 variant 完成人工复核，但不要重新自动标注。若要整轮从头重跑，应先明确放弃并退役旧变体，再使用新名称；例如：
+
+```bash
+make batch-source-variant-delete \
+  HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
+  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
+  PROPOSAL_VARIANT=eos_2.0-rtmpose-gate \
+  CONFIRM_DELETE=eos_2.0-rtmpose-gate
+make batch-eval-autolabel \
+  HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
+  DATASET_ID=FullEnhanceVal0801 \
+  PROPOSAL_VARIANT=eos_2.0-rtmpose-gate-r2 \
+  HAND_LANDMARK_BACKEND=rtmpose_onnx
+```
+
+第二条命令会跳过 far，只处理 near/mid。上述删除不是日常预检步骤，仅在确认放弃旧草稿时执行；retired 名称永久不能复用。
+
 ## 11. 负样本与困难样本
 
 ```bash
@@ -336,6 +367,8 @@ make batch-eval-autolabel DATASET_ID=FullEnhanceVal0801 \
 ```
 
 自动标注脚本从 `<dataset>/<source>/images/` 发现来源，不要求预先存在 `source.json`；每个单来源流水线首先执行 source check，因此新来源会在批处理中自动注册。只有数据集的直接子目录被视为 capture source，`images/` 内部不递归发现来源。
+
+批处理会在任何来源写入前调用统一 Palm 距离预检。兼容来源进入处理队列；far 显示 `SKIPPED_UNSUPPORTED_DISTANCE`，汇总记录 discovered、supported、success、failed、skipped 以及完整 skipped source ID。只要至少存在一个兼容来源且没有真实执行失败，跳过 far 不会使批处理失败；全部来源均不兼容或预检配置非法时返回非零。
 
 `HAND_DATASET_ROOT`、`DATASET_ID`、`PROPOSAL_VARIANT`、`HAND_LANDMARK_BACKEND`、`PYTHON_BIN`、`REPO_DIR`、`LOG_DIR` 均通过环境变量传入。每个自动标注来源单独写日志；任一来源失败时脚本完成其余来源后返回非零。Train 脚本不会自动关机。
 

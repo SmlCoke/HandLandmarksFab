@@ -4,7 +4,20 @@
 
 Eos-2.0 的 TensorFlow 结构、H5 权重与优化 ONNX 数值一致，已作为 HLMF 默认 Palm Detector。正式参数为 score `0.25`、全局 NMS IoU `0.10`、最多 2 手；输入为灰度 `[1,1,224,384]`。兼容性回放不支持把 ROI scale 降到 `1.5`，因此暂保留 `scale_x=scale_y=1.8`。
 
+Eos-2.0 只在 near/mid 数据上训练，far 会显著降低召回率和准确率，因此当前能力边界固定为 `supported_capture_distances: [near, mid]`。HLMF 对 far 做来源级硬拒绝，批处理显式跳过；Iris/Muse、板端和现场演示也应限定 near/mid。far 原图保留，待未来 Palm 模型完成正式距离覆盖评测后再启用。
+
 GPU 吞吐为 `426.2 images/s`，CPU 为 `175.0 images/s`；真实输入解码一致，Palm 继续使用 `auto`（CUDA 优先，CPU fallback）。
+
+## far 限制的仓库核查
+
+2026-08-11 对正式仓库做了只读核查。`FullEnhanceVal0801:eos_2.0-rtmpose-gate` 的 10 个来源均只到草标和 CVAT 自动导出阶段，共 13,419 个 ROI；没有人工复核文件、发布报告或该变体的 dataset manifest 条目。两个 far 来源为：
+
+| source | 原图 | ROI | 状态 |
+|---|---:|---:|---|
+| `complex-far-bright-random-test-s01-peak` | 600 | 1,005 | 未复核、未发布；人工查看发现大量无手 ROI |
+| `complex-far-bright-random-val-s01-peak` | 600 | 985 | 未复核、未发布；人工查看发现大量无手 ROI |
+
+这说明问题尚未进入正式 Eval，但也不能靠质量门控补救：Palm 产生错误 ROI 后，后续 RTMPose/HCF 只能处理错误输入。正确边界是在 Palm 链路开始前按模型支持距离拦截，而不是删除原始 far 数据。
 
 ## 环境与模型
 

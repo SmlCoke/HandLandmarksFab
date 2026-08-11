@@ -1,10 +1,12 @@
-# HLMF 当前状态（2026-08-10）
+# HLMF 当前状态（2026-08-11）
 
 ## 代码与配置
 
 HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。MediaPipe Tasks 仍是全局默认 Hand landmark 后端，RTMPose-m Hand5 可通过单次参数启用。
 
 默认 Palm Detector 已升级为 Eos-2.0：模型路径 `models/palm_detector/eos-2.0/model_384x224_opt.onnx`，默认 proposal variant `eos-2.0`，输入 `[1,1,224,384]`，score `0.25`、全局 NMS IoU `0.10`、最多 2 手。两个矩形 feature level 为 `14×24/7×12`，共 840 anchors。ROI 兼容性优先，继续使用 `scale_x=scale_y=1.8、shift_x=0、shift_y=-0.1`。
+
+Dragon 已确认 Eos-2.0 仅在 near/mid 数据上训练；加入 far 会同时降低召回率和准确率。当前配置明确声明 `supported_capture_distances: [near, mid]`。单来源 Palm→ROI→Landmark→CVAT→发布命令在写入前硬拒绝 far；Train/Eval 批处理显式跳过并汇总 far。HLMF、后续 Iris/Muse、端侧部署和现场演示当前均以 near/mid 为有效距离范围。far 原始来源和历史已发布资产保留，不做追溯删除。Eos-1.0 更脆弱，历史上仅适合作为 mid 兼容资产。
 
 Eos-2.0 TensorFlow 参考模型参数量为 `1,367,620`，ONNX full checker 通过；17 组随机/真实输入的 TF↔ONNX raw 最大差 `5.4e-7`，CPU↔GPU 为 `5.6e-7`，score `0.15/0.25` 解码数量一致。Eos-2.0 Palm CPU/GPU 吞吐为 `175.0/426.2 images/s`，因此保持 GPU 优先、CPU fallback。完整审计位于 `assets/palm_detector/eos_2_0_adaptation.md`。
 
@@ -26,7 +28,7 @@ RTMPose Train 几何补救现已默认开启：RTMPose 点触发边界或已开�
 
 原图可视化默认生成按 PNG 文件名字典序排列的 30 FPS MP4；RTMPose ROI 可视化只抽样 runtime ROI。可视化可以独立清理。Registry 使用 source/variant active/retired 状态表，删除变体会留下永久 tombstone。
 
-自动标注批处理现从数据集直接子目录的 `images/` 发现来源，不再要求首次运行前已有 `source.json`。新增数据集级 `batch-autolabel-visualizations-clean` 与 `batch-source-variant-delete`；后者保留精确确认和 retired tombstone，并在批处理末尾重建 dataset manifest。未执行 `source-publish` 的来源仍不会进入 manifest。
+自动标注批处理现从数据集直接子目录的 `images/` 发现来源，不再要求首次运行前已有 `source.json`。批处理先执行统一 Palm 距离预检，near/mid 正常处理，far 显示 `SKIPPED_UNSUPPORTED_DISTANCE`；若至少存在一个兼容来源且无真实失败，跳过 far 不影响成功状态。数据集级 `batch-autolabel-visualizations-clean` 与 `batch-source-variant-delete` 保持独立；后者保留精确确认和 retired tombstone，并在批处理末尾重建 dataset manifest。未执行 `source-publish` 的来源仍不会进入 manifest。
 
 服务器 Hand ROI 像素域审查覆盖 Pretrain/Eval 的 71,779 张原图 TIFF，全部为单通道 8-bit、`1280×720`；`FullEnhanceVal0801/eos-1.0` 的 8,248 张 ROI 全部为单通道 8-bit、`256×256` PNG。跨 10 个来源抽查 50 个 ROI，无损 PNG 与无损 TIFF 往返后逐像素一致。Python OpenCV 与板端 C++ 双线性采样的对比中，3,276,800 个像素仅 242 个相差 1 灰度级（0.0074%），差异来自插值舍入而非文件格式；现有 ROI、人工复核结果和发布资产均不重建。
 
@@ -38,6 +40,8 @@ Eval 数据集 `FullEnhanceVal0801` 当前有 10 个来源：6 个 val、4 个 t
 
 - val：4,200 张原图、5,288 个 ROI、5,091 条发布标签；
 - test：2,800 张原图、2,960 个 ROI、2,816 条发布标签。
+
+同一数据集的 `eos_2.0-rtmpose-gate` 当前在 10 个来源均为 active 草稿，共 13,419 个 ROI，已生成自动 CVAT XML，但没有 `cvat_reviewed.xml`、source publish report 或该变体的 manifest 条目。两个 far 来源分别为 `complex-far-bright-random-test-s01-peak`（1,005 ROI）和 `complex-far-bright-random-val-s01-peak`（985 ROI），人工查看发现大量无手 ROI；本轮保持这些草稿及正式仓库不变。八个 near/mid 草稿可沿用原 variant 继续复核；若决定从头重跑，应先退役整轮旧变体并使用 `eos_2.0-rtmpose-gate-r2`，不能复用 retired 名称。
 
 Pretrain 数据集 `FullEnhance0801` 当前有 95 个 train 来源：
 
@@ -55,14 +59,15 @@ Eval 数据集 `FullEnhanceVal0808` 当前有 3 个 val 来源，每个来源 60
 
 本轮永久删除只作用于 `FullEnhance0801/eos-1.0`。`FullEnhance0801/eos_1.0-gate` 的 95 个 Palm/ROI/labels/发布报告以及所有既有 EValSource 变体均未被该删除操作修改。
 
-Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 4 个 dataset、116 个 capture source、72,379 张 raw image、116 个 active proposal variant、95 个 retired proposal variant、1,142,002 个 ROI。active variant 由 11 个 `eos-1.0`、95 个 `eos_1.0-gate` 和 10 个 `eos_1.0-gate_r2` 组成。
+Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 4 个 dataset、116 个 capture source、72,379 张 raw image、126 个 active proposal variant、95 个 retired proposal variant、1,155,421 个 ROI。active variant 由 11 个 `eos-1.0`、95 个 `eos_1.0-gate`、10 个 `eos_1.0-gate_r2` 和 10 个 `eos_2.0-rtmpose-gate` 组成。
 
 ## 验收状态
 
-- `make compile`：33 个 Python 文件语法检查通过；
-- `make test`：59 项测试通过；
+- `make compile`：37 个 Python 文件语法检查通过；
+- `make test`：70 项测试通过；
 - `make help`：通过；
-- 4 个 Bash 批处理脚本均通过 `bash -n`；未注册 Eval 来源发现测试识别 3/3 个仅含 `images/` 的来源；
+- 4 个 Bash 批处理脚本均通过 `bash -n`；Eos-2.0 距离门控的 near/mid、far/unknown、非法配置、写入前拒绝和批处理接口测试通过；
+- 服务器隔离临时数据根的真实混合批次通过：Eval discovered/supported/skipped 为 `3/2/1`，Train 为 `2/1/1`；far 未产生 proposal 目录，单来源自动标注和发布均被拒绝，near/mid 的 Palm/发布 QC 均记录完整能力契约；临时目录已删除，正式仓库只读；
 - 数据集级可视化清理与永久变体删除均在隔离临时数据仓库通过，永久删除后 dataset manifest 已重建；
 - 新 HCF ONNX 接口验证通过：动态 batch、`input`、`handedness`、`hand_presence`、float32 与双 `[N,2]` 输出均符合契约；
 - 真实 RTMPose+双头 HCF runtime ROI 冒烟通过：21 个有限坐标、有效 handedness 与 `P(has_hand)`；

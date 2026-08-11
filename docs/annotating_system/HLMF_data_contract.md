@@ -19,6 +19,8 @@ train 来源只能位于 `PretrainSource`，val/test 来源只能位于 `EValSou
 
 split 在来源注册阶段写入所有 manifest，不在发布阶段随机生成。
 
+来源注册不限制 distance，因此 far 原始图片及 raw/source 元数据可以长期保留。模型相关阶段另行应用 Palm 能力契约。
+
 ## 2. Capture source 目录
 
 ```text
@@ -56,7 +58,7 @@ split 在来源注册阶段写入所有 manifest，不在发布阶段随机生�
 - `raw_image_id`：同一来源原图的稳定 ID，不随 proposal variant 改变。
 - `roi_id/crop_id`：由 raw ID、proposal variant、proposal slot 和 ROI contract version 稳定派生。
 - Registry `proposal_variants` 主键：`(capture_source_id, proposal_variant)`。
-- `status=active`：变体可按现有幂等流程重跑。
+- `status=active`：变体尚未退役，可继续已有草稿的后续步骤；完整重跑应使用新 variant，避免混合旧 ROI/CVAT 资产。
 - `status=retired`：变体已永久退役，同一来源不得复用该名称。
 - `retired_at`：UTC 退役时间。
 
@@ -75,6 +77,7 @@ paths:
   palm_model_onnx: models/palm_detector/eos-2.0/model_384x224_opt.onnx
 palm:
   model_id: eos-2.0
+  supported_capture_distances: [near, mid]
   input_width: 384
   input_height: 224
   onnx_output_layout: nchw
@@ -91,6 +94,10 @@ hand_roi:
 ```
 
 所有 level 的候选合并后执行一次全局 NMS；旧 `cross_head_suppress_iou` 不再属于配置契约。HLMF 原图仍必须是实际 `1280×720` upright 图像，不接受在 Palm 预处理阶段临时旋转 portrait 输入。
+
+`palm.supported_capture_distances` 必须是非空、无重复的 lowercase source-distance token 列表。当前 Eos-2.0 只允许 `near|mid`。Palm、ROI、Hand Landmark、CVAT 导出/导入和 source publish 在任何变体写入前校验该契约；不支持时以 `unsupported_capture_distance:model=<id>:distance=<distance>:supported=<list>` 拒绝整个来源，不产生逐标签 ignore reason。`check-palm-distance` 的退出码为：支持 0、不支持 3、配置或 source ID 非法 2。
+
+批处理先预检全部来源，far 以 `SKIPPED_UNSUPPORTED_DISTANCE` 跳过；汇总包含 discovered、supported、success、failed、skipped 和完整 skipped source ID。全部来源均不兼容时返回非零。历史可视化、精确变体清理、manifest rebuild 和既有 published 数据不受追溯限制。
 
 Palm bbox、p0、p9 与 ROI 几何是程序输出，CVAT 不得修改。所有 Hand ROI 固定为单通道 `uint8 256×256`，以无损 PNG 保存。模型输入契约是图片解码后的灰度像素数组，不是 PNG/TIFF 容器；相同 `uint8` 数组使用无损 PNG 或无损 TIFF 编解码后像素一致。板端从摄像头 `SSNE_Y_8` 内存构造 ROI，不读取 TIFF 文件作为 Hand Landmarker 输入。
 
@@ -190,7 +197,7 @@ negative_candidates_skipped
 mediapipe_tflite_rescue.enabled/model_id/attempted/accepted/rejected
 ```
 
-MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 的实际 ONNX provider、fallback 原因、batch size、HCF 模型 ID 和 HCF 推理数。Palm 的 `palm_detection_report.json.onnx_runtime` 记录 provider、fallback 原因及固定 batch 1 的原因。
+MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 的实际 ONNX provider、fallback 原因、batch size、HCF 模型 ID 和 HCF 推理数。Palm 的 `palm_detection_report.json.onnx_runtime` 记录 provider、fallback 原因及固定 batch 1 的原因；顶层 `capture_distance_policy` 记录 Palm model ID、实际 distance、支持列表和 `supported=true`。
 
 `palm_detection_report.json.onnx_runtime.model_contract` 记录 Eos model ID/相对路径、输入名称/形状/类型、四个输出名称/形状、预处理、layout、feature levels、anchor 总数及 score/NMS/max/negative 阈值。运行前模型输入输出必须与配置完全匹配；不匹配时明确终止，不产生 Palm manifest。
 
@@ -212,6 +219,8 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
 
 `source_publish_report.json.quality_gate_rejections` 固定包含 `hand_presence`、`boundary_coordinate`、`connection_length`、`handedness` 四个非负整数。计数按发布拒绝优先级互斥归因，因此一行最多计入一项；其他自动质量错误不计入四项。`quality_gate_counting_policy` 固定为 `exclusive_by_publish_routing_priority`。
+
+`source_publish_report.json.capture_distance_policy` 与 Palm QC 使用相同结构。它是来源级模型能力契约，不属于四条标签质量门控；far 在报告写入前即被拒绝。
 
 ## 8. Eval、CVAT 与发布
 

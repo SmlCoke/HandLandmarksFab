@@ -18,11 +18,13 @@ from hand_autolabel.dataset_v3 import (
     SCHEMA_VERSION,
     WarehouseRegistry,
     apply_label_provenance,
+    assert_palm_capture_distance_supported,
     clean_variant_visualizations,
     delete_source_variant,
     enrich_palm_rows,
     enrich_roi_rows,
     parse_capture_source_id,
+    palm_capture_distance_policy,
     prepare_negative_review,
     prepare_selection_review,
     proposal_paths,
@@ -150,6 +152,8 @@ def _parser() -> argparse.ArgumentParser:
                 required=True,
                 help="Must exactly match --proposal-variant.",
             )
+    distance_check = sub.add_parser("check-palm-distance")
+    distance_check.add_argument("--capture-source-id", required=True)
     rebuild_manifest = sub.add_parser("rebuild-dataset-manifest")
     rebuild_manifest.add_argument("--dataset-root", required=True)
     rebuild_manifest.add_argument(
@@ -255,6 +259,9 @@ def _run_palm(
     *,
     show_progress: bool = True,
 ) -> Dict[str, Any]:
+    distance_policy = assert_palm_capture_distance_supported(
+        args.capture_source_id, cfg
+    )
     source, paths = _source_context(args, cfg)
     raw_rows = read_jsonl(source / "raw_images.jsonl")
     if not raw_rows:
@@ -297,6 +304,7 @@ def _run_palm(
         "proposal_variant": args.proposal_variant,
         "backend": backend,
         "backend_mode": backend_mode,
+        "capture_distance_policy": distance_policy,
         "onnx_runtime": runtime_info or None,
         "images": len(rows),
         "detections": sum(len(row.get("detections") or []) for row in rows),
@@ -317,6 +325,7 @@ def _run_build_roi(
     *,
     show_progress: bool = True,
 ) -> Dict[str, Any]:
+    assert_palm_capture_distance_supported(args.capture_source_id, cfg)
     source, paths = _source_context(args, cfg)
     palm_rows = read_jsonl(paths["palm"] / "palm_detections.jsonl")
     if not palm_rows:
@@ -449,6 +458,7 @@ def _run_mediapipe(
     *,
     show_progress: bool = True,
 ) -> Dict[str, Any]:
+    assert_palm_capture_distance_supported(args.capture_source_id, cfg)
     dataset_root = Path(args.dataset_root).resolve()
     root = source_root(
         dataset_root,
@@ -729,6 +739,7 @@ def _run_existing_original_image_visualization(
 
 
 def _run_export_cvat(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    assert_palm_capture_distance_supported(args.capture_source_id, cfg)
     _, paths = _source_context(args, cfg)
     if parse_capture_source_id(args.capture_source_id)["split"] == "train":
         raise DatasetContractError("routine CVAT review is limited to Val/Test Hand ROIs")
@@ -743,6 +754,7 @@ def _run_export_cvat(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str,
 
 
 def _run_import_cvat(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    assert_palm_capture_distance_supported(args.capture_source_id, cfg)
     _, paths = _source_context(args, cfg)
     reviewed_xml = paths["reviewed"] / "cvat_reviewed.xml"
     manifest = read_jsonl(paths["roi"] / "hand_roi_crops_manifest.jsonl")
@@ -925,6 +937,9 @@ def _partition_labels(
 
 
 def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    distance_policy = assert_palm_capture_distance_supported(
+        args.capture_source_id, cfg
+    )
     source, paths = _source_context(args, cfg)
     split = parse_capture_source_id(args.capture_source_id)["split"]
     raw_rows = read_jsonl(source / "raw_images.jsonl")
@@ -945,6 +960,7 @@ def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[s
         "capture_source_id": args.capture_source_id,
         "split": split,
         "proposal_variant": args.proposal_variant,
+        "capture_distance_policy": distance_policy,
         "raw_images": len(raw_rows),
         "rois": len(manifest),
         "published_labels": len(positives),
@@ -974,6 +990,7 @@ def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[s
 
 
 def _run_source_pipeline(args: argparse.Namespace, cfg: Dict[str, Any], evaluation: bool) -> Dict[str, Any]:
+    assert_palm_capture_distance_supported(args.capture_source_id, cfg)
     split = parse_capture_source_id(args.capture_source_id)["split"]
     if evaluation != (split in {"val", "test"}):
         raise DatasetContractError("autolabel-train/eval does not match capture source split")
@@ -997,7 +1014,9 @@ def main() -> None:
     args = _parser().parse_args()
     cfg = _load_public_configs(args)
     try:
-        if args.command == "validate-source":
+        if args.command == "check-palm-distance":
+            result = palm_capture_distance_policy(args.capture_source_id, cfg)
+        elif args.command == "validate-source":
             result = _run_validate(args)
         elif args.command == "palm":
             result = _run_palm(args, cfg)
@@ -1051,6 +1070,16 @@ def main() -> None:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if args.command == "check-palm-distance" and not result["supported"]:
+        allowed = ",".join(result["supported_capture_distances"])
+        print(
+            "ERROR: unsupported_capture_distance:"
+            f"model={result['palm_model_id']}:"
+            f"distance={result['capture_distance']}:"
+            f"supported={allowed}",
+            file=sys.stderr,
+        )
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":

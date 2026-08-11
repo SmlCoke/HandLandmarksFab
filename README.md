@@ -2,6 +2,8 @@
 
 HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。系统默认从 Eos-2.0 Palm Detector 的 bbox、p0、p9 构造固定 `256×256` Hand ROI，再由 MediaPipe Tasks 或 RTMPose-m Hand5 生成 21 点草标；RTMPose runtime ROI 的 Left/Right 与 hand presence 由独立双头 HCF ONNX 分类器给出。
 
+当前 Eos-2.0 只在 near/mid 数据上训练，HLMF、后续 Iris/Muse 和端侧演示因此仅支持 near/mid。far 原始来源应保留，但不得进入 Eos-2.0 的 Palm→ROI→Landmark→复核→发布链路；单来源命令会硬拒绝，批处理会显式跳过。
+
 本仓库只制作 Hand Landmarker 数据。Palm 几何不能人工修改，人工复核对象是程序生成的 Hand ROI、21 个关键点、handedness 以及 `no_hand/ignore_for_training` 状态。
 
 Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素。仓库使用无损 PNG 保存 ROI；PNG/TIFF 是存储容器，不改变相同灰度数组的像素域。板端从 `SSNE_Y_8` 摄像头内存直接构造 ROI，并不把 TIFF 文件送入 Hand Landmarker。
@@ -18,7 +20,7 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 
 ## 当前教师后端
 
-- Palm：默认 Eos-2.0，输入灰度 `[1,1,224,384]`，score `0.25`、全局 NMS IoU `0.10`、840 anchors；ROI scale 保持 `1.8/1.8`。默认 proposal variant 为 `eos-2.0`。
+- Palm：默认 Eos-2.0，输入灰度 `[1,1,224,384]`，score `0.25`、全局 NMS IoU `0.10`、840 anchors；ROI scale 保持 `1.8/1.8`，`supported_capture_distances=[near,mid]`。默认 proposal variant 为 `eos-2.0`。
 - 默认后端：`hand_landmark.backend: mediapipe_tasks`。
 - 单次切换：`HAND_LANDMARK_BACKEND=rtmpose_onnx`。
 - RTMPose：原始 SimCC logits 直接 argmax，除以固定 `2.0`；runtime ROI 总是输出 21 点。
@@ -39,6 +41,9 @@ export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
 make source-check DATASET_SCOPE=pretrain DATASET_ID=demo \
   CAPTURE_SOURCE_ID=room-near-daylight-normal-train-s01-alice \
   PROPOSAL_VARIANT=eos-2.0
+
+make palm-distance-check \
+  CAPTURE_SOURCE_ID=room-near-daylight-normal-train-s01-alice
 
 make train-autolabel DATASET_SCOPE=pretrain DATASET_ID=demo \
   CAPTURE_SOURCE_ID=room-near-daylight-normal-train-s01-alice \
@@ -75,6 +80,10 @@ make help
 `autolabel-visualize-original` 默认在 PNG 完成后生成 `visualizations/original_image_landmarks/<variant>.mp4`；传 `ORIGINAL_VIDEO=false` 可只生成 PNG。
 
 `source-variant-delete` 只删除精确来源/变体的派生产物，保留 `images/`、`raw_images.jsonl`、`source.json`，并写入永久 retired tombstone。同一来源不能再次使用被 retired 的变体名。若只想释放可重建的可视化空间，使用 `autolabel-visualizations-clean`，它不会写 tombstone。
+
+批量自动标注先按当前 Palm 模型能力预检全部 source：near/mid 正常执行，far 输出 `SKIPPED_UNSUPPORTED_DISTANCE` 并计入 skipped，不计作运行失败；若没有任何兼容来源则返回非零。`source-check`、历史可视化和精确变体清理仍允许处理 far，以保留原始资产和诊断能力。
+
+现有 near/mid 草稿可继续沿用原 variant 复核；若要从头重跑，必须换用新 variant。以 `eos_2.0-rtmpose-gate` 为例，清理后应使用 `eos_2.0-rtmpose-gate-r2`，不能复用已 retired 的名称，也不应在已有 ROI/CVAT 资产上原地重跑。
 
 ## Train 质量边界
 

@@ -16,11 +16,13 @@ from hand_autolabel.dataset_v3 import (
     ROI_CONTRACT_VERSION,
     WarehouseRegistry,
     apply_label_provenance,
+    assert_palm_capture_distance_supported,
     clean_variant_visualizations,
     delete_source_variant,
     enrich_palm_rows,
     enrich_roi_rows,
     parse_capture_source_id,
+    palm_capture_distance_policy,
     prepare_negative_review,
     prepare_selection_review,
     proposal_paths,
@@ -46,6 +48,8 @@ from scripts.hlmf import (
     _run_delete_source_variant,
     _run_existing_original_image_visualization,
     _run_existing_roi_visualization,
+    _run_publish_source,
+    _run_source_pipeline,
     _validate_evaluation_limits,
 )
 from tools.downsample import downsample
@@ -114,6 +118,99 @@ class DatasetV3Tests(unittest.TestCase):
             parse_capture_source_id("white-mid-bright-two-hands-train-s01-peak")
         with self.assertRaises(DatasetContractError):
             source_root(self.root, "pretrain", "national-r1", CAPTURE_VAL)
+
+    def test_palm_capture_distance_policy_accepts_near_mid_and_rejects_other_distances(self) -> None:
+        cfg = {
+            "palm": {
+                "model_id": "eos-2.0",
+                "supported_capture_distances": ["near", "mid"],
+            }
+        }
+        near = palm_capture_distance_policy(
+            "white-near-bright-fist-train-s01-peak", cfg
+        )
+        mid = assert_palm_capture_distance_supported(CAPTURE_TRAIN, cfg)
+        self.assertTrue(near["supported"])
+        self.assertTrue(mid["supported"])
+        self.assertEqual(["near", "mid"], near["supported_capture_distances"])
+        for capture_id in (
+            CAPTURE_VAL,
+            "white-unknown-bright-fist-train-s01-peak",
+        ):
+            with self.assertRaisesRegex(
+                DatasetContractError,
+                r"unsupported_capture_distance:model=eos-2\.0:distance=.*:supported=near,mid",
+            ):
+                assert_palm_capture_distance_supported(capture_id, cfg)
+
+    def test_palm_capture_distance_policy_rejects_invalid_config(self) -> None:
+        bad_values = (
+            {},
+            {"palm": {}},
+            {"palm": {"model_id": "eos-2.0"}},
+            {
+                "palm": {
+                    "model_id": "eos-2.0",
+                    "supported_capture_distances": "near,mid",
+                }
+            },
+            {
+                "palm": {
+                    "model_id": "eos-2.0",
+                    "supported_capture_distances": [],
+                }
+            },
+            {
+                "palm": {
+                    "model_id": "eos-2.0",
+                    "supported_capture_distances": ["near", "Near"],
+                }
+            },
+            {
+                "palm": {
+                    "model_id": "eos-2.0",
+                    "supported_capture_distances": ["near", "near"],
+                }
+            },
+        )
+        for cfg in bad_values:
+            with self.subTest(cfg=cfg), self.assertRaises(DatasetContractError):
+                palm_capture_distance_policy(CAPTURE_TRAIN, cfg)
+
+    def test_far_pipeline_and_publish_fail_before_creating_variant_outputs(self) -> None:
+        cfg = {
+            "palm": {
+                "model_id": "eos-2.0",
+                "supported_capture_distances": ["near", "mid"],
+            }
+        }
+        args = SimpleNamespace(
+            dataset_root=str(self.root),
+            scope="eval",
+            dataset_id="national-r1",
+            capture_source_id=CAPTURE_VAL,
+            proposal_variant="eos-2.0-r1",
+        )
+        source = source_root(self.root, "eval", "national-r1", CAPTURE_VAL)
+        with patch("scripts.hlmf._run_validate") as validate:
+            with self.assertRaisesRegex(
+                DatasetContractError, "unsupported_capture_distance"
+            ):
+                _run_source_pipeline(args, cfg, evaluation=True)
+            validate.assert_not_called()
+        with self.assertRaisesRegex(
+            DatasetContractError, "unsupported_capture_distance"
+        ):
+            _run_publish_source(args, cfg)
+        paths = proposal_paths(source, args.proposal_variant)
+        self.assertFalse(any(path.exists() for key, path in paths.items() if key != "images"))
+
+    def test_check_palm_distance_parser_requires_only_capture_source(self) -> None:
+        args = _parser().parse_args(
+            ["check-palm-distance", "--capture-source-id", CAPTURE_TRAIN]
+        )
+        self.assertEqual("check-palm-distance", args.command)
+        self.assertEqual(CAPTURE_TRAIN, args.capture_source_id)
 
     def test_validate_rotates_once_and_is_idempotent(self) -> None:
         source = self._source()
@@ -1289,6 +1386,7 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertIn("batch-train-autolabel:", makefile)
         self.assertIn("batch-autolabel-visualizations-clean:", makefile)
         self.assertIn("batch-source-variant-delete:", makefile)
+        self.assertIn("palm-distance-check:", makefile)
         self.assertIn("dataset-manifest-rebuild:", makefile)
         self.assertEqual({"hlmf.py"}, {path.name for path in (root / "scripts").glob("*.py")})
         self.assertEqual(
@@ -1303,6 +1401,12 @@ class DatasetV3Tests(unittest.TestCase):
         batch_eval = (root / "scripts" / "batch_eval_autolabel.sh").read_text(encoding="utf-8")
         self.assertIn('[[ -d "$source_dir/images" ]]', batch_eval)
         self.assertNotIn("-name source.json", batch_eval)
+        for script_name in ("batch_eval_autolabel.sh", "batch_train_autolabel.sh"):
+            batch_script = (root / "scripts" / script_name).read_text(encoding="utf-8")
+            self.assertIn("check-palm-distance", batch_script)
+            self.assertIn("SKIPPED_UNSUPPORTED_DISTANCE", batch_script)
+            self.assertIn("SUPPORTED_SOURCE_DIRS", batch_script)
+            self.assertIn("Skipped source IDs", batch_script)
         self.assertEqual(
             {"autolabel.yaml", "review.yaml", "datasets.yaml", "cvat_label.json"},
             {path.name for path in (root / "configs").iterdir() if path.is_file()},

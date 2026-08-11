@@ -69,6 +69,68 @@ def parse_capture_source_id(value: str) -> Dict[str, str]:
     return dict(match.groupdict())
 
 
+def palm_capture_distance_policy(
+    capture_source_id: str, cfg: Mapping[str, Any]
+) -> Dict[str, Any]:
+    """Return the configured Palm-model distance capability for one source."""
+
+    parsed = parse_capture_source_id(capture_source_id)
+    palm_cfg = cfg.get("palm")
+    if not isinstance(palm_cfg, Mapping):
+        raise DatasetContractError("palm config must be a mapping")
+    raw_model_id = palm_cfg.get("model_id")
+    if not isinstance(raw_model_id, str) or not raw_model_id.strip():
+        raise DatasetContractError("palm.model_id must be a non-empty string")
+    model_id = require_safe_id(raw_model_id, "palm.model_id")
+    raw_distances = palm_cfg.get("supported_capture_distances")
+    if not isinstance(raw_distances, list) or not raw_distances:
+        raise DatasetContractError(
+            "palm.supported_capture_distances must be a non-empty YAML list"
+        )
+    supported: List[str] = []
+    for index, raw_distance in enumerate(raw_distances):
+        if (
+            not isinstance(raw_distance, str)
+            or raw_distance != raw_distance.strip().lower()
+            or re.fullmatch(r"[a-z0-9_]+", raw_distance) is None
+        ):
+            raise DatasetContractError(
+                "palm.supported_capture_distances entries must be lowercase "
+                f"source-distance tokens: index={index} value={raw_distance!r}"
+            )
+        if raw_distance in supported:
+            raise DatasetContractError(
+                "palm.supported_capture_distances contains a duplicate: "
+                f"{raw_distance}"
+            )
+        supported.append(raw_distance)
+    distance = parsed["distance"]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "policy": "palm_supported_capture_distances",
+        "capture_source_id": capture_source_id,
+        "palm_model_id": model_id,
+        "capture_distance": distance,
+        "supported_capture_distances": supported,
+        "supported": distance in supported,
+    }
+
+
+def assert_palm_capture_distance_supported(
+    capture_source_id: str, cfg: Mapping[str, Any]
+) -> Dict[str, Any]:
+    policy = palm_capture_distance_policy(capture_source_id, cfg)
+    if not policy["supported"]:
+        allowed = ",".join(policy["supported_capture_distances"])
+        raise DatasetContractError(
+            "unsupported_capture_distance:"
+            f"model={policy['palm_model_id']}:"
+            f"distance={policy['capture_distance']}:"
+            f"supported={allowed}"
+        )
+    return policy
+
+
 def source_root(
     dataset_root: Path,
     scope: str,

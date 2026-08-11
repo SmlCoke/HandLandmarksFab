@@ -28,7 +28,7 @@ mkdir -p models/mediapipe/hand_landmarker_tflite
 # 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0809/model.onnx。
 ```
 
-输出：代码和环境检查结果。默认 Eos-2.0 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，默认 proposal variant 为 `eos-2.0`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
+输出：代码和环境检查结果。默认 Eos-2.0 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，只支持 near/mid，默认 proposal variant 为 `eos-2.0`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
 
 ## 2. 注册来源
 
@@ -39,6 +39,9 @@ make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
   PROPOSAL_VARIANT=eos-2.0
+
+make palm-distance-check \
+  CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak
 ```
 
 输出：`source.json`、`raw_images.jsonl`、图像 QC 和 Registry 记录。
@@ -64,6 +67,8 @@ make batch-train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
+输出：批处理显式跳过 far 并列出 `SKIPPED_UNSUPPORTED_DISTANCE`；near/mid 正常执行。若全部来源均被跳过则返回非零。
+
 ## 4. Eval 自动标注
 
 输入：已注册 val/test 来源、Eos、RTMPose 和双头 HCF。
@@ -84,6 +89,8 @@ make batch-eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.0 \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
+
+输出：同样只处理 near/mid，far 不生成或更新 proposal、ROI、CVAT 和发布资产。
 
 ## 5. 可视化
 
@@ -183,6 +190,21 @@ make batch-source-variant-delete HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 ```
 
 输出：逐来源写入 retired tombstone、删除精确变体产物，最后重建 dataset manifest。确认值必须与变体名完全一致。
+
+如果要把未发布的 `eos_2.0-rtmpose-gate` 整轮清理后重跑，使用新名称：
+
+```bash
+make batch-source-variant-delete HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
+  PROPOSAL_VARIANT=eos_2.0-rtmpose-gate \
+  CONFIRM_DELETE=eos_2.0-rtmpose-gate
+make batch-eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_ID=FullEnhanceVal0801 \
+  PROPOSAL_VARIANT=eos_2.0-rtmpose-gate-r2 \
+  HAND_LANDMARK_BACKEND=rtmpose_onnx
+```
+
+清理命令只在明确决定放弃旧草稿时执行；retired 名称不能复用。若直接继续现有 near/mid 草稿的人工复核，则继续使用原 variant，不要重新自动标注。
 
 ## 9. 最终检查
 

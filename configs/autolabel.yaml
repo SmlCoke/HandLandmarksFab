@@ -36,6 +36,8 @@ image:
 palm:
   backend: aethersign_onnx
   model_id: eos-2.0
+  # Eos-2.0 was trained for near/mid only; far must not enter its annotation chain.
+  supported_capture_distances: [near, mid]
   input_width: 384
   input_height: 224
   onnx_output_layout: nchw

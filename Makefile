@@ -27,7 +27,7 @@ AUTOLABEL_ARGS = $(if $(strip $(ROI_VISUALIZATION)),--roi-visualization "$(ROI_V
 	$(if $(strip $(ORIGINAL_VISUALIZATION)),--original-visualization "$(ORIGINAL_VISUALIZATION)",) \
 	$(if $(strip $(HAND_LANDMARK_BACKEND)),--hand-landmark-backend "$(HAND_LANDMARK_BACKEND)",)
 
-.PHONY: help paths source-check train-autolabel eval-autolabel autolabel-visualize-roi \
+.PHONY: help paths source-check palm-distance-check train-autolabel eval-autolabel autolabel-visualize-roi \
 	autolabel-visualize-original autolabel-visualizations-clean \
 	batch-autolabel-visualizations-clean source-variant-delete batch-source-variant-delete \
 	dataset-manifest-rebuild batch-eval-autolabel batch-train-autolabel hand-cvat-export \
@@ -38,6 +38,7 @@ help:
 	@echo HLMF 3.0 - Palm proposals to versioned Hand ROI datasets
 	@echo Configs: autolabel.yaml=automatic labels, review.yaml=Hand CVAT, datasets.yaml=publication, cvat_label.json=CVAT schema
 	@echo   make source-check DATASET_SCOPE=pretrain/eval DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-2.0
+	@echo   make palm-distance-check CAPTURE_SOURCE_ID=...  Check current Palm model distance support
 	@echo   make train-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
 	@echo   make eval-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
 	@echo   make autolabel-visualize-roi ...  Render existing draft on Hand ROI images
@@ -68,6 +69,9 @@ paths:
 
 source-check:
 	$(CLI) validate-source $(SOURCE_ARGS)
+
+palm-distance-check:
+	$(CLI) check-palm-distance --capture-source-id "$(CAPTURE_SOURCE_ID)"
 
 train-autolabel:
 	$(CLI) autolabel-train $(SOURCE_ARGS) $(AUTOLABEL_ARGS)
@@ -103,11 +107,11 @@ dataset-manifest-rebuild:
 
 batch-eval-autolabel:
 	$(if $(strip $(DATASET_ID)),,$(error DATASET_ID is required))
-	HAND_DATASET_ROOT="$(HAND_DATASET_ROOT)" DATASET_ID="$(DATASET_ID)" PROPOSAL_VARIANT="$(PROPOSAL_VARIANT)" HAND_LANDMARK_BACKEND="$(or $(HAND_LANDMARK_BACKEND),rtmpose_onnx)" PYTHON_BIN="$(PYTHON)" REPO_DIR="$(CURDIR)" $(if $(strip $(BATCH_LOG_DIR)),LOG_DIR="$(BATCH_LOG_DIR)",) bash scripts/batch_eval_autolabel.sh
+	HAND_DATASET_ROOT="$(HAND_DATASET_ROOT)" DATASET_ID="$(DATASET_ID)" PROPOSAL_VARIANT="$(PROPOSAL_VARIANT)" HAND_LANDMARK_BACKEND="$(or $(HAND_LANDMARK_BACKEND),rtmpose_onnx)" PYTHON_BIN="$(PYTHON)" REPO_DIR="$(CURDIR)" AUTOLABEL_CONFIG="$(AUTOLABEL_CONFIG)" REVIEW_CONFIG="$(REVIEW_CONFIG)" DATASETS_CONFIG="$(DATASETS_CONFIG)" $(if $(strip $(BATCH_LOG_DIR)),LOG_DIR="$(BATCH_LOG_DIR)",) bash scripts/batch_eval_autolabel.sh
 
 batch-train-autolabel:
 	$(if $(strip $(DATASET_ID)),,$(error DATASET_ID is required))
-	HAND_DATASET_ROOT="$(HAND_DATASET_ROOT)" DATASET_ID="$(DATASET_ID)" PROPOSAL_VARIANT="$(PROPOSAL_VARIANT)" HAND_LANDMARK_BACKEND="$(or $(HAND_LANDMARK_BACKEND),rtmpose_onnx)" PYTHON_BIN="$(PYTHON)" REPO_DIR="$(CURDIR)" $(if $(strip $(BATCH_LOG_DIR)),LOG_DIR="$(BATCH_LOG_DIR)",) bash scripts/batch_train_autolabel.sh
+	HAND_DATASET_ROOT="$(HAND_DATASET_ROOT)" DATASET_ID="$(DATASET_ID)" PROPOSAL_VARIANT="$(PROPOSAL_VARIANT)" HAND_LANDMARK_BACKEND="$(or $(HAND_LANDMARK_BACKEND),rtmpose_onnx)" PYTHON_BIN="$(PYTHON)" REPO_DIR="$(CURDIR)" AUTOLABEL_CONFIG="$(AUTOLABEL_CONFIG)" REVIEW_CONFIG="$(REVIEW_CONFIG)" DATASETS_CONFIG="$(DATASETS_CONFIG)" $(if $(strip $(BATCH_LOG_DIR)),LOG_DIR="$(BATCH_LOG_DIR)",) bash scripts/batch_train_autolabel.sh
 
 hand-cvat-export:
 	$(CLI) export-cvat $(SOURCE_ARGS)
