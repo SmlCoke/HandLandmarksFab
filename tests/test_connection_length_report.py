@@ -147,6 +147,46 @@ class ConnectionLengthReportTests(unittest.TestCase):
         self.assertIn("## 运行与重新统计", report)
         self.assertNotIn("FullEnhanceVal0803", report)
 
+    def test_partial_published_variant_preserves_unobserved_distance(self) -> None:
+        self._build_dataset()
+        manifest_path = self.root / "EValSource" / "demo-eval" / "dataset_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for source in manifest["capture_sources"]:
+            if "far" in source["capture_source_id"]:
+                source["published_variants"] = []
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        fallback = {
+            distance: {
+                pair: 100 + index
+                for index, pair in enumerate(RTMPOSE_CONNECTION_PAIRS)
+            }
+            for distance in ("near", "mid", "far")
+        }
+        analysis = analyze_datasets(
+            self.root, [("demo-eval", "v1")], fallback_thresholds=fallback
+        )
+
+        self.assertEqual(["far"], analysis["preserved_distances"])
+        self.assertEqual(0, analysis["stats"]["far"][(0, 1)]["n"])
+        self.assertEqual(100, analysis["thresholds"]["far"][(0, 1)])
+        report = render_report(analysis, "python -B tools/analyze.py ...")
+        self.assertIn("阈值保留 YAML 中的历史值", report)
+        self.assertIn("| 0-1 | 0 | — | — |", report)
+
+    def test_missing_variant_is_rejected(self) -> None:
+        self._build_dataset()
+        fallback = {
+            distance: {pair: 100 for pair in RTMPOSE_CONNECTION_PAIRS}
+            for distance in ("near", "mid", "far")
+        }
+        with self.assertRaisesRegex(ValueError, "no published sources"):
+            analyze_datasets(
+                self.root,
+                [("demo-eval", "missing")],
+                fallback_thresholds=fallback,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

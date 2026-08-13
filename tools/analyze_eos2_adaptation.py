@@ -377,7 +377,7 @@ def render_report(
         "",
         "## 结论",
         "",
-        f"当前配置为 score `{cfg['palm']['score_threshold']}`、NMS `{cfg['palm']['nms_iou_threshold']}`、ROI scale `{cfg['hand_roi']['scale_x']}/{cfg['hand_roi']['scale_y']}`。兼容策略保留旧连接长度阈值；首个 Eos-2.0 人工复核 Eval 发布后必须正式重算。",
+        f"当前配置为 score `{cfg['palm']['score_threshold']}`、NMS `{cfg['palm']['nms_iou_threshold']}`、ROI scale `{cfg['hand_roi']['scale_x']}/{cfg['hand_roi']['scale_y']}`。代表性 Eos-2.0 Gold 发布后应使用连接长度统计工具重算 near/mid 阈值并回放 gold/draft；far 在模型不支持期间只保留不可达的历史值。",
         "",
         "## 模型契约",
         "",

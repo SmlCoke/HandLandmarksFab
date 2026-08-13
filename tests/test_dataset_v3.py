@@ -582,10 +582,15 @@ class DatasetV3Tests(unittest.TestCase):
             "source": "rtmpose_m_hand5_onnx",
             "capture_source_id": "white-near-bright-random-train-s01-peak",
         }
+        connection_threshold = float(
+            cfg["quality"]["rtmpose_train_connection_length_thresholds_px"]["near"][
+                "19-20"
+            ]
+        )
         at_threshold_points = [dict(point) for point in base_points]
-        at_threshold_points[20]["x"] = 152.0
+        at_threshold_points[20]["x"] = 100.0 + connection_threshold
         over_threshold_points = [dict(point) for point in base_points]
-        over_threshold_points[20]["x"] = 152.01
+        over_threshold_points[20]["x"] = 100.01 + connection_threshold
         zero_length = dict(base, crop_id="zero")
         at_threshold = dict(
             base, crop_id="at-threshold", landmarks_crop_px=at_threshold_points
@@ -768,7 +773,7 @@ class DatasetV3Tests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml"
         )
         classifier = SimpleNamespace(
-            model_id="hand-classifier-handedness-handpresence-0809",
+            model_id="hand-classifier-handedness-handpresence-0813",
             provider="CPUExecutionProvider",
             fallback_reason=None,
             classify_batch=lambda images: [
@@ -780,9 +785,8 @@ class DatasetV3Tests(unittest.TestCase):
             ],
         )
         with patch(
-            "hand_autolabel.dataset_v3.HandClassifierONNX",
-            return_value=classifier,
-        ):
+            "hand_autolabel.dataset_v3.HandClassifierONNX", return_value=classifier
+        ) as classifier_factory:
             result = prepare_negative_review(
                 self.root,
                 "neg-r1",
@@ -790,9 +794,14 @@ class DatasetV3Tests(unittest.TestCase):
                 cfg,
                 Path(__file__).resolve().parents[1],
             )
+        classifier_factory.assert_called_once_with(
+            Path(__file__).resolve().parents[1]
+            / "models/hand_classifier/handedness-handpresence-0813/model.onnx",
+            "auto",
+        )
         review_image = next(Path(result["review_root"]).glob("images/*/*"))
         self.assertEqual(
-            "hand-classifier-handedness-handpresence-0809",
+            "hand-classifier-handedness-handpresence-0813",
             result["hand_classifier_model_id"],
         )
         self.assertNotEqual(os.stat(crop).st_ino, os.stat(review_image).st_ino)

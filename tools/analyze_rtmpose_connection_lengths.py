@@ -50,12 +50,14 @@ def _source_label_file(
     dataset_id: str,
     proposal_variant: str,
     source: Mapping[str, Any],
-) -> Path:
+) -> Path | None:
     matches = [
         item
         for item in source.get("published_variants", [])
         if str(item.get("proposal_variant")) == proposal_variant
     ]
+    if not matches:
+        return None
     if len(matches) != 1:
         raise ValueError(
             f"{dataset_id}/{source.get('capture_source_id')} must have exactly one "
@@ -89,8 +91,24 @@ def _threshold_stats(values: Iterable[float]) -> Dict[str, float | int]:
     }
 
 
+def _preserved_threshold_stats(threshold: float) -> Dict[str, float | int | None]:
+    return {
+        "n": 0,
+        "mean": None,
+        "variance": None,
+        "p50": None,
+        "p95": None,
+        "p9995": None,
+        "max": None,
+        "threshold": int(threshold),
+    }
+
+
 def analyze_datasets(
-    dataset_root: Path, dataset_specs: Sequence[tuple[str, str]]
+    dataset_root: Path,
+    dataset_specs: Sequence[tuple[str, str]],
+    *,
+    fallback_thresholds: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
 ) -> Dict[str, Any]:
     dataset_root = Path(dataset_root).resolve()
     values: Dict[str, Dict[tuple[int, int], List[float]]] = {
@@ -118,6 +136,8 @@ def analyze_datasets(
             labels_file = _source_label_file(
                 dataset_root, dataset_id, proposal_variant, source
             )
+            if labels_file is None:
+                continue
             valid_rows = 0
             total_rows = 0
             for row in read_jsonl(labels_file):
@@ -159,13 +179,29 @@ def analyze_datasets(
                 }
             )
 
-    stats = {
-        distance: {
-            pair: _threshold_stats(values[distance][pair])
+    if not sources:
+        variants = ", ".join(f"{dataset}:{variant}" for dataset, variant in dataset_specs)
+        raise ValueError(f"no published sources found for requested variants: {variants}")
+
+    preserved_distances: List[str] = []
+    stats: Dict[str, Dict[tuple[int, int], Dict[str, float | int | None]]] = {}
+    for distance in RTMPOSE_CONNECTION_DISTANCES:
+        if values[distance][RTMPOSE_CONNECTION_PAIRS[0]]:
+            stats[distance] = {
+                pair: _threshold_stats(values[distance][pair])
+                for pair in RTMPOSE_CONNECTION_PAIRS
+            }
+            continue
+        if fallback_thresholds is None or distance not in fallback_thresholds:
+            raise ValueError(
+                f"distance {distance!r} has no published samples; "
+                "configured fallback thresholds are required"
+            )
+        preserved_distances.append(distance)
+        stats[distance] = {
+            pair: _preserved_threshold_stats(fallback_thresholds[distance][pair])
             for pair in RTMPOSE_CONNECTION_PAIRS
         }
-        for distance in RTMPOSE_CONNECTION_DISTANCES
-    }
     thresholds = {
         distance: {
             pair: int(stats[distance][pair]["threshold"])
@@ -251,6 +287,7 @@ def analyze_datasets(
         "stats": stats,
         "thresholds": thresholds,
         "replay": replay,
+        "preserved_distances": preserved_distances,
     }
 
 
@@ -271,7 +308,9 @@ def verify_config_thresholds(
         raise ValueError("config threshold mismatch: " + ", ".join(mismatches))
 
 
-def _fmt(value: float) -> str:
+def _fmt(value: float | None) -> str:
+    if value is None:
+        return "—"
     return f"{value:.2f}"
 
 
@@ -297,7 +336,7 @@ def render_report(analysis: Mapping[str, Any], command: str) -> str:
         "",
         "遮挡时 RTMPose 可能把不可见关键点预测到无关位置，使相邻骨骼异常变长。本门控以人工复核 Eval 的 crop 像素长度为基准，过滤这类高置信异常；它不能发现所有遮挡或仍落在正常长度范围内的乱飞点。规则仅用于 RTMPose Train runtime，长度为 0 不拒绝。",
         "",
-        f"本次共统计 **{total_valid:,}** 条有效 gold hand。阈值采用 `ceil(P99.95 × 1.05)`；历史 gold 回放保留 **{total_valid-total_gold_flagged:,}/{total_valid:,}**，RTMPose 草标命中 **{total_draft_flagged:,}** 条，其中 **{total_draft_modified:,}** 条后来确有人工修点。",
+        f"本次共统计 **{total_valid:,}** 条有效 gold hand。阈值采用 `ceil(P99.95 × 1.05)`；gold 回放保留 **{total_valid-total_gold_flagged:,}/{total_valid:,}**，RTMPose 草标命中 **{total_draft_flagged:,}** 条，其中 **{total_draft_modified:,}** 条后来确有人工修点。",
         "",
         "## 数据集",
         "",
@@ -330,6 +369,11 @@ def render_report(analysis: Mapping[str, Any], command: str) -> str:
             "- 阈值：每组取经验 P99.95，乘 1.05 泛化裕量后向上取整。样本最大值容易受残留极端值影响；当前分布偏态明显，因此不直接采用最大值或正态假设下的 `μ+3σ`。",
         ]
     )
+    if analysis.get("preserved_distances"):
+        joined = "/".join(analysis["preserved_distances"])
+        lines.append(
+            f"- `{joined}` 本次没有该模型支持的已发布样本，统计列记为 `—`，阈值保留 YAML 中的历史值；不把无样本的旧阈值伪装成新统计结果。"
+        )
     for distance in RTMPOSE_CONNECTION_DISTANCES:
         lines.extend(
             [
@@ -360,9 +404,9 @@ def render_report(analysis: Mapping[str, Any], command: str) -> str:
     for distance in RTMPOSE_CONNECTION_DISTANCES:
         item = analysis["replay"][distance]
         retained = item["gold"] - item["gold_flagged"]
-        rate = retained / item["gold"] if item["gold"] else 0.0
+        rate = f"{retained / item['gold']:.3%}" if item["gold"] else "—"
         lines.append(
-            f"| {distance} | {item['gold']:,} | {retained:,} | {rate:.3%} | "
+            f"| {distance} | {item['gold']:,} | {retained:,} | {rate} | "
             f"{item['draft_joined']:,} | {item['draft_flagged']:,} | "
             f"{item['draft_flagged_human_modified']:,} |"
         )
@@ -420,8 +464,11 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     specs = [parse_dataset_spec(value) for value in args.dataset]
-    analysis = analyze_datasets(args.dataset_root, specs)
     cfg = load_yaml_config(args.config)
+    configured = validate_rtmpose_connection_thresholds(cfg)
+    analysis = analyze_datasets(
+        args.dataset_root, specs, fallback_thresholds=configured
+    )
     verify_config_thresholds(analysis, cfg)
     dataset_args = " ".join(
         f"--dataset {dataset_id}:{variant}" for dataset_id, variant in specs

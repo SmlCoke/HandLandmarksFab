@@ -16,6 +16,8 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 - [当前状态](docs/annotating_system/HLMF_current_status.md)
 - [常见问题与解答](docs/annotating_system/HLMF_qa.md)
 - [Eos-2.0 审计与适配报告](assets/palm_detector/eos_2_0_adaptation.md)
+- [HCF 0813 接入与校准报告](assets/hand_classifier/handedness_handpresence_0813.md)
+- [Iris Eval 就绪度评估](assets/evaluation/iris_eval_readiness.md)
 - [ONNX CPU/GPU 性能报告](assets/device_perf/onnx_cpu_gpu_benchmark.md)
 
 ## 当前教师后端
@@ -24,7 +26,7 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 - 默认后端：`hand_landmark.backend: mediapipe_tasks`。
 - 单次切换：`HAND_LANDMARK_BACKEND=rtmpose_onnx`。
 - RTMPose：原始 SimCC logits 直接 argmax，除以固定 `2.0`；runtime ROI 总是输出 21 点。
-- HCF：`models/hand_classifier/handedness-handpresence-0809/model.onnx`，输入灰度 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits；模型 ID 从版本目录名生成，仅运行于 RTMPose runtime ROI。旧 handedness-only 资产保存在 `models/handedness-0806/`。
+- HCF：`models/hand_classifier/handedness-handpresence-0813/model.onnx`，输入灰度 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits；模型 ID 从版本目录名生成，仅运行于 RTMPose runtime ROI。0813 使用 Eos-2.0 与历史 Eos-1.0 数据混合训练；旧模型仅作归档。
 - 负样本 `negative-review` 预审核复用同一 `hand_classifier.model_onnx_path`，并在所选/排除清单及 README 中记录实际 HCF 模型 ID。
 - MediaPipe TFLite 补救：仅当 RTMPose Train runtime 未通过边界或已开启的连接长度门控时，使用纯 Hand Landmarker TFLite 重预测 21 点；presence/handedness 仍只采用 HCF。
 - Eos low-score candidate 不运行 RTMPose/HCF，保持 `unknown/null`，进入人工候选链路。
@@ -89,12 +91,12 @@ make help
 
 RTMPose Train runtime 行满足以下任一条件时整行进入 `ignored.jsonl`：
 
-- `hand_presence.score=P(has_hand)` 缺失、非有限，或低于 `quality.rtmpose_train_hand_presence_threshold`（0809 当前为 `0.025`；负候选预审仍独立使用 `0.5`）；
+- `hand_presence.score=P(has_hand)` 缺失、非有限，或低于 `quality.rtmpose_train_hand_presence_threshold`（0813 复核后保持 `0.025`；负候选预审仍独立使用 `0.5`）；
 - HCF handedness 分数低于 `quality.handedness_review_threshold`（当前 `0.7`）；
 - 42 个 crop 坐标值中，精确边界值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`（当前 `2`）；
 - 开启连接长度门控时，任一指定连接的 crop 像素长度严格超过当前 `near/mid/far` 阈值。
 
-连接长度门控由 `quality.rtmpose_train_connection_length_gate_enabled` 独立控制并默认开启；关闭时不解析距离或阈值。其阈值来自 Eos-1.x ROI 上 9,868 条人工复核 gold hand 的 `ceil(P99.95 × 1.05)`。Eos-2.0 兼容回放暂时支持继续使用旧值；首个代表性 Eos-2.0 Eval 人工复核并发布后必须正式重算。完整统计见 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
+连接长度门控由 `quality.rtmpose_train_connection_length_gate_enabled` 独立控制并默认开启；关闭时不解析距离或阈值。near/mid 阈值已按 6,095 条 Eos-2.0 人工复核 gold hand 的 `ceil(P99.95 × 1.05)` 重算；Eos-2.0 不支持 far，因此 far 只保留不可达的历史阈值，不宣称为新统计结果。完整统计见 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
 
 `quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 默认开启。RTMPose 触发边界或已开启的连接长度门控时，程序批量调用 `models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite`；补救结果通过两项几何检查才替换关键点，否则保留原 RTMPose 点并继续拒绝。关闭后不读取 TFLite 模型或独立环境配置。该补救不是第五条门控，也不使用 TFLite 的 presence/handedness 输出。
 

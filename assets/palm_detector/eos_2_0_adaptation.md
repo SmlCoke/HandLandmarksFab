@@ -69,7 +69,7 @@ GPU 吞吐为 `426.2 images/s`，CPU 为 `175.0 images/s`；真实输入解码�
 
 ## Eval 使用建议与重跑
 
-旧 Eos-1.x Eval 可继续用于 Iris 模型级历史回归，不需要立即重新人工修点，但它不能永久替代 Eos-2.0 端到端评估。当前连接长度门控保持默认开启并暂留旧值；首个代表性 Eos-2.0 Eval 完成人工复核和发布后，必须正式重算阈值并回放 gold/draft。
+旧 Eos-1.x Eval 可继续用于 Iris 模型级历史回归，不需要立即重新人工修点，但它不能替代 Eos-2.0 端到端评估。首批 6,095 条 Eos-2.0 Gold hand 发布后，near/mid 连接长度阈值已正式重算并完成 gold/draft 回放；far 因模型不支持而保留不可达的历史值。结果见 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
 
 ```bash
 python -B tools/analyze_eos2_adaptation.py \
