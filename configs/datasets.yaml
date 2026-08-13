@@ -18,4 +18,4 @@ policies:
 
 evaluation_limits:
   max_raw_images_per_split: 5000
-  max_rois_per_split: 12000
+  max_rois_per_split: 15000
