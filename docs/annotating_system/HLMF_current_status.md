@@ -1,4 +1,4 @@
-# HLMF 当前状态（2026-08-13）
+# HLMF 当前状态（2026-08-14）
 
 ## 代码与配置
 
@@ -34,6 +34,8 @@ RTMPose Train 几何补救现已默认开启：RTMPose 点触发边界或已开�
 
 `negative-review` 现先用 HCF 批量预审并显示进度，只复制 `P(has_hand)<0.5` 的候选，同时保存 selected/excluded 清单和分数；人工复核及 `negative-publish` 契约不变。负样本和困难样本的 review/published 图片均使用独立复制；困难样本 published 记录包含 `published_relpath`，不依赖源变体存活。当前服务器既有 `background-neg-0801` review 工作区，以及已发布 1,543 条记录/图片的 `background-neg-0801-full`；本轮均未修改。
 
+2026-08-14 已发布负样本集 `neg-eos_2.0-hcf0813-hp0.5`：HCF 0.5 预审从 573,786 个输入候选选择 167,760 个供人工复核，最终保留 16,910 个真负样本并复制到 published，删除 150,850 个有手或不确定候选。`complex-mid-bright-flat-train-s01-soar` 的 1,136 个候选全部被人工删除；该来源零保留不会阻止整个数据集发布，最终 manifest 含 91 个非空来源、16,910 条 label/图片，Registry 状态为 `published`。
+
 ## 服务器数据仓库
 
 Eval 数据集 `FullEnhanceVal0801` 当前有 10 个来源：6 个 val、4 个 test，均已发布 `eos-1.0`：
@@ -68,7 +70,7 @@ Eval 数据集 `FullEnhanceVal0808` 当前有 3 个 val 来源，每个来源 60
 
 本轮永久删除只作用于 `FullEnhance0801/eos-1.0`。`FullEnhance0801/eos_1.0-gate` 的 95 个 Palm/ROI/labels/发布报告以及所有既有 EValSource 变体均未被该删除操作修改。
 
-Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 5 个 dataset、117 个 capture source、72,579 张 raw image、127 个 active proposal variant、95 个 retired proposal variant、1,155,817 个 ROI；另有 3 个 negative dataset、1,824 条已发布 negative。
+Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 7 个 dataset、138 个 capture source、85,779 张 raw image、222 个 active proposal variant、95 个 retired proposal variant、1,825,896 个 ROI；另有 4 个 negative dataset（3 个 published、1 个 reserved）、18,734 条已发布 negative，尚无 published selection。
 
 ## 验收状态
 
