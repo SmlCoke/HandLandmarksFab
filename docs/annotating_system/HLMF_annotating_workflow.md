@@ -256,28 +256,6 @@ Eval 限额在 `configs/datasets.yaml` 的 `evaluation_limits.max_raw_images_per
 
 Dataset manifest 只聚合至少存在一个 `qc/<variant>/source_publish_report.json` 的来源。某个 Eval 来源即使已执行 `eval-autolabel` 或导出 CVAT，只要尚未导入人工复核结果并执行 `source-publish`，就不会进入 `dataset_manifest.json`；下游 HLML 按 manifest 中的发布标签路径读取数据，因此会忽略该来源。
 
-### 新录制 Gold 来源
-
-Gold 来源必须是新录制的 train capture source，不得把既有 EValSource/PretrainSource 复制或改名充当 Gold。它复用 Eval 的自动标注、CVAT 1.1 精修和发布链路，但保存到独立的 `GoldSource/ReviewedDatasets/<dataset_id>/`，并同时保留人工确认的 positive 与 negative：
-
-```bash
-make gold-autolabel DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
-  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
-  PROPOSAL_VARIANT=eos-2.0
-make hand-cvat-export DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
-  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
-  PROPOSAL_VARIANT=eos-2.0
-# 将人工导出的 CVAT 1.1 XML 放到 03_reviewed/<variant>/cvat_reviewed.xml
-make hand-cvat-import DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
-  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
-  PROPOSAL_VARIANT=eos-2.0
-make source-publish DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
-  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
-  PROPOSAL_VARIANT=eos-2.0
-```
-
-输出为 `hand_gold_labels.jsonl` 与 Gold dataset manifest。Gold ID 和路径不得包含训练 run/snapshot/round 身份，因此可被后续任意训练流程复用。
-
 ## 8. Provenance
 
 - MediaPipe：`label_origin=mediapipe`、`annotation_style=mediapipe_v1`。
@@ -390,7 +368,33 @@ make hard-publish HARD_DATASET_ID=hard-hands-r1
 
 negative、hard 的 review/published 图片都使用普通独立复制，不创建硬链接；删除源变体不会破坏已发布副本。既有 `Selections/<selection_id>` 资产仍可由下游读取，但不再是新困难样本的公开复核入口。
 
-## 12. 批处理
+## 12. 新录制 Gold 来源
+
+这一步专门面向于 HLML 系统：Multi-finetune 阶段的新 Gold 来源数据集制作，满足：
+
+1. Gold 来源必须是新录制的 train capture source，不得把既有 EValSource/PretrainSource 复制或改名充当 Gold。
+2. 它复用 Eval 的自动标注、CVAT 1.1 精修和发布链路，但保存到独立的 `GoldSource/ReviewedDatasets/<dataset_id>/`，并同时保留人工确认的 positive 与 negative：
+3. 每一个 Gold 来源不与某一次训练，因此可以被后续任意训练流程复用。Gold 来源的 `dataset_id` 不得包含训练 run/snapshot/round 身份。
+
+```bash
+make gold-autolabel DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
+  PROPOSAL_VARIANT=eos-2.0
+make hand-cvat-export DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
+  PROPOSAL_VARIANT=eos-2.0
+# 将人工导出的 CVAT 1.1 XML 放到 03_reviewed/<variant>/cvat_reviewed.xml
+make hand-cvat-import DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
+  PROPOSAL_VARIANT=eos-2.0
+make source-publish DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
+  PROPOSAL_VARIANT=eos-2.0
+```
+
+输出为 `hand_gold_labels.jsonl` 与 Gold dataset manifest。Gold ID 和路径不得包含训练 run/snapshot/round 身份，因此可被后续任意训练流程复用。
+
+## 13. 批处理
 
 ```bash
 make batch-train-autolabel DATASET_ID=FullEnhance0801 \
@@ -407,7 +411,7 @@ make batch-eval-autolabel DATASET_ID=FullEnhanceVal0801 \
 
 可视化清理批处理同样从 `images/` 发现来源；永久变体删除批处理只处理已有 `source.json` 的注册来源，并额外接收 `DATASET_SCOPE` 与 `CONFIRM_DELETE`。所有批处理仅作用于指定 dataset ID 与 proposal variant。
 
-## 13. Registry 与验收
+## 14. Registry 与验收
 
 ```bash
 make registry-check HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
