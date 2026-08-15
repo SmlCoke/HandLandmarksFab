@@ -1,6 +1,6 @@
 # HandLandmarkerFab（HLMF 3.0）
 
-HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。系统默认从 Eos-2.0 Palm Detector 的 bbox、p0、p9 构造固定 `256×256` Hand ROI，再由 MediaPipe Tasks 或 RTMPose-m Hand5 生成 21 点草标；RTMPose runtime ROI 的 Left/Right 与 hand presence 由独立双头 HCF ONNX 分类器给出。
+HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。系统默认从 Eos-2.0 Palm Detector 的 bbox、p0、p9 构造固定 `256×256` Hand ROI，再执行 RTMPose-m Hand5 + 双头 HCF + 质量门控 + MediaPipe Hand Landmarker TFLite rescue；MediaPipe Tasks 仍可作为显式覆盖。
 
 当前 Eos-2.0 只在 near/mid 数据上训练，HLMF、后续 Iris/Muse 和端侧演示因此仅支持 near/mid。far 原始来源应保留，但不得进入 Eos-2.0 的 Palm→ROI→Landmark→复核→发布链路；单来源命令会硬拒绝，批处理会显式跳过。
 
@@ -23,8 +23,8 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 ## 当前教师后端
 
 - Palm：默认 Eos-2.0，输入灰度 `[1,1,224,384]`，score `0.25`、全局 NMS IoU `0.10`、840 anchors；ROI scale 保持 `1.8/1.8`，`supported_capture_distances=[near,mid]`。默认 proposal variant 为 `eos-2.0`。
-- 默认后端：`hand_landmark.backend: mediapipe_tasks`。
-- 单次切换：`HAND_LANDMARK_BACKEND=rtmpose_onnx`。
+- 默认后端：`hand_landmark.backend: rtmpose_onnx`。
+- 单次切换：`HAND_LANDMARK_BACKEND=mediapipe_tasks`。
 - RTMPose：原始 SimCC logits 直接 argmax，除以固定 `2.0`；runtime ROI 总是输出 21 点。
 - HCF：`models/hand_classifier/handedness-handpresence-0813/model.onnx`，输入灰度 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits；模型 ID 从版本目录名生成，仅运行于 RTMPose runtime ROI。0813 使用 Eos-2.0 与历史 Eos-1.0 数据混合训练；旧模型仅作归档。
 - 负样本 `negative-review` 预审核复用同一 `hand_classifier.model_onnx_path`，并在所选/排除清单及 README 中记录实际 HCF 模型 ID。
@@ -72,6 +72,16 @@ make batch-eval-autolabel DATASET_ID=demo-eval PROPOSAL_VARIANT=eos-2.0 \
 
 make negative-review NEGATIVE_DATASET_ID=background-neg-0801 \
   NEGATIVE_CANDIDATE_LABELS=/abs/candidate_negatives.jsonl
+
+make gold-autolabel DATASET_SCOPE=gold DATASET_ID=gold-demo \
+  CAPTURE_SOURCE_ID=room-near-daylight-normal-train-s06-alice \
+  PROPOSAL_VARIANT=eos-2.0
+
+make hard-review HARD_DATASET_ID=hard-hands-r1 \
+  MINING_REQUEST=/abs/hlmf_review_request.jsonl
+# CVAT 精修并放回 review/cvat_reviewed.xml 后：
+make hard-import HARD_DATASET_ID=hard-hands-r1
+make hard-publish HARD_DATASET_ID=hard-hands-r1
 
 make registry-check
 make compile

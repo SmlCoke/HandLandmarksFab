@@ -7,11 +7,13 @@ HAND_DATASET_ROOT/
   PretrainSource/<dataset_id>/<capture_source_id>/
   EValSource/<dataset_id>/<capture_source_id>/
   GoldSource/NegativeSamples/<negative_dataset_id>/
-  Selections/<selection_id>/
+  GoldSource/HardSamples/<hard_dataset_id>/
+  GoldSource/ReviewedDatasets/<dataset_id>/<capture_source_id>/
+  Selections/<selection_id>/  # 已发布 legacy 只读兼容
   Registry/registry.sqlite3
 ```
 
-train 来源只能位于 `PretrainSource`，val/test 来源只能位于 `EValSource`。`capture_source_id` 固定为：
+自动发布的 train 来源位于 `PretrainSource`，val/test 来源位于 `EValSource`，新录制且必须人工复核的 train Gold 来源位于 `GoldSource/ReviewedDatasets`。`capture_source_id` 固定为：
 
 ```text
 <background>-<distance>-<lighting>-<condition>-<split>-<session>-<performer>
@@ -40,7 +42,7 @@ split 在来源注册阶段写入所有 manifest，不在发布阶段随机生�
     cvat_reviewed.xml
     hand_landmarks_reviewed.jsonl
   05_labels/<proposal_variant>/
-    hand_training_labels.jsonl | hand_evaluation_labels.jsonl
+    hand_training_labels.jsonl | hand_evaluation_labels.jsonl | hand_gold_labels.jsonl
     candidate_negatives.jsonl
     ignored.jsonl
   qc/<proposal_variant>/*_report.json
@@ -222,7 +224,7 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 
 `source_publish_report.json.capture_distance_policy` 与 Palm QC 使用相同结构。它是来源级模型能力契约，不属于四条标签质量门控；far 在报告写入前即被拒绝。
 
-## 8. Eval、CVAT 与发布
+## 8. Eval/Recorded Gold、CVAT 与发布
 
 Eval draft 不是正式真值，RTMPose Train presence、边界和连接长度门控均不作用于 Eval。CVAT frame 依据 ROI 图片完整 basename（包含扩展名）的字典序映射到 manifest；导入后也按完整 basename 精确匹配。因此擅自更换 ROI 后缀会使既有 CVAT XML 无法直接导入，即使稳定 ROI ID 没有变化。导入后产生 `hand_landmarks_reviewed.jsonl`。人工改变 presence 时设置 `human_modified_presence=true`，改变 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
 
@@ -235,6 +237,8 @@ evaluation_limits:
 ```
 
 需要增大时修改 `configs/datasets.yaml` 中对应值。
+
+Recorded Gold 必须是 `scope=gold` 的新录制 train 来源，不能引用既有 PretrainSource/EValSource 作为替代。它使用相同 CVAT 1.1 导出/导入契约，发布 `hand_gold_labels.jsonl`，保留全部未标记 `ignore_for_training` 的人工 positive 与 negative。其 dataset ID 与 capture source ID 是长期数据身份，不得嵌入训练 run/snapshot/round ID。
 
 ## 9. 可视化与视频
 
@@ -289,14 +293,20 @@ GoldSource/NegativeSamples/<negative_dataset_id>/published/negative_labels.jsonl
 困难样本目录：
 
 ```text
-Selections/<selection_id>/review/images/
-Selections/<selection_id>/published/images/
-Selections/<selection_id>/published/selection.jsonl
+GoldSource/HardSamples/<hard_dataset_id>/review/images/
+GoldSource/HardSamples/<hard_dataset_id>/review/cvat_autolabel.xml
+GoldSource/HardSamples/<hard_dataset_id>/review/cvat_reviewed.xml
+GoldSource/HardSamples/<hard_dataset_id>/review/hand_landmarks_reviewed.jsonl
+GoldSource/HardSamples/<hard_dataset_id>/published/images/
+GoldSource/HardSamples/<hard_dataset_id>/published/hard_labels.jsonl
+GoldSource/HardSamples/<hard_dataset_id>/published/manifest.json
 ```
 
 `negative_review.hand_presence_threshold` 必须是 `[0,1]` 内有限数，缺省及正式配置为 `0.5`。预审核从 `hand_classifier.model_onnx_path` 加载与 RTMPose runtime 相同的当前 HCF；当前模型 ID 为 `hand-classifier-handedness-handpresence-0813`。`candidate_manifest.jsonl` 仅含 `P(has_hand)<threshold` 的行；`precheck_excluded.jsonl` 保存其余行。两者的 `negative_review_precheck` 包含 `hand_presence_score`、`threshold`、`selected_for_human_review` 和实际 `model_id`，`README.json` 也记录该模型 ID。人工发布前仍必须复核所选图片。
 
-review 与 published 图片都是普通复制产生的独立文件，不是硬链接。困难样本记录保留原始 `source_crop_relpath`，并增加可直接读取的 `published_relpath`。删除源变体不会破坏已经发布的负样本/困难样本。
+困难样本必须经过 `prepare-hard-review → CVAT 1.1 精修 → import-hard-review → publish-hard-review`。导入要求请求与 XML 一一覆盖且无 blocking error；`ignore_for_training` 行不发布，其余人工 positive/negative 均可发布。`hard_dataset_id` 是通用数据身份，不得包含训练 run/snapshot/round 语义；同一训练流程的跨轮 ROI 去重由 HLML snapshot ledger 保证。
+
+review 与 published 图片都是普通复制产生的独立文件，不是硬链接。困难样本记录保留原始 `source_crop_relpath`，并增加可直接读取的 `published_relpath`。删除源变体不会破坏已经发布的负样本/困难样本。既有 `Selections/<selection_id>/published` 合同仅为已发布资产保留读取兼容，不再用于新 review。
 
 ## 12. Dataset manifest 与完整性
 

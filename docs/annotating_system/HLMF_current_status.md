@@ -1,8 +1,10 @@
-# HLMF 当前状态（2026-08-14）
+# HLMF 当前状态（2026-08-16）
 
 ## 代码与配置
 
-HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。MediaPipe Tasks 仍是全局默认 Hand landmark 后端，RTMPose-m Hand5 可通过单次参数启用。
+HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。默认标注链路已切换为 RTMPose-m Hand5 + 双头 Hand Classifier + 四项质量门控 + MediaPipe Hand Landmarker TFLite 几何补救；MediaPipe Tasks 仍可作为单次显式覆盖。
+
+2026-08-16 新增两个与训练 run 解耦的 Gold 发布合同：困难 ROI 经 CVAT 1.1 精修后发布到 `GoldSource/HardSamples/<hard_dataset_id>`；新录制 train 来源复用 Eval 的自动标注与人工 CVAT 链路，positive/negative 一并发布到 `GoldSource/ReviewedDatasets/<dataset_id>`。旧 `Selections` 已发布资产仍可被 HLML 读取，新困难复核不再使用删除式流程。Registry 通过新增表扩展，不迁移或改写既有 EValSource/PretrainSource 资产。
 
 默认 Palm Detector 已升级为 Eos-2.0：模型路径 `models/palm_detector/eos-2.0/model_384x224_opt.onnx`，默认 proposal variant `eos-2.0`，输入 `[1,1,224,384]`，score `0.25`、全局 NMS IoU `0.10`、最多 2 手。两个矩形 feature level 为 `14×24/7×12`，共 840 anchors。ROI 兼容性优先，继续使用 `scale_x=scale_y=1.8、shift_x=0、shift_y=-0.1`。
 
@@ -74,8 +76,8 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 
 ## 验收状态
 
-- `make compile`：37 个 Python 文件语法检查通过；
-- `make test`：72 项测试通过；
+- `make compile`：新增 Gold/CVAT 模块已纳入全部 Python 语法检查；
+- `make test`：73 项测试通过；
 - `make help`：通过；
 - 4 个 Bash 批处理脚本均通过 `bash -n`；Eos-2.0 距离门控的 near/mid、far/unknown、非法配置、写入前拒绝和批处理接口测试通过；
 - 服务器隔离临时数据根的真实混合批次通过：Eval discovered/supported/skipped 为 `3/2/1`，Train 为 `2/1/1`；far 未产生 proposal 目录，单来源自动标注和发布均被拒绝，near/mid 的 Palm/发布 QC 均记录完整能力契约；临时目录已删除，正式仓库只读；

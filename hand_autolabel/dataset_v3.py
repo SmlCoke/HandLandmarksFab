@@ -138,15 +138,21 @@ def source_root(
     capture_source_id: str,
 ) -> Path:
     scope = str(scope).strip().lower()
-    if scope not in {"pretrain", "eval"}:
-        raise DatasetContractError("dataset scope must be pretrain or eval")
+    if scope not in {"pretrain", "eval", "gold"}:
+        raise DatasetContractError("dataset scope must be pretrain, eval or gold")
     require_safe_id(dataset_id, "dataset_id")
     parsed = parse_capture_source_id(capture_source_id)
     if scope == "pretrain" and parsed["split"] != "train":
         raise DatasetContractError("PretrainSource accepts only capture sources whose split field is train")
     if scope == "eval" and parsed["split"] not in {"val", "test"}:
         raise DatasetContractError("EValSource accepts only capture sources whose split field is val or test")
-    bucket = "PretrainSource" if scope == "pretrain" else "EValSource"
+    if scope == "gold" and parsed["split"] != "train":
+        raise DatasetContractError("GoldSource/ReviewedDatasets accepts only capture sources whose split field is train")
+    bucket = {
+        "pretrain": "PretrainSource",
+        "eval": "EValSource",
+        "gold": "GoldSource/ReviewedDatasets",
+    }[scope]
     return Path(dataset_root).resolve() / bucket / dataset_id / capture_source_id
 
 
@@ -474,7 +480,19 @@ class WarehouseRegistry:
                     selection_id TEXT PRIMARY KEY,
                     status TEXT NOT NULL CHECK(status IN ('reserved','published','retired'))
                 );
+                CREATE TABLE IF NOT EXISTS dataset_namespaces (
+                    dataset_id TEXT PRIMARY KEY,
+                    scope TEXT NOT NULL CHECK(scope IN ('pretrain','eval','gold'))
+                );
+                CREATE TABLE IF NOT EXISTS hard_datasets (
+                    hard_dataset_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL CHECK(status IN ('reserved','published','retired'))
+                );
                 """
+            )
+            db.execute(
+                """INSERT OR IGNORE INTO dataset_namespaces(dataset_id,scope)
+                   SELECT dataset_id,scope FROM datasets"""
             )
             db.execute(
                 """INSERT OR IGNORE INTO proposal_variants
@@ -490,17 +508,34 @@ class WarehouseRegistry:
         dataset_id = str(descriptor["dataset_id"])
         capture_id = str(descriptor["capture_source_id"])
         scope = str(descriptor["scope"])
-        bucket = "PretrainSource" if scope == "pretrain" else "EValSource"
+        bucket = {
+            "pretrain": "PretrainSource",
+            "eval": "EValSource",
+            "gold": "GoldSource/ReviewedDatasets",
+        }[scope]
         source_relpath = f"{bucket}/{dataset_id}/{capture_id}"
+        # The original datasets table has a deployed pretrain/eval CHECK
+        # constraint. Keep it intact for existing warehouses and record the
+        # public three-scope namespace in the additive table above.
+        registry_scope = "pretrain" if scope == "gold" else scope
         with self.connect() as db:
+            namespace = db.execute(
+                "SELECT scope FROM dataset_namespaces WHERE dataset_id=?", (dataset_id,)
+            ).fetchone()
+            if namespace is not None and namespace["scope"] != scope:
+                raise DatasetContractError(f"dataset_id reused across scopes: {dataset_id}")
+            db.execute(
+                "INSERT OR IGNORE INTO dataset_namespaces(dataset_id,scope) VALUES(?,?)",
+                (dataset_id, scope),
+            )
             existing = db.execute(
                 "SELECT scope FROM datasets WHERE dataset_id=?", (dataset_id,)
             ).fetchone()
-            if existing is not None and existing["scope"] != scope:
+            if existing is not None and existing["scope"] != registry_scope:
                 raise DatasetContractError(f"dataset_id reused across scopes: {dataset_id}")
             db.execute(
                 "INSERT OR IGNORE INTO datasets(dataset_id,scope) VALUES(?,?)",
-                (dataset_id, scope),
+                (dataset_id, registry_scope),
             )
             existing_source = db.execute(
                 "SELECT dataset_id,split FROM capture_sources WHERE capture_source_id=?",
@@ -759,6 +794,34 @@ class WarehouseRegistry:
             if cursor.rowcount != 1:
                 raise DatasetContractError(f"selection is not reserved: {selection_id}")
 
+    def reserve_hard_dataset(self, hard_dataset_id: str) -> None:
+        require_safe_id(hard_dataset_id, "hard_dataset_id")
+        with self.connect() as db:
+            existing = db.execute(
+                "SELECT status FROM hard_datasets WHERE hard_dataset_id=?",
+                (hard_dataset_id,),
+            ).fetchone()
+            if existing is not None:
+                raise DatasetContractError(
+                    f"hard_dataset_id has already been used ({existing['status']}): {hard_dataset_id}"
+                )
+            db.execute(
+                "INSERT INTO hard_datasets(hard_dataset_id,status) VALUES(?,'reserved')",
+                (hard_dataset_id,),
+            )
+
+    def publish_hard_dataset(self, hard_dataset_id: str) -> None:
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE hard_datasets SET status='published' "
+                "WHERE hard_dataset_id=? AND status='reserved'",
+                (hard_dataset_id,),
+            )
+            if cursor.rowcount != 1:
+                raise DatasetContractError(
+                    f"hard dataset is not reserved: {hard_dataset_id}"
+                )
+
     def report(self) -> Dict[str, Any]:
         with self.connect() as db:
             counts = {}
@@ -771,6 +834,8 @@ class WarehouseRegistry:
                 "negative_datasets",
                 "published_negatives",
                 "selections",
+                "dataset_namespaces",
+                "hard_datasets",
             ):
                 counts[table] = int(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
             duplicate_variants = [

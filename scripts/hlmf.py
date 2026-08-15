@@ -26,16 +26,19 @@ from hand_autolabel.dataset_v3 import (
     parse_capture_source_id,
     palm_capture_distance_policy,
     prepare_negative_review,
-    prepare_selection_review,
     proposal_paths,
     publish_negative_review,
     require_safe_id,
-    publish_selection_review,
     source_root,
     stable_id,
     validate_and_normalize_source,
 )
 from hand_autolabel.formats import load_yaml_config, read_jsonl, resolve_path, write_json, write_jsonl
+from hand_autolabel.gold_reviews import (
+    import_hard_review,
+    prepare_hard_review,
+    publish_hard_review,
+)
 from hand_autolabel.image_io import read_image, write_image
 from hand_autolabel.hand_landmark_labeler import label_hand_landmark_manifest
 from hand_autolabel.mediapipe_roi_visualization import (
@@ -107,6 +110,7 @@ def _parser() -> argparse.ArgumentParser:
         "publish-source",
         "autolabel-train",
         "autolabel-eval",
+        "autolabel-gold",
         "autolabel-visualize-roi",
         "autolabel-visualize-original",
         "clean-autolabel-visualizations",
@@ -115,18 +119,25 @@ def _parser() -> argparse.ArgumentParser:
     for name in source_commands:
         command = sub.add_parser(name)
         command.add_argument("--dataset-root", required=True)
-        command.add_argument("--scope", choices=("pretrain", "eval"), required=True)
+        command.add_argument(
+            "--scope", choices=("pretrain", "eval", "gold"), required=True
+        )
         command.add_argument("--dataset-id", required=True)
         command.add_argument("--capture-source-id", required=True)
         command.add_argument("--proposal-variant", required=True)
-        if name in {"mediapipe", "autolabel-train", "autolabel-eval"}:
+        if name in {
+            "mediapipe",
+            "autolabel-train",
+            "autolabel-eval",
+            "autolabel-gold",
+        }:
             command.add_argument(
                 "--hand-landmark-backend",
                 choices=("mediapipe_tasks", "rtmpose_onnx"),
                 default=None,
                 help="Override hand_landmark.backend for this run.",
             )
-        if name in {"autolabel-train", "autolabel-eval"}:
+        if name in {"autolabel-train", "autolabel-eval", "autolabel-gold"}:
             command.add_argument(
                 "--roi-visualization",
                 choices=("true", "false"),
@@ -157,7 +168,7 @@ def _parser() -> argparse.ArgumentParser:
     rebuild_manifest = sub.add_parser("rebuild-dataset-manifest")
     rebuild_manifest.add_argument("--dataset-root", required=True)
     rebuild_manifest.add_argument(
-        "--scope", choices=("pretrain", "eval"), required=True
+        "--scope", choices=("pretrain", "eval", "gold"), required=True
     )
     rebuild_manifest.add_argument("--dataset-id", required=True)
     prepare_negative = sub.add_parser("prepare-negative-review")
@@ -167,13 +178,16 @@ def _parser() -> argparse.ArgumentParser:
     publish_negative = sub.add_parser("publish-negative-review")
     publish_negative.add_argument("--dataset-root", required=True)
     publish_negative.add_argument("--negative-dataset-id", required=True)
-    prepare_selection = sub.add_parser("prepare-selection-review")
-    prepare_selection.add_argument("--dataset-root", required=True)
-    prepare_selection.add_argument("--selection-id", required=True)
-    prepare_selection.add_argument("--request", required=True)
-    publish_selection = sub.add_parser("publish-selection-review")
-    publish_selection.add_argument("--dataset-root", required=True)
-    publish_selection.add_argument("--selection-id", required=True)
+    prepare_hard = sub.add_parser("prepare-hard-review")
+    prepare_hard.add_argument("--dataset-root", required=True)
+    prepare_hard.add_argument("--hard-dataset-id", required=True)
+    prepare_hard.add_argument("--request", required=True)
+    import_hard = sub.add_parser("import-hard-review")
+    import_hard.add_argument("--dataset-root", required=True)
+    import_hard.add_argument("--hard-dataset-id", required=True)
+    publish_hard = sub.add_parser("publish-hard-review")
+    publish_hard.add_argument("--dataset-root", required=True)
+    publish_hard.add_argument("--hard-dataset-id", required=True)
     registry = sub.add_parser("registry-check")
     registry.add_argument("--dataset-root", required=True)
     return parser
@@ -741,8 +755,10 @@ def _run_existing_original_image_visualization(
 def _run_export_cvat(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[str, Any]:
     assert_palm_capture_distance_supported(args.capture_source_id, cfg)
     _, paths = _source_context(args, cfg)
-    if parse_capture_source_id(args.capture_source_id)["split"] == "train":
-        raise DatasetContractError("routine CVAT review is limited to Val/Test Hand ROIs")
+    if args.scope not in {"eval", "gold"}:
+        raise DatasetContractError(
+            "routine CVAT review is limited to Eval or recorded Gold Hand ROIs"
+        )
     manifest = read_jsonl(paths["roi"] / "hand_roi_crops_manifest.jsonl")
     draft = read_jsonl(paths["roi"] / "hand_landmarks_autolabel_draft.jsonl")
     xml_path = paths["reviewed"] / "cvat_autolabel.xml"
@@ -782,10 +798,14 @@ def _dataset_manifest(
 ) -> Dict[str, Any]:
     dataset_root = Path(dataset_root).resolve()
     scope = str(scope).strip().lower()
-    if scope not in {"pretrain", "eval"}:
-        raise DatasetContractError("dataset scope must be pretrain or eval")
+    if scope not in {"pretrain", "eval", "gold"}:
+        raise DatasetContractError("dataset scope must be pretrain, eval or gold")
     dataset_id = require_safe_id(dataset_id, "dataset_id")
-    bucket = "PretrainSource" if scope == "pretrain" else "EValSource"
+    bucket = {
+        "pretrain": "PretrainSource",
+        "eval": "EValSource",
+        "gold": "GoldSource/ReviewedDatasets",
+    }[scope]
     root = dataset_root / bucket / dataset_id
     sources = []
     dataset_gate_counts = _empty_quality_gate_counts()
@@ -945,15 +965,25 @@ def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[s
     raw_rows = read_jsonl(source / "raw_images.jsonl")
     manifest = read_jsonl(paths["roi"] / "hand_roi_crops_manifest.jsonl")
     draft = read_jsonl(paths["roi"] / "hand_landmarks_autolabel_draft.jsonl")
-    if split == "train":
-        rows = draft
-    else:
+    if args.scope in {"eval", "gold"}:
         rows = read_jsonl(paths["reviewed"] / "hand_landmarks_reviewed.jsonl")
         if not rows:
-            raise DatasetContractError("Val/Test publication requires reviewed CVAT labels")
-    positives, candidates, ignored = _partition_labels(rows, split, cfg)
+            raise DatasetContractError(
+                "Eval/Gold publication requires reviewed CVAT labels"
+            )
+    else:
+        rows = draft
+    # Recorded Gold is a Train source with the same human-review contract as
+    # Eval. Keep both reviewed positive and reviewed negative decisions.
+    partition_split = "val" if args.scope == "gold" else split
+    positives, candidates, ignored = _partition_labels(rows, partition_split, cfg)
     quality_gate_rejections = _quality_gate_rejection_counts(ignored)
-    labels_file = paths["labels"] / ("hand_training_labels.jsonl" if split == "train" else "hand_evaluation_labels.jsonl")
+    labels_name = {
+        "pretrain": "hand_training_labels.jsonl",
+        "eval": "hand_evaluation_labels.jsonl",
+        "gold": "hand_gold_labels.jsonl",
+    }[args.scope]
+    labels_file = paths["labels"] / labels_name
     report = {
         "schema_version": SCHEMA_VERSION,
         "dataset_id": args.dataset_id,
@@ -989,11 +1019,27 @@ def _run_publish_source(args: argparse.Namespace, cfg: Dict[str, Any]) -> Dict[s
     return report
 
 
-def _run_source_pipeline(args: argparse.Namespace, cfg: Dict[str, Any], evaluation: bool) -> Dict[str, Any]:
+def _run_source_pipeline(
+    args: argparse.Namespace,
+    cfg: Dict[str, Any],
+    mode: str | None = None,
+    evaluation: bool | None = None,
+) -> Dict[str, Any]:
+    if mode is None:
+        if evaluation is None:
+            raise DatasetContractError("source pipeline mode is required")
+        mode = "eval" if evaluation else "train"
     assert_palm_capture_distance_supported(args.capture_source_id, cfg)
     split = parse_capture_source_id(args.capture_source_id)["split"]
-    if evaluation != (split in {"val", "test"}):
-        raise DatasetContractError("autolabel-train/eval does not match capture source split")
+    expected = {
+        "train": ("pretrain", {"train"}),
+        "eval": ("eval", {"val", "test"}),
+        "gold": ("gold", {"train"}),
+    }[mode]
+    if args.scope != expected[0] or split not in expected[1]:
+        raise DatasetContractError(
+            f"autolabel-{mode} does not match dataset scope or capture source split"
+        )
     print("[1/4] Source check", file=sys.stderr, flush=True)
     _run_validate(args, show_progress=True)
     print("[2/4] Palm inference", file=sys.stderr, flush=True)
@@ -1002,7 +1048,7 @@ def _run_source_pipeline(args: argparse.Namespace, cfg: Dict[str, Any], evaluati
     _run_build_roi(args, cfg, show_progress=True)
     print("[4/4] Hand landmark autolabel", file=sys.stderr, flush=True)
     result = _run_mediapipe(args, cfg, show_progress=True)
-    if evaluation:
+    if mode in {"eval", "gold"}:
         result["next_step"] = "export-cvat, then place cvat_reviewed.xml and run import-cvat + publish-source"
     else:
         _run_publish_source(args, cfg)
@@ -1031,9 +1077,11 @@ def main() -> None:
         elif args.command == "publish-source":
             result = _run_publish_source(args, cfg)
         elif args.command == "autolabel-train":
-            result = _run_source_pipeline(args, cfg, evaluation=False)
+            result = _run_source_pipeline(args, cfg, mode="train")
         elif args.command == "autolabel-eval":
-            result = _run_source_pipeline(args, cfg, evaluation=True)
+            result = _run_source_pipeline(args, cfg, mode="eval")
+        elif args.command == "autolabel-gold":
+            result = _run_source_pipeline(args, cfg, mode="gold")
         elif args.command == "autolabel-visualize-roi":
             result = _run_existing_roi_visualization(args, cfg)
         elif args.command == "autolabel-visualize-original":
@@ -1058,12 +1106,21 @@ def main() -> None:
             )
         elif args.command == "publish-negative-review":
             result = publish_negative_review(Path(args.dataset_root), args.negative_dataset_id)
-        elif args.command == "prepare-selection-review":
-            result = prepare_selection_review(
-                Path(args.dataset_root), args.selection_id, read_jsonl(Path(args.request))
+        elif args.command == "prepare-hard-review":
+            result = prepare_hard_review(
+                Path(args.dataset_root),
+                args.hard_dataset_id,
+                read_jsonl(Path(args.request)),
+                cfg,
             )
-        elif args.command == "publish-selection-review":
-            result = publish_selection_review(Path(args.dataset_root), args.selection_id)
+        elif args.command == "import-hard-review":
+            result = import_hard_review(
+                Path(args.dataset_root), args.hard_dataset_id, cfg
+            )
+        elif args.command == "publish-hard-review":
+            result = publish_hard_review(
+                Path(args.dataset_root), args.hard_dataset_id
+            )
         else:
             result = WarehouseRegistry(Path(args.dataset_root)).report()
     except (DatasetContractError, OSError, ValueError, KeyError) as exc:

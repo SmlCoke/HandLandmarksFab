@@ -32,6 +32,11 @@ from hand_autolabel.dataset_v3 import (
     validate_and_normalize_source,
 )
 from hand_autolabel.formats import load_yaml_config, read_jsonl, write_json, write_jsonl
+from hand_autolabel.gold_reviews import (
+    import_hard_review,
+    prepare_hard_review,
+    publish_hard_review,
+)
 from hand_autolabel.mediapipe_roi_visualization import (
     TrainingRoiVisualizationError,
     evenly_spaced_sample,
@@ -118,6 +123,16 @@ class DatasetV3Tests(unittest.TestCase):
             parse_capture_source_id("white-mid-bright-two-hands-train-s01-peak")
         with self.assertRaises(DatasetContractError):
             source_root(self.root, "pretrain", "national-r1", CAPTURE_VAL)
+        self.assertEqual(
+            self.root
+            / "GoldSource"
+            / "ReviewedDatasets"
+            / "gold-r1"
+            / CAPTURE_TRAIN,
+            source_root(self.root, "gold", "gold-r1", CAPTURE_TRAIN),
+        )
+        with self.assertRaises(DatasetContractError):
+            source_root(self.root, "gold", "gold-r1", CAPTURE_VAL)
 
     def test_palm_capture_distance_policy_accepts_near_mid_and_rejects_other_distances(self) -> None:
         cfg = {
@@ -964,6 +979,50 @@ class DatasetV3Tests(unittest.TestCase):
         self.assertTrue(published_image.is_file())
         self.assertGreater(published_image.stat().st_size, 0)
 
+    def test_hard_review_uses_cvat_and_publishes_under_gold_source(self) -> None:
+        crop, row = self._registered_roi()
+        points_px = [
+            {"id": index, "x": 24.0 + index * 4.0, "y": 32.0 + index * 3.0}
+            for index in range(21)
+        ]
+        request = dict(
+            row,
+            proposal_kind="runtime",
+            hand_presence={"present": True},
+            handedness={"label": "Left", "score": 0.9},
+            landmarks_crop_px=points_px,
+            landmarks_crop_norm=[
+                {"id": point["id"], "x": point["x"] / 255.0, "y": point["y"] / 255.0}
+                for point in points_px
+            ],
+            landmarks_image_px=points_px,
+            roi_corners_px=[[0.0, 0.0], [255.0, 0.0], [255.0, 255.0], [0.0, 255.0]],
+            source="rtmpose_m_hand5_onnx",
+        )
+        args = _parser().parse_args(
+            ["registry-check", "--dataset-root", str(self.root)]
+        )
+        cfg = _load_public_configs(args)
+        prepared = prepare_hard_review(self.root, "hard-gold-r1", [request], cfg)
+        review = Path(prepared["review_root"])
+        xml_text = (review / "cvat_autolabel.xml").read_text(encoding="utf-8")
+        self.assertIn("<version>1.1</version>", xml_text)
+        self.assertIn('label="hand_landmarks"', xml_text)
+        (review / "cvat_reviewed.xml").write_text(xml_text, encoding="utf-8")
+        imported = import_hard_review(self.root, "hard-gold-r1", cfg)
+        self.assertEqual(1, imported["reviewed_rows"])
+        manifest = publish_hard_review(self.root, "hard-gold-r1")
+        self.assertEqual(1, manifest["positive"])
+        self.assertEqual("cvat_xml_1.1_precise_hand_roi_review", manifest["review_contract"])
+        published = (
+            self.root / "GoldSource" / "HardSamples" / "hard-gold-r1" / "published"
+        )
+        label = read_jsonl(published / "hard_labels.jsonl")[0]
+        self.assertTrue(label["human_reviewed"])
+        self.assertTrue((self.root / label["published_relpath"]).is_file())
+        crop.unlink()
+        self.assertTrue((self.root / label["published_relpath"]).is_file())
+
     def test_local_downsample_is_tiff_only_and_refuses_overwrite(self) -> None:
         source = self.root / "camera"
         for index in range(5):
@@ -1098,11 +1157,11 @@ class DatasetV3Tests(unittest.TestCase):
             "p01",
         ]
         global_cfg = _load_public_configs(_parser().parse_args(common))
-        self.assertEqual("mediapipe_tasks", global_cfg["hand_landmark"]["backend"])
+        self.assertEqual("rtmpose_onnx", global_cfg["hand_landmark"]["backend"])
         override_cfg = _load_public_configs(
-            _parser().parse_args(common + ["--hand-landmark-backend", "rtmpose_onnx"])
+            _parser().parse_args(common + ["--hand-landmark-backend", "mediapipe_tasks"])
         )
-        self.assertEqual("rtmpose_onnx", override_cfg["hand_landmark"]["backend"])
+        self.assertEqual("mediapipe_tasks", override_cfg["hand_landmark"]["backend"])
 
     def test_eval_limit_preflight_uses_pending_report_without_writing_manifest(self) -> None:
         dataset = self.root / "EValSource" / "eval-r1"

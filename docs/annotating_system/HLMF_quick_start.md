@@ -28,7 +28,7 @@ mkdir -p models/mediapipe/hand_landmarker_tflite
 # 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0813/model.onnx。
 ```
 
-输出：代码和环境检查结果。默认 Eos-2.0 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，只支持 near/mid，默认 proposal variant 为 `eos-2.0`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
+输出：代码和环境检查结果。默认链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue。Eos-2.0 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，只支持 near/mid，默认 proposal variant 为 `eos-2.0`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
 
 ## 2. 注册来源
 
@@ -151,7 +151,21 @@ make source-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 输出：reviewed JSONL、evaluation labels、ignored 和 dataset manifest。未完成 CVAT 导入与 `source-publish` 的来源不进入 manifest，下游 HLML 会忽略。
 
-## 7. 负样本与困难样本
+## 7. 新录制 Gold、负样本与困难样本
+
+新录制 Gold 来源输入 train 原图，执行与 Eval 相同的自动标注、CVAT 导出/导入和发布；输出 `GoldSource/ReviewedDatasets/<dataset_id>/`，同时含人工确认 positive/negative：
+
+```bash
+make gold-autolabel DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.0
+make hand-cvat-export DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.0
+# 放入 03_reviewed/eos-2.0/cvat_reviewed.xml
+make hand-cvat-import DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.0
+make source-publish DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.0
+```
 
 ```bash
 make negative-review HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
@@ -161,12 +175,14 @@ make negative-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   NEGATIVE_DATASET_ID=background-neg-0801
 
 make hard-review HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
-  SELECTION_ID=hard-0801 MINING_REQUEST=/abs/request.jsonl
+  HARD_DATASET_ID=hard-hands-r1 MINING_REQUEST=/abs/request.jsonl
+make hard-import HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  HARD_DATASET_ID=hard-hands-r1
 make hard-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
-  SELECTION_ID=hard-0801
+  HARD_DATASET_ID=hard-hands-r1
 ```
 
-输出：当前 0813 HCF 的预审进度、仅含 `P(has_hand)<0.5` 的 review 独立图片副本、带实际模型 ID 的 `candidate_manifest.jsonl`/`precheck_excluded.jsonl`，以及人工复核后的 published 独立副本和 manifest。
+困难样本在 `hard-review` 后上传 `GoldSource/HardSamples/<id>/review/images/` 和 `cvat_autolabel.xml`，精修并放回 `cvat_reviewed.xml` 后再执行 import/publish。输出：负样本 HCF 预审清单，以及 CVAT 精修后的通用 `GoldSource/HardSamples/<id>/published/` 独立副本和 manifest。
 
 ## 8. 永久删除一个来源变体
 

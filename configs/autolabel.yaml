@@ -73,7 +73,9 @@ hand_roi:
   shift_y: -0.1
 
 hand_landmark:
-  backend: mediapipe_tasks
+  # Default chain: RTMPose landmarks + Hand Classifier + quality gates,
+  # with MediaPipe Hand Landmarker TFLite used only for geometry rescue.
+  backend: rtmpose_onnx
 
 mediapipe:
   model_asset_path: models/mediapipe/hand_landmarker.task

@@ -12,7 +12,7 @@ HLMF 从 Eos Palm Detector 的 proposal 开始工作。程序原样使用 bbox�
 
 `distance` 是 Palm 模型能力门控字段。当前 Eos-2.0 只支持 `near|mid`；`far` 可以注册、保存和查看历史资产，但不能进入 Palm、ROI、Hand Landmark、CVAT 或发布阶段。Eos-1.0 的能力更弱，历史上仅适合作为 mid 兼容资产。新 Palm 模型必须先完成各距离覆盖评测，再更新配置中的支持列表。
 
-`split` 只能是 `train|val|test`，在注册来源时从 `capture_source_id` 解析并写入 `source.json`、raw manifest 和 dataset manifest；发布阶段不会随机划分。train 来源位于 `PretrainSource`，val/test 来源位于 `EValSource`。
+`split` 只能是 `train|val|test`，在注册来源时从 `capture_source_id` 解析并写入 `source.json`、raw manifest 和 dataset manifest；发布阶段不会随机划分。自动发布的 train 来源位于 `PretrainSource`，val/test 来源位于 `EValSource`；新录制且必须人工复核的 train Gold 来源位于 `GoldSource/ReviewedDatasets`。三者使用不同 scope，既有 Pretrain/Eval 发布合同不变。
 
 每次 proposal 配置使用一个 `PROPOSAL_VARIANT`。同一来源/变体在 Registry 中为 `active` 或 `retired`；retired 名称永久不能复用。
 
@@ -66,7 +66,7 @@ hand_roi:
   shift_x: 0.0
   shift_y: -0.1
 hand_landmark:
-  backend: mediapipe_tasks
+  backend: rtmpose_onnx
 onnx_runtime:
   provider: auto
   model_providers:
@@ -99,7 +99,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：Eos-2.0 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。`0.25` 是本次确认的召回/候选量折中值；ROI scale `1.8/1.8` 用于保持旧 Eval 与连接门控兼容。MediaPipe Tasks 保持 Hand landmark 全局默认；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.0 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。HCF 模型 ID 自动由 `model_onnx_path` 的父目录生成，切换版本时只需修改该路径，但版本目录必须使用安全名称。`negative_review.hand_presence_threshold=0.5` 只用于负样本预审，严格低于模型 argmax 分界的候选才进入人工 review。0813 在 10,773 条人工复核 near/mid Gold ROI 上重校准后，`rtmpose_train_hand_presence_threshold=0.025` 继续作为 RTMPose Train runtime 最小 `P(has_hand)`；低于阈值、缺失或非有限时整行拒绝，等于阈值通过。两项阈值用途不同，不应联动修改。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
+配置原则：Eos-2.0 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。`0.25` 是本次确认的召回/候选量折中值；ROI scale `1.8/1.8` 用于保持旧 Eval 与连接门控兼容。全局默认标注链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.0 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。HCF 模型 ID 自动由 `model_onnx_path` 的父目录生成，切换版本时只需修改该路径，但版本目录必须使用安全名称。`negative_review.hand_presence_threshold=0.5` 只用于负样本预审，严格低于模型 argmax 分界的候选才进入人工 review。0813 在 10,773 条人工复核 near/mid Gold ROI 上重校准后，`rtmpose_train_hand_presence_threshold=0.025` 继续作为 RTMPose Train runtime 最小 `P(has_hand)`；低于阈值、缺失或非有限时整行拒绝，等于阈值通过。两项阈值用途不同，不应联动修改。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
 
 `palm.supported_capture_distances` 是与 Palm 权重绑定的必填能力资产；缺失、为空或格式非法时，所有模型相关阶段在写入前终止。
 
@@ -110,6 +110,7 @@ visualization:
 ```text
 HAND_DATASET_ROOT/PretrainSource/<dataset_id>/<capture_source_id>/images/*.tif[f]
 HAND_DATASET_ROOT/EValSource/<dataset_id>/<capture_source_id>/images/*.tif[f]
+HAND_DATASET_ROOT/GoldSource/ReviewedDatasets/<dataset_id>/<capture_source_id>/images/*.tif[f]
 ```
 
 `images/` 必须平铺。命令：
@@ -255,6 +256,28 @@ Eval 限额在 `configs/datasets.yaml` 的 `evaluation_limits.max_raw_images_per
 
 Dataset manifest 只聚合至少存在一个 `qc/<variant>/source_publish_report.json` 的来源。某个 Eval 来源即使已执行 `eval-autolabel` 或导出 CVAT，只要尚未导入人工复核结果并执行 `source-publish`，就不会进入 `dataset_manifest.json`；下游 HLML 按 manifest 中的发布标签路径读取数据，因此会忽略该来源。
 
+### 新录制 Gold 来源
+
+Gold 来源必须是新录制的 train capture source，不得把既有 EValSource/PretrainSource 复制或改名充当 Gold。它复用 Eval 的自动标注、CVAT 1.1 精修和发布链路，但保存到独立的 `GoldSource/ReviewedDatasets/<dataset_id>/`，并同时保留人工确认的 positive 与 negative：
+
+```bash
+make gold-autolabel DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
+  PROPOSAL_VARIANT=eos-2.0
+make hand-cvat-export DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
+  PROPOSAL_VARIANT=eos-2.0
+# 将人工导出的 CVAT 1.1 XML 放到 03_reviewed/<variant>/cvat_reviewed.xml
+make hand-cvat-import DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
+  PROPOSAL_VARIANT=eos-2.0
+make source-publish DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
+  PROPOSAL_VARIANT=eos-2.0
+```
+
+输出为 `hand_gold_labels.jsonl` 与 Gold dataset manifest。Gold ID 和路径不得包含训练 run/snapshot/round 身份，因此可被后续任意训练流程复用。
+
 ## 8. Provenance
 
 - MediaPipe：`label_origin=mediapipe`、`annotation_style=mediapipe_v1`。
@@ -354,13 +377,18 @@ make negative-review NEGATIVE_DATASET_ID=background-neg-0801 \
   NEGATIVE_CANDIDATE_LABELS=/abs/candidate_negatives.jsonl
 make negative-publish NEGATIVE_DATASET_ID=background-neg-0801
 
-make hard-review SELECTION_ID=hard-0801 MINING_REQUEST=/abs/request.jsonl
-make hard-publish SELECTION_ID=hard-0801
+make hard-review HARD_DATASET_ID=hard-hands-r1 MINING_REQUEST=/abs/request.jsonl
+# 上传 GoldSource/HardSamples/hard-hands-r1/review/images/ 与 cvat_autolabel.xml，
+# 精修后把 CVAT 1.1 XML 保存为 review/cvat_reviewed.xml。
+make hard-import HARD_DATASET_ID=hard-hands-r1
+make hard-publish HARD_DATASET_ID=hard-hands-r1
 ```
 
 `negative-review` 从同一 `hand_classifier.model_onnx_path` 加载当前 HCF（现为 0813），批量计算每个候选的 `P(has_hand)` 并显示进度；仅严格低于 `negative_review.hand_presence_threshold` 的 ROI 被复制到 `review/images/`。`candidate_manifest.jsonl` 保存所选行及 `negative_review_precheck`，`precheck_excluded.jsonl` 保存未复制行及其分数，两者都记录实际 `model_id`；`README.json` 汇总模型 ID、阈值、数量、provider 与 batch。人工仍需删除有手或不确定图片，再执行 `negative-publish`；预审不是正式负标签，等于阈值的候选不进入 review。
 
-review 和 published 图片都使用普通独立复制，不创建硬链接。困难样本 published 目录拥有自己的图片副本，`selection.jsonl` 同时保存 `source_crop_relpath` 与 `published_relpath`；因此源变体被删除后，已发布负样本/困难样本仍可读取。
+困难样本不再采用删除式复核。`hard-review` 为 HLML 当前轮请求复制独立 ROI 并导出 CVAT 1.1 草标；人工必须精修 21 点、presence 与 handedness，`hard-import` 完成严格一一覆盖导入，`hard-publish` 才发布到 `GoldSource/HardSamples/<hard_dataset_id>/published/`。发布标签允许人工确认的 positive 和 negative，并同时保存 `source_crop_relpath` 与独立 `published_relpath`。`hard_dataset_id` 不得绑定训练 run/snapshot/round；轮次去重由 HLML 的 snapshot ledger 管理，HLMF 只发布通用可复用数据集。
+
+negative、hard 的 review/published 图片都使用普通独立复制，不创建硬链接；删除源变体不会破坏已发布副本。既有 `Selections/<selection_id>` 资产仍可由下游读取，但不再是新困难样本的公开复核入口。
 
 ## 12. 批处理
 
