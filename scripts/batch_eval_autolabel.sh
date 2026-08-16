@@ -3,7 +3,7 @@ set -uo pipefail
 
 : "${HAND_DATASET_ROOT:?HAND_DATASET_ROOT is required}"
 : "${DATASET_ID:?DATASET_ID is required}"
-PROPOSAL_VARIANT="${PROPOSAL_VARIANT:-eos-2.0}"
+PROPOSAL_VARIANT="${PROPOSAL_VARIANT:-eos-2.1}"
 HAND_LANDMARK_BACKEND="${HAND_LANDMARK_BACKEND:-rtmpose_onnx}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

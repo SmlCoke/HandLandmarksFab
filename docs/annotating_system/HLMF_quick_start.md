@@ -2,7 +2,7 @@
 
 ## 1. 环境检查
 
-输入：仓库、现有 `anfab` 环境、`models/palm_detector/eos-2.0/model_384x224_opt.onnx` 和 Hand landmark ONNX；RTMPose 模式还需要双头 HCF，以及默认开启的 MediaPipe TFLite 补救模型和独立环境。
+输入：仓库、现有 `anfab` 环境、`models/palm_detector/eos-2.1/model_384x224_opt.onnx` 和 Hand landmark ONNX；RTMPose 模式还需要双头 HCF，以及默认开启的 MediaPipe TFLite 补救模型和独立环境。
 
 ```bash
 cd /root/HandLandmarksFab
@@ -23,12 +23,12 @@ make test
 /root/miniconda3/envs/hlmf-mp-tflite/bin/python -m pip install \
   -r requirements-mediapipe-tflite.txt
 mkdir -p models/mediapipe/hand_landmarker_tflite
-# 将 Eos-2.0 部署到 models/palm_detector/eos-2.0/model_384x224_opt.onnx。
+# 将 Eos-2.1 部署到 models/palm_detector/eos-2.1/model_384x224_opt.onnx。
 # 将 hand_landmark_full.tflite 部署到上述目录。
-# 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0813/model.onnx。
+# 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0814/model.onnx。
 ```
 
-输出：代码和环境检查结果。默认链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue。Eos-2.0 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，只支持 near/mid，默认 proposal variant 为 `eos-2.0`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
+输出：代码和环境检查结果。默认链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue。Eos-2.1 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，只支持 near/mid，默认 proposal variant 为 `eos-2.1`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
 
 ## 2. 注册来源
 
@@ -38,7 +38,7 @@ mkdir -p models/mediapipe/hand_landmarker_tflite
 make source-check HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 
 make palm-distance-check \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak
@@ -48,13 +48,13 @@ make palm-distance-check \
 
 ## 3. Train 自动标注
 
-输入：已注册 train 来源、Eos、RTMPose、双头 HCF 和 TFLite 补救资产；当前 RTMPose Train presence 阈值为 `0.025`，连接长度门控及 `rtmpose_train_mediapipe_tflite_rescue_enabled` 均默认开启。分别设为 `false` 可独立关闭连接长度门控或补救。
+输入：已注册 train 来源、Eos、RTMPose、双头 HCF 和 TFLite 补救资产；当前 HCF0814 的 handedness/presence 门控阈值分别为 `0.8/0.025`，连接长度门控及 `rtmpose_train_mediapipe_tflite_rescue_enabled` 均默认开启。分别设为 `false` 可独立关闭连接长度门控或补救。
 
 ```bash
 make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
+  PROPOSAL_VARIANT=eos-2.1 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
 输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 与可选 TFLite 补救记录的 draft、三类发布 JSONL 和 QC；source report 记录四条门控互斥淘汰数，dataset manifest 记录 dataset 总计及各 capture source 明细。补救关闭时保持原 RTMPose 分流，连接长度门控关闭时其余三条门控仍正常工作。
@@ -63,7 +63,7 @@ make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 ```bash
 make batch-train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
-  DATASET_ID=FullEnhance0801 PROPOSAL_VARIANT=eos-2.0 \
+  DATASET_ID=FullEnhance0801 PROPOSAL_VARIANT=eos-2.1 \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
@@ -77,7 +77,7 @@ make batch-train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
+  PROPOSAL_VARIANT=eos-2.1 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
 输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 的 draft 和 QC；Train presence 阈值不作用于 Eval，正式评估标签仍需 CVAT 复核。
@@ -86,7 +86,7 @@ make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 ```bash
 make batch-eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
-  DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.0 \
+  DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.1 \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
@@ -100,12 +100,12 @@ make batch-eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 make autolabel-visualize-roi HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 
 make autolabel-visualize-original HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 ```
 
 输出：ROI PNG、原图 PNG 和默认 MP4。只生成 PNG 时追加 `ORIGINAL_VIDEO=false`。
@@ -116,14 +116,14 @@ make autolabel-visualize-original HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 make autolabel-visualizations-clean HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 ```
 
 批量清理同一数据集全部来源的该变体可视化：
 
 ```bash
 make batch-autolabel-visualizations-clean HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
-  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.0
+  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.1
 ```
 
 输出：删除 ROI/原图可视化 PNG、MP4 和 visualization QC；标签、manifest 与 Registry 不变。
@@ -136,17 +136,17 @@ make batch-autolabel-visualizations-clean HAND_DATASET_ROOT="$HAND_DATASET_ROOT"
 make hand-cvat-export HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 
 make hand-cvat-import HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 
 make source-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 ```
 
 输出：reviewed JSONL、evaluation labels、ignored 和 dataset manifest。未完成 CVAT 导入与 `source-publish` 的来源不进入 manifest，下游 HLML 会忽略。
@@ -157,14 +157,14 @@ make source-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 
 ```bash
 make gold-autolabel DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
-  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.0
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.1
 make hand-cvat-export DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
-  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.0
-# 放入 03_reviewed/eos-2.0/cvat_reviewed.xml
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.1
+# 放入 03_reviewed/eos-2.1/cvat_reviewed.xml
 make hand-cvat-import DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
-  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.0
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.1
 make source-publish DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
-  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.0
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak PROPOSAL_VARIANT=eos-2.1
 ```
 
 ```bash
@@ -192,7 +192,7 @@ make hard-publish HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 make source-variant-delete HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0 CONFIRM_DELETE=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1 CONFIRM_DELETE=eos-2.1
 ```
 
 输出：派生产物被删除、dataset manifest 被重建、Registry 写入 retired tombstone；原图和 raw/source 元数据保留。同名变体不能再次使用。
@@ -202,7 +202,7 @@ make source-variant-delete HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
 ```bash
 make batch-source-variant-delete HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
-  PROPOSAL_VARIANT=eos-2.0 CONFIRM_DELETE=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1 CONFIRM_DELETE=eos-2.1
 ```
 
 输出：逐来源写入 retired tombstone、删除精确变体产物，最后重建 dataset manifest。确认值必须与变体名完全一致。

@@ -5,7 +5,7 @@ HAND_DATASET_ROOT ?= /root/autodl-tmp/DatesetFab
 DATASET_SCOPE ?= pretrain
 DATASET_ID ?=
 CAPTURE_SOURCE_ID ?=
-PROPOSAL_VARIANT ?= eos-2.0
+PROPOSAL_VARIANT ?= eos-2.1
 AUTOLABEL_CONFIG ?= configs/autolabel.yaml
 REVIEW_CONFIG ?= configs/review.yaml
 DATASETS_CONFIG ?= configs/datasets.yaml
@@ -37,7 +37,7 @@ AUTOLABEL_ARGS = $(if $(strip $(ROI_VISUALIZATION)),--roi-visualization "$(ROI_V
 help:
 	@echo HLMF 3.0 - Palm proposals to versioned Hand ROI datasets
 	@echo Configs: autolabel.yaml=automatic labels, review.yaml=Hand CVAT, datasets.yaml=publication, cvat_label.json=CVAT schema
-	@echo   make source-check DATASET_SCOPE=pretrain/eval/gold DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-2.0
+	@echo   make source-check DATASET_SCOPE=pretrain/eval/gold DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-2.1
 	@echo   make palm-distance-check CAPTURE_SOURCE_ID=...  Check current Palm model distance support
 	@echo   make train-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
 	@echo   make eval-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]

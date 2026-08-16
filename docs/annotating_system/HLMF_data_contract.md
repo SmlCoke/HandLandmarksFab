@@ -72,13 +72,13 @@ ROI ID 不包含图片扩展名，但 `crop_path/crop_relpath` 是精确文件�
 
 Eos 产生 `proposal_kind=runtime|negative_candidate`。ROI manifest 至少保存 dataset/source/split、raw/ROI ID、proposal variant/slot/kind、Palm score、`palm_valid`、crop 路径与尺寸、ROI rect/corners 和 ROI contract version。
 
-默认 Palm 模型为 Eos-2.0，proposal variant 为 `eos-2.0`。输入契约是灰度 `uint8 → INTER_AREA 384×224 → float32/[0,1] → NCHW [1,1,224,384]`；输出为 `14×24` 与 `7×12` 两级 regression/classification，共 840 anchors。配置接口为：
+默认 Palm 模型为 Eos-2.1，proposal variant 为 `eos-2.1`。输入契约是灰度 `uint8 → INTER_AREA 384×224 → float32/[0,1] → NCHW [1,1,224,384]`；输出为 `14×24` 与 `7×12` 两级 regression/classification，共 840 anchors。配置接口为：
 
 ```yaml
 paths:
-  palm_model_onnx: models/palm_detector/eos-2.0/model_384x224_opt.onnx
+  palm_model_onnx: models/palm_detector/eos-2.1/model_384x224_opt.onnx
 palm:
-  model_id: eos-2.0
+  model_id: eos-2.1
   supported_capture_distances: [near, mid]
   input_width: 384
   input_height: 224
@@ -97,7 +97,7 @@ hand_roi:
 
 所有 level 的候选合并后执行一次全局 NMS；旧 `cross_head_suppress_iou` 不再属于配置契约。HLMF 原图仍必须是实际 `1280×720` upright 图像，不接受在 Palm 预处理阶段临时旋转 portrait 输入。
 
-`palm.supported_capture_distances` 必须是非空、无重复的 lowercase source-distance token 列表。当前 Eos-2.0 只允许 `near|mid`。Palm、ROI、Hand Landmark、CVAT 导出/导入和 source publish 在任何变体写入前校验该契约；不支持时以 `unsupported_capture_distance:model=<id>:distance=<distance>:supported=<list>` 拒绝整个来源，不产生逐标签 ignore reason。`check-palm-distance` 的退出码为：支持 0、不支持 3、配置或 source ID 非法 2。
+`palm.supported_capture_distances` 必须是非空、无重复的 lowercase source-distance token 列表。当前 Eos-2.1 只允许 `near|mid`。Palm、ROI、Hand Landmark、CVAT 导出/导入和 source publish 在任何变体写入前校验该契约；不支持时以 `unsupported_capture_distance:model=<id>:distance=<distance>:supported=<list>` 拒绝整个来源，不产生逐标签 ignore reason。`check-palm-distance` 的退出码为：支持 0、不支持 3、配置或 source ID 非法 2。
 
 批处理先预检全部来源，far 以 `SKIPPED_UNSUPPORTED_DISTANCE` 跳过；汇总包含 discovered、supported、success、failed、skipped 和完整 skipped source ID。全部来源均不兼容时返回非零。历史可视化、精确变体清理、manifest rebuild 和既有 published 数据不受追溯限制。
 
@@ -144,8 +144,8 @@ rtmpose_geometry_rescue (optional)
 - `label_origin=rtmpose`；
 - `annotation_style=rtmpose_m_hand5_v1`；
 - `teacher_model_id=rtmpose-m_hand5_256x256_onnx`；
-- `handedness_teacher_model_id=hand-classifier-handedness-handpresence-0813`；
-- `hand_presence_teacher_model_id=hand-classifier-handedness-handpresence-0813`；
+- `handedness_teacher_model_id=hand-classifier-handedness-handpresence-0814`；
+- `hand_presence_teacher_model_id=hand-classifier-handedness-handpresence-0814`；
 - `handedness.label=Left|Right`，score 为 HCF 胜出类 softmax 概率；
 - `hand_presence.present` 为 HCF presence argmax（0 no_hand、1 has_hand）；
 - `hand_presence.score` 始终为 `P(has_hand)`，不是胜出类别置信度。
@@ -203,7 +203,7 @@ MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 
 
 `palm_detection_report.json.onnx_runtime.model_contract` 记录 Eos model ID/相对路径、输入名称/形状/类型、四个输出名称/形状、预处理、layout、feature levels、anchor 总数及 score/NMS/max/negative 阈值。运行前模型输入输出必须与配置完全匹配；不匹配时明确终止，不产生 Palm manifest。
 
-`onnx_runtime.provider` 及 `onnx_runtime.model_providers.{palm,rtmpose,hand_classifier}` 只接受 `auto|cuda|cpu`；`auto` 为 CUDA 优先并允许 CPU fallback，`cuda` 在 CUDA provider 未激活时失败，`cpu` 固定 CPU。`onnx_runtime.batch_size` 必须是正整数。当前 HCF 模型路径为 `models/hand_classifier/handedness-handpresence-0813/model.onnx`。HCF 模型 ID 固定由该路径的父目录名生成；版本目录必须是安全名称，当前得到 `hand-classifier-handedness-handpresence-0813`，防止模型路径与标签 provenance 漂移。
+`onnx_runtime.provider` 及 `onnx_runtime.model_providers.{palm,rtmpose,hand_classifier}` 只接受 `auto|cuda|cpu`；`auto` 为 CUDA 优先并允许 CPU fallback，`cuda` 在 CUDA provider 未激活时失败，`cpu` 固定 CPU。`onnx_runtime.batch_size` 必须是正整数。当前 HCF 模型路径为 `models/hand_classifier/handedness-handpresence-0814/model.onnx`。HCF 模型 ID 固定由该路径的父目录名生成；版本目录必须是安全名称，当前得到 `hand-classifier-handedness-handpresence-0814`，防止模型路径与标签 provenance 漂移。
 
 ## 7. Train 发布分流
 
@@ -216,7 +216,7 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 - `quality.rtmpose_train_connection_length_gate_enabled` 为布尔开关，缺省及正式配置均为 `true`。开启时按 capture source 距离读取 `quality.rtmpose_train_connection_length_thresholds_px.<distance>`；任一连接长度严格超过阈值时，quality error 为 `rtmpose_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，`ignore_reason=rtmpose_connection_length_gate`。21 点无效时 error 为 `rtmpose_connection_length_landmarks_invalid`。等于阈值和长度为 0 均通过；关闭时不解析距离或阈值。
 - `quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 缺省及正式配置均为 `true`。开启时，边界或已开启的连接长度门控失败会触发 TFLite 重预测；两项几何复检通过才替换关键点。关闭时不读取 `mediapipe_tflite` 配置、模型或独立环境。它不是新的门控，不改变既有 quality error 与 `ignore_reason`。
 
-当前 RTMPose Train presence 阈值为 `0.025`，边界阈值为 2；0–1 个边界值通过。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 主链路或 Eos negative candidate；成功补救行仍属于 RTMPose Train runtime 链路，继续应用三条 RTMPose 专用门控。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。`negative_review.hand_presence_threshold=0.5` 是独立的候选预审 argmax 分界，不等于 Train presence 门控阈值。
+当前 HCF0814 的 handedness review 阈值为 `0.8`，RTMPose Train presence 阈值为 `0.025`，边界阈值为 2；0–1 个边界值通过。near/mid 的 20 对连接阈值绑定 Eos-2.1 ROI 几何与 7 个最新人工 Gold 来源；far 只保留距离能力门控后不可达的历史值。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 主链路或 Eos negative candidate；成功补救行仍属于 RTMPose Train runtime 链路，继续应用三条 RTMPose 专用门控。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。`negative_review.hand_presence_threshold=0.5` 是独立的候选预审 argmax 分界，不等于 Train presence 门控阈值。
 
 双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
 
@@ -302,7 +302,7 @@ GoldSource/HardSamples/<hard_dataset_id>/published/hard_labels.jsonl
 GoldSource/HardSamples/<hard_dataset_id>/published/manifest.json
 ```
 
-`negative_review.hand_presence_threshold` 必须是 `[0,1]` 内有限数，缺省及正式配置为 `0.5`。预审核从 `hand_classifier.model_onnx_path` 加载与 RTMPose runtime 相同的当前 HCF；当前模型 ID 为 `hand-classifier-handedness-handpresence-0813`。`candidate_manifest.jsonl` 仅含 `P(has_hand)<threshold` 的行；`precheck_excluded.jsonl` 保存其余行。两者的 `negative_review_precheck` 包含 `hand_presence_score`、`threshold`、`selected_for_human_review` 和实际 `model_id`，`README.json` 也记录该模型 ID。人工发布前仍必须复核所选图片。
+`negative_review.hand_presence_threshold` 必须是 `[0,1]` 内有限数，缺省及正式配置为 `0.5`。预审核从 `hand_classifier.model_onnx_path` 加载与 RTMPose runtime 相同的当前 HCF；当前模型 ID 为 `hand-classifier-handedness-handpresence-0814`。`candidate_manifest.jsonl` 仅含 `P(has_hand)<threshold` 的行；`precheck_excluded.jsonl` 保存其余行。两者的 `negative_review_precheck` 包含 `hand_presence_score`、`threshold`、`selected_for_human_review` 和实际 `model_id`，`README.json` 也记录该模型 ID。人工发布前仍必须复核所选图片。
 
 困难样本必须经过 `prepare-hard-review → CVAT 1.1 精修 → import-hard-review → publish-hard-review`。导入要求请求与 XML 一一覆盖且无 blocking error；`ignore_for_training` 行不发布，其余人工 positive/negative 均可发布。`hard_dataset_id` 是通用数据身份，不得包含训练 run/snapshot/round 语义；同一训练流程的跨轮 ROI 去重由 HLML snapshot ledger 保证。
 

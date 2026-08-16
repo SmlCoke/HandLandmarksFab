@@ -1,36 +1,37 @@
-# Iris Eval 就绪度评估（2026-08-13）
+# Iris Eval 就绪度评估（2026-08-16）
 
 ## 结论
 
-当前 Gold 足够启动 near/mid 范围内的 HLMF 训练集自动标注和本轮 Iris 训练，但只足以支撑当前比赛/演示边界，不能用于宣称跨背景、跨人员、跨距离的广泛泛化。Eos-2.0 应作为主评测；Eos-1.0 可作为单独的 legacy/stress 回放，不能与 Eos-2.0 合并成一个 headline 指标，也不能包含 far。
+当前 7 个已发布来源、9,279 条人工 Gold 是 Eos-2.1/HCF0814 配置校准及后续 Iris near/mid 评估的固定标准集。它覆盖 val/test、near/mid、complex/white、bright/dark 和 peak/soar，但人员与会话仍集中在 s01，不能据此宣称跨人员、跨会话或 far 泛化。
 
-## 当前 Eos-2.0 Gold
+这些标签由历史 Eos-2.0 变体发布；Eos-2.1 的 Palm、ROI 与连接阈值校准从原图重新检测并投影人工 image-space 点，没有把旧 crop 几何冒充新模型输出。Eos-1.0 只能单独作为 legacy/stress 回放，不能与 Eos-2.1 合并为 headline 指标。
 
-| 角色 | 数据来源 | Gold ROI | hand / no-hand |
-|---|---|---:|---:|
-| Dev | `complex-mid-dark-random-val-s01-peak` | 2,302 | 2,302 / 0 |
-| Dev | `white-mid-bright-random-val-s01-soar` | 1,151 | 1,151 / 0 |
-| Test | `complex-mid-bright-random-test-s01-peak` | 1,166 | 1,154 / 12 |
-| Test | `complex-near-bright-random-test-s01-peak` | 1,176 | 1,176 / 0 |
-| Frozen Iris test | `complex-mid-bright-random-test-s05-peak` | 396 | 312 / 84 |
-| **合计** | 3,200 张原图、5 个来源 | **6,191** | **6,095 / 96** |
+## 固定 Gold 清单
 
-建议只用两条 Val 调参与选择 checkpoint；两条 s01 Test 只做主测试；s05 最后只运行一次。s05 未进入 RTMPose/Iris 训练，但曾出现在 HCF 0813 validation，并用于连接长度门控的尺度校准；因此它是 Iris 关键点模型层面的独立测试，不是整条 Palm→Gate→HCF→Iris 链路完全未接触的盲测。
+| 角色 | 发布变体 | 数据来源 | Gold ROI | hand / no-hand |
+|---|---|---|---:|---:|
+| Val | `eos_2.0-rtmpose-hcf0813-gate` | `complex-mid-bright-random-val-s01-peak` | 1,170 | 1,170 / 0 |
+| Val | `eos_2.0-rtmpose-hcf0813-gate` | `complex-mid-bright-random-val-s01-soar` | 1,145 | 1,115 / 30 |
+| Val | `eos_2.0-rtmpose-hcf0813-gate` | `complex-near-bright-random-val-s01-peak` | 1,169 | 1,169 / 0 |
+| Val | `eos_2.0-rtmpose-gate` | `complex-mid-dark-random-val-s01-peak` | 2,302 | 2,302 / 0 |
+| Val | `eos_2.0-rtmpose-gate` | `white-mid-bright-random-val-s01-soar` | 1,151 | 1,151 / 0 |
+| Test | `eos_2.0-rtmpose-gate` | `complex-mid-bright-random-test-s01-peak` | 1,166 | 1,154 / 12 |
+| Test | `eos_2.0-rtmpose-gate` | `complex-near-bright-random-test-s01-peak` | 1,176 | 1,176 / 0 |
+| **合计** | 2 个历史发布变体 | 7 个来源 | **9,279** | **9,237 / 42** |
 
-现有覆盖包含 near/mid、complex/white、bright/dark，但缺少 Eos-2.0 的 white-dark、near-dark、更多人员/会话及非 random 动作。若还有极少量标注预算，优先补新人员/新会话的 white-dark near/mid，而不是继续扩充相同 s01 random 条件。
+Val 共 6,937 条，Test 共 2,342 条。训练和模型选择只使用 Val 指标；Test 必须冻结到最终 checkpoint 后再评估。每次报告同时给出关键点误差/PCK、presence、handedness，并按来源和距离拆分，不能只给合并平均值。
 
-## Eos-1.0 的使用边界
+## 独立性边界
 
-推荐作为独立 legacy/stress 集使用以下不与 Eos-2.0 主评测重复的来源：
+HCF0814 的 train/validation split 已覆盖上述全部 7 个来源，其中 5 个进入 train、2 个进入 validation。因此这批 Gold 可以校准 HLMF 的 HCF 门控，却不是 HCF0814 的独立盲测，相关结果可能乐观。下一次录制应优先增加未参与训练的新人员/新会话、white-dark near/mid，并冻结为新的 HCF/Iris blind test。
 
-- `FullEnhanceVal0808:eos_1.0-gate_r2` 的 `white-mid-dark-random-val-s03-soar` 与 `white-near-dark-random-val-s03-soar`：最小补充集，用于填补 white-dark 与 s03。
-- 时间允许时再加入 `FullEnhanceVal0801:eos-1.0` 的 `complex-mid-bright-random-val-s01-peak`、`complex-mid-bright-random-val-s01-soar`、`complex-mid-dark-random-test-s01-peak`、`complex-near-bright-random-val-s01-peak`。
+Eos-2.1 在这批 near/mid Gold 上完成 Palm 与 ROI 回放；历史 far 兼容回放召回不足，当前能力契约继续拒绝 far。不得用删除 far 原图、复用 Eos-1.0 far 结果或只报告已检出 ROI 的方式绕过 Palm 能力边界。
 
-这些 ROI 来自旧 Palm 几何，只能回答“新 Iris 是否退化旧链路兼容性”，不能替代 Eos-2.0 端到端指标。排除所有 far、排除与 Eos-2.0 主集使用同一原图的旧 variant，并分别报告 `Eos-2.0 primary`、`s05 Iris test`、`Eos-1.0 legacy` 三组结果。
+## Eos-1.0 legacy 使用边界
 
-## 启动条件
+推荐单独使用以下不与主 Gold 重复的来源做兼容性回放：
 
-- 可以启动 `DatesetFab/PretrainSource` 的 near/mid HLMF 自动标注；far 继续由 Eos-2.0 距离硬门控拒绝。
-- 在训练 Iris 前冻结上述 Dev/Test/Blind 清单，避免后续把 Test 或 s05 用于调参、早停或模型选择。
-- 本轮训练后同时给出关键点误差/PCK、presence、handedness，并按来源拆分；不要只给合并平均值。
-- 若主测试与 s05 明显分化，以 s05 作为泛化风险信号，不回头用 s05 调参；除非明确将其降级为 Dev 并另建新盲测。
+- `FullEnhanceVal0808:eos_1.0-gate_r2` 的 `white-mid-dark-random-val-s03-soar` 与 `white-near-dark-random-val-s03-soar`，补充 white-dark 与 s03；
+- 时间允许时，再加入 `FullEnhanceVal0801:eos-1.0` 中不与主集复用原图的 near/mid 来源。
+
+这些 ROI 来自旧 Palm 几何，只能回答“新 Iris 是否退化旧链路兼容性”。结果必须分别标记为 `Eos-2.1 primary` 与 `Eos-1.0 legacy`，并排除所有 far。

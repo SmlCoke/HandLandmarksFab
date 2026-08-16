@@ -10,7 +10,7 @@ HLMF 从 Eos Palm Detector 的 proposal 开始工作。程序原样使用 bbox�
 <background>-<distance>-<lighting>-<condition>-<split>-<session>-<performer>
 ```
 
-`distance` 是 Palm 模型能力门控字段。当前 Eos-2.0 只支持 `near|mid`；`far` 可以注册、保存和查看历史资产，但不能进入 Palm、ROI、Hand Landmark、CVAT 或发布阶段。Eos-1.0 的能力更弱，历史上仅适合作为 mid 兼容资产。新 Palm 模型必须先完成各距离覆盖评测，再更新配置中的支持列表。
+`distance` 是 Palm 模型能力门控字段。当前 Eos-2.1 只支持 `near|mid`；`far` 可以注册、保存和查看历史资产，但不能进入 Palm、ROI、Hand Landmark、CVAT 或发布阶段。Eos-1.0 的能力更弱，历史上仅适合作为 mid 兼容资产。新 Palm 模型必须先完成各距离覆盖评测，再更新配置中的支持列表。
 
 `split` 只能是 `train|val|test`，在注册来源时从 `capture_source_id` 解析并写入 `source.json`、raw manifest 和 dataset manifest；发布阶段不会随机划分。自动发布的 train 来源位于 `PretrainSource`，val/test 来源位于 `EValSource`；新录制且必须人工复核的 train Gold 来源位于 `GoldSource/ReviewedDatasets`。三者使用不同 scope，既有 Pretrain/Eval 发布合同不变。
 
@@ -38,11 +38,11 @@ make test
   -r requirements-mediapipe-tflite.txt
 ```
 
-Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略，需要在执行环境单独部署。当前默认 Eos-2.0、双头 HCF 与上一版归档路径为：
+Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略，需要在执行环境单独部署。当前默认 Eos-2.1、双头 HCF 与上一版归档路径为：
 
 ```text
-models/palm_detector/eos-2.0/model_384x224_opt.onnx
-models/hand_classifier/handedness-handpresence-0813/model.onnx
+models/palm_detector/eos-2.1/model_384x224_opt.onnx
+models/hand_classifier/handedness-handpresence-0814/model.onnx
 models/handedness-0806/
 models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
 ```
@@ -53,7 +53,7 @@ models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
 
 ```yaml
 palm:
-  model_id: eos-2.0
+  model_id: eos-2.1
   supported_capture_distances: [near, mid]
   input_width: 384
   input_height: 224
@@ -81,11 +81,11 @@ mediapipe_tflite:
   model_asset_path: models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
   python_executable: /root/miniconda3/envs/hlmf-mp-tflite/bin/python
 hand_classifier:
-  model_onnx_path: models/hand_classifier/handedness-handpresence-0813/model.onnx
+  model_onnx_path: models/hand_classifier/handedness-handpresence-0814/model.onnx
 negative_review:
   hand_presence_threshold: 0.5
 quality:
-  handedness_review_threshold: 0.7
+  handedness_review_threshold: 0.8
   rtmpose_train_hand_presence_threshold: 0.025
   rtmpose_train_boundary_coordinate_reject_threshold: 2
   rtmpose_train_mediapipe_tflite_rescue_enabled: true
@@ -99,7 +99,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：Eos-2.0 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。`0.25` 是本次确认的召回/候选量折中值；ROI scale `1.8/1.8` 用于保持旧 Eval 与连接门控兼容。全局默认标注链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.0 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。HCF 模型 ID 自动由 `model_onnx_path` 的父目录生成，切换版本时只需修改该路径，但版本目录必须使用安全名称。`negative_review.hand_presence_threshold=0.5` 只用于负样本预审，严格低于模型 argmax 分界的候选才进入人工 review。0813 在 10,773 条人工复核 near/mid Gold ROI 上重校准后，`rtmpose_train_hand_presence_threshold=0.025` 继续作为 RTMPose Train runtime 最小 `P(has_hand)`；低于阈值、缺失或非有限时整行拒绝，等于阈值通过。两项阈值用途不同，不应联动修改。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
+配置原则：Eos-2.1 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。7 个最新 Gold 来源的只读回放表明，`score=0.25、NMS=0.10、max_detections=2` 在 9,237 个 hand 上达到 100% 匹配召回，且比更低 score 少保留误候选；ROI `scale=1.8、shift_y=-0.1` 的关键点覆盖率为 99.999%，同时避免更大 scale 降低手部在 crop 中的占用率。全局默认标注链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.1 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。HCF 模型 ID 自动由 `model_onnx_path` 的父目录生成，切换版本时只需修改该路径，但版本目录必须使用安全名称。`negative_review.hand_presence_threshold=0.5` 只用于负样本预审，严格低于模型 argmax 分界的候选才进入人工 review。0814 在 9,279 条人工复核 near/mid Gold ROI 上重校准后，`rtmpose_train_hand_presence_threshold=0.025` 继续作为 RTMPose Train runtime 最小 `P(has_hand)`；低于阈值、缺失或非有限时整行拒绝，等于阈值通过。两项阈值用途不同，不应联动修改。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
 
 `palm.supported_capture_distances` 是与 Palm 权重绑定的必填能力资产；缺失、为空或格式非法时，所有模型相关阶段在写入前终止。
 
@@ -120,7 +120,7 @@ make source-check \
   HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 ```
 
 可在自动标注前只读检查当前 Palm 是否支持该距离：
@@ -150,7 +150,7 @@ make train-autolabel \
   HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0 \
+  PROPOSAL_VARIANT=eos-2.1 \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
@@ -200,20 +200,21 @@ TFLite 补救不是第五条门控。执行顺序为：RTMPose/HCF → 几何预
 
 `source-publish` 按上述发布优先级为每条 rejected 行只归因一次，并把四项互斥计数写入 `source_publish_report.json.quality_gate_rejections`。`dataset_manifest.json` 同时保存 dataset 合计、每个 `capture_source_id` 合计及 `quality_gate_counting_policy=exclusive_by_publish_routing_priority`；其他通用质量问题不计入四项统计。
 
-Presence 阈值应在每次 HCF 更新后使用正式仓库只读的人工复核 ROI 重新校准。0813 在 10,675 条 hand、98 条 no_hand 上，Train 阈值 `0.025` 保留 10,669 条 hand（99.944%），并拒绝 88 条 no_hand（89.796%）；最弱的独立 s05 来源保留 98.077%。若把 Train 阈值提高到 `0.5`，s05 只保留 86.538%，因此保持 `0.025`。`negative_review.hand_presence_threshold=0.5` 仍表示需要人工复核的负候选预审分界；handedness `0.7` 在有效人工标签上覆盖 98.733%，覆盖范围内准确率 98.640%。三项阈值用途不同。
+Presence 阈值应在每次 HCF 更新后使用正式仓库只读的人工复核 ROI 重新校准。0814 在 9,237 条 hand、42 条 no_hand 上，Train 阈值 `0.025` 保留全部 hand，并拒绝 41 条 no_hand（97.619%）；提高到 `0.5` 会漏掉 4 条 hand，因此保持 `0.025`。`negative_review.hand_presence_threshold=0.5` 仍是负候选人工预审分界；Eos low-score 候选中的 HCF 分数不能替代负样本真值。handedness `0.8` 在 9,237 条有效人工标签上覆盖 98.506%，覆盖范围内准确率 99.275%，作为覆盖率与准确率的折中。三项阈值用途不同。由于 HCF0814 的训练/验证拆分已覆盖这 7 个来源，这次回放用于配置校准，不应表述为独立盲测；更新模型后仍应补充未见过的新 Gold。
 
-near/mid 连接长度阈值来自 `FullEnhanceVal0801:eos_2.0-rtmpose-gate` 与 `RTMPose-Finetune-Test-0812:rtmpose-finetune-test` 的 6,095 条人工复核 gold hand，按距离和连接取 `ceil(P99.95 × 1.05)`。Eos-2.0 不支持 far，因此 far 没有新样本，YAML 只保留不可达的历史阈值；统计工具以 `—` 明示无统计量。完整分布、阈值与 gold/draft 回放结果位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。新增代表性已发布 Eval 或更新 Eos/ROI 几何后，使用实际新 variant 重新执行：
+near/mid 连接长度阈值来自 `FullEnhanceVal0801` 指定的 7 个最新 Gold 来源：程序用 Eos-2.1 在原图上重新检测并以当前 ROI 几何投影 9,237 条人工关键点，再按距离和连接取 `ceil(P99.95 × 1.05)`。Gold 共保留 9,203/9,237（99.632%）。Eos-2.1 的 far 历史标签兼容回放召回不足，因此能力契约仍只支持 near/mid；far 没有正式新样本，YAML 只保留不可达的历史阈值。完整分布、阈值与 RTMPose 回放结果位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。更新 Eos、ROI、HCF 或正式 Gold 后，在服务器隔离输出目录重新执行统一只读工具：
 
 ```bash
-python -B tools/analyze_rtmpose_connection_lengths.py \
+python -B tools/analyze_eos_hcf_recalibration.py \
   --dataset-root /root/autodl-tmp/DatesetFab \
-  --dataset FullEnhanceVal0801:eos_2.0-rtmpose-gate \
-  --dataset RTMPose-Finetune-Test-0812:rtmpose-finetune-test \
   --config configs/autolabel.yaml \
-  --output assets/quality_gate/rtmpose_connection_length_distribution.md
+  --palm-model models/palm_detector/eos-2.1/model_384x224_opt.onnx \
+  --hcf-model models/hand_classifier/handedness-handpresence-0814/model.onnx \
+  --rtmpose-model models/rtmpose/rtmpose-m_hand5_256x256.onnx \
+  --output /root/autodl-tmp/hlmf-calibration/eos21-hcf0814.json
 ```
 
-输入是已人工复核并发布的 Eval manifests/labels；输出只写仓库内的统计报告，不修改数据仓库。重算后必须审查 gold/draft 回放、更新 YAML 阈值并运行完整测试。
+输入是工具内列明的 7 个已人工复核并发布的 Eval manifests/labels；输出写入指定隔离 JSON，不修改数据仓库。重算后必须审查 Gold/RTMPose 回放、更新 YAML 与报告并运行完整测试。`tools/analyze_rtmpose_connection_lengths.py` 仍可诊断既有已发布 crop 几何，但 Palm/ROI 更新后不能代替原图重投影校准。
 
 HCF presence/handedness 是 Train 的教师伪标签；Eval draft 必须经过 CVAT 人工确认后才能成为正式真值。
 
@@ -224,10 +225,10 @@ make eval-autolabel \
   HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
   DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0 \
+  PROPOSAL_VARIANT=eos-2.1 \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
 
-make hand-cvat-export ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.0
+make hand-cvat-export ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.1
 ```
 
 `eval-autolabel` 生成 Palm、ROI、RTMPose 关键点以及双头 HCF 的 presence/handedness 草标和 QC，但不把任何教师结果当成正式评估真值；`hand-cvat-export` 从 ROI manifest、ROI images 和 draft 生成：
@@ -246,8 +247,8 @@ make hand-cvat-export ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.0
 导入和发布：
 
 ```bash
-make hand-cvat-import ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.0
-make source-publish ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.0
+make hand-cvat-import ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.1
+make source-publish ... DATASET_SCOPE=eval PROPOSAL_VARIANT=eos-2.1
 ```
 
 输出 `hand_landmarks_reviewed.jsonl`、`hand_evaluation_labels.jsonl`、`ignored.jsonl` 和重建后的 dataset manifest。
@@ -260,7 +261,7 @@ Dataset manifest 只聚合至少存在一个 `qc/<variant>/source_publish_report
 
 - MediaPipe：`label_origin=mediapipe`、`annotation_style=mediapipe_v1`。
 - RTMPose：`label_origin=rtmpose`、`annotation_style=rtmpose_m_hand5_v1`、`teacher_model_id=rtmpose-m_hand5_256x256_onnx`。
-- 双头 HCF：`handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 均由模型版本目录生成；当前为 `hand-classifier-handedness-handpresence-0813`。
+- 双头 HCF：`handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 均由模型版本目录生成；当前为 `hand-classifier-handedness-handpresence-0814`。
 - 人工复核记录 `human_reviewed`、`human_modified_landmark_ids`、`human_modified_handedness` 和 `human_modified_presence`；修点后使用 `*_human_corrected/project_consensus_v1`。
 - 未推理 candidate：两个 HCF teacher ID 均为 null，provenance 为 `unresolved/unlabeled_v1`，不伪装为教师标签。
 
@@ -269,7 +270,7 @@ Dataset manifest 只聚合至少存在一个 `qc/<variant>/source_publish_report
 从既有 draft 重建 ROI 图：
 
 ```bash
-make autolabel-visualize-roi ... PROPOSAL_VARIANT=eos-2.0
+make autolabel-visualize-roi ... PROPOSAL_VARIANT=eos-2.1
 ```
 
 RTMPose 根据既有 QC 报告读取实际教师后端，并只抽样 runtime ROI；不会受后来修改 YAML 的影响。MediaPipe 保持原抽样行为。Train 最多按 `train_max_samples` 确定性均匀抽样；Val/Test 渲染全部适用行。
@@ -277,8 +278,8 @@ RTMPose 根据既有 QC 报告读取实际教师后端，并只抽样 runtime RO
 原图可视化：
 
 ```bash
-make autolabel-visualize-original ... PROPOSAL_VARIANT=eos-2.0
-make autolabel-visualize-original ... PROPOSAL_VARIANT=eos-2.0 ORIGINAL_VIDEO=false
+make autolabel-visualize-original ... PROPOSAL_VARIANT=eos-2.1
+make autolabel-visualize-original ... PROPOSAL_VARIANT=eos-2.1 ORIGINAL_VIDEO=false
 ```
 
 输出按原图 stem 命名的 PNG，并默认按文件名字典序生成 30 FPS、`mp4v` 视频：
@@ -291,7 +292,7 @@ make autolabel-visualize-original ... PROPOSAL_VARIANT=eos-2.0 ORIGINAL_VIDEO=fa
 只删除可重建可视化：
 
 ```bash
-make autolabel-visualizations-clean ... PROPOSAL_VARIANT=eos-2.0
+make autolabel-visualizations-clean ... PROPOSAL_VARIANT=eos-2.1
 ```
 
 该命令删除 ROI/原图审核图、MP4 和对应 visualization QC 报告；不删除 ROI/draft，不改变 Registry，不写 tombstone。
@@ -301,7 +302,7 @@ make autolabel-visualizations-clean ... PROPOSAL_VARIANT=eos-2.0
 ```bash
 make batch-autolabel-visualizations-clean \
   HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
-  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.0
+  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 PROPOSAL_VARIANT=eos-2.1
 ```
 
 脚本从数据集的直接子目录 `images/` 发现全部来源，对每个来源执行同一精确变体的可视化清理，并在全部来源处理后汇总成功与失败数量。输入是 scope、dataset ID 和 proposal variant；输出是删除汇总，不改变 dataset manifest 或 Registry。
@@ -313,7 +314,7 @@ make source-variant-delete \
   HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
-  PROPOSAL_VARIANT=eos-2.0 CONFIRM_DELETE=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1 CONFIRM_DELETE=eos-2.1
 ```
 
 `CONFIRM_DELETE` 必须与 `PROPOSAL_VARIANT` 完全相同。处理顺序是先把 `(capture_source_id, proposal_variant)` 标为 retired，再删除精确变体的 `01_palm`、`02_roi_crops`、`03_reviewed`、`05_labels`、`qc`、原图可视化目录与 MP4，最后重建 dataset manifest。
@@ -326,7 +327,7 @@ make source-variant-delete \
 make batch-source-variant-delete \
   HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
-  PROPOSAL_VARIANT=eos-2.0 CONFIRM_DELETE=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1 CONFIRM_DELETE=eos-2.1
 ```
 
 脚本从 `source.json` 发现全部已注册来源，逐来源执行永久退役与精确产物删除；`CONFIRM_DELETE` 不完全匹配时在任何删除前退出。所有来源处理结束后，无论是否有单来源失败，都会再执行一次 `dataset-manifest-rebuild`，使 manifest 与已完成的删除保持一致。批处理继续保留每个来源的原图、raw/source 元数据及 Registry ROI 元数据。
@@ -362,7 +363,7 @@ make hard-import HARD_DATASET_ID=hard-hands-r1
 make hard-publish HARD_DATASET_ID=hard-hands-r1
 ```
 
-`negative-review` 从同一 `hand_classifier.model_onnx_path` 加载当前 HCF（现为 0813），批量计算每个候选的 `P(has_hand)` 并显示进度；仅严格低于 `negative_review.hand_presence_threshold` 的 ROI 被复制到 `review/images/`。`candidate_manifest.jsonl` 保存所选行及 `negative_review_precheck`，`precheck_excluded.jsonl` 保存未复制行及其分数，两者都记录实际 `model_id`；`README.json` 汇总模型 ID、阈值、数量、provider 与 batch。人工仍需删除有手或不确定图片，再执行 `negative-publish`；预审不是正式负标签，等于阈值的候选不进入 review。
+`negative-review` 从同一 `hand_classifier.model_onnx_path` 加载当前 HCF（现为 0814），批量计算每个候选的 `P(has_hand)` 并显示进度；仅严格低于 `negative_review.hand_presence_threshold` 的 ROI 被复制到 `review/images/`。`candidate_manifest.jsonl` 保存所选行及 `negative_review_precheck`，`precheck_excluded.jsonl` 保存未复制行及其分数，两者都记录实际 `model_id`；`README.json` 汇总模型 ID、阈值、数量、provider 与 batch。人工仍需删除有手或不确定图片，再执行 `negative-publish`；预审不是正式负标签，等于阈值的候选不进入 review。
 
 困难样本不再采用删除式复核。`hard-review` 为 HLML 当前轮请求复制独立 ROI 并导出 CVAT 1.1 草标；人工必须精修 21 点、presence 与 handedness，`hard-import` 完成严格一一覆盖导入，`hard-publish` 才发布到 `GoldSource/HardSamples/<hard_dataset_id>/published/`。发布标签允许人工确认的 positive 和 negative，并同时保存 `source_crop_relpath` 与独立 `published_relpath`。`hard_dataset_id` 不得绑定训练 run/snapshot/round；轮次去重由 HLML 的 snapshot ledger 管理，HLMF 只发布通用可复用数据集。
 
@@ -379,17 +380,17 @@ negative、hard 的 review/published 图片都使用普通独立复制，不创�
 ```bash
 make gold-autolabel DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 make hand-cvat-export DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 # 将人工导出的 CVAT 1.1 XML 放到 03_reviewed/<variant>/cvat_reviewed.xml
 make hand-cvat-import DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 make source-publish DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-train-s06-peak \
-  PROPOSAL_VARIANT=eos-2.0
+  PROPOSAL_VARIANT=eos-2.1
 ```
 
 输出为 `hand_gold_labels.jsonl` 与 Gold dataset manifest。Gold ID 和路径不得包含训练 run/snapshot/round 身份，因此可被后续任意训练流程复用。
@@ -398,9 +399,9 @@ make source-publish DATASET_SCOPE=gold DATASET_ID=gold-national-r1 \
 
 ```bash
 make batch-train-autolabel DATASET_ID=FullEnhance0801 \
-  PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
+  PROPOSAL_VARIANT=eos-2.1 HAND_LANDMARK_BACKEND=rtmpose_onnx
 make batch-eval-autolabel DATASET_ID=FullEnhanceVal0801 \
-  PROPOSAL_VARIANT=eos-2.0 HAND_LANDMARK_BACKEND=rtmpose_onnx
+  PROPOSAL_VARIANT=eos-2.1 HAND_LANDMARK_BACKEND=rtmpose_onnx
 ```
 
 自动标注脚本从 `<dataset>/<source>/images/` 发现来源，不要求预先存在 `source.json`；每个单来源流水线首先执行 source check，因此新来源会在批处理中自动注册。只有数据集的直接子目录被视为 capture source，`images/` 内部不递归发现来源。
