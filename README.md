@@ -16,7 +16,7 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 - [当前状态](docs/annotating_system/HLMF_current_status.md)
 - [常见问题与解答](docs/annotating_system/HLMF_qa.md)
 - [Eos-2.1 审计与校准报告](assets/palm_detector/eos_2_1_adaptation.md)
-- [HCF 0814 接入与校准报告](assets/hand_classifier/handedness_handpresence_0814.md)
+- [HCF v1 MobileNetV3-Large 接入与校准报告](assets/hand_classifier/v1_mobilenet_v3_large.md)
 - [HaMeR 标注后端接入报告](assets/hand_landmark/hamer_integration.md)
 - [Iris Eval 就绪度评估](assets/evaluation/iris_eval_readiness.md)
 - [ONNX CPU/GPU 性能报告](assets/device_perf/onnx_cpu_gpu_benchmark.md)
@@ -26,9 +26,9 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 - Palm：默认 Eos-2.1，输入灰度 `[1,1,224,384]`，score `0.25`、全局 NMS IoU `0.10`、840 anchors；ROI 保持 `scale=1.8/1.8、shift=0/-0.1`，`supported_capture_distances=[near,mid]`。默认 proposal variant 为 `eos-2.1`。
 - 默认后端：`hand_landmark.backend: rtmpose_onnx`。
 - 单次切换：`HAND_LANDMARK_BACKEND=mediapipe_tasks`。
-- HaMeR 单次切换：`HAND_LANDMARK_BACKEND=hamer`；HaMeR 只预测 21 点，外部 `HLMF-Enhance/hand_classifier/handedness-handpresence-0814/model.onnx` 仍是 presence/handedness 的唯一教师，并直接决定 HaMeR 左右手翻转。
+- HaMeR 单次切换：`HAND_LANDMARK_BACKEND=hamer`；HaMeR 只预测 21 点，外部 `HLMF-Enhance/hand_classifier/v1-mobilenet_v3_large/model.onnx` 仍是 presence/handedness 的唯一教师，并直接决定 HaMeR 左右手翻转。
 - RTMPose：原始 SimCC logits 直接 argmax，除以固定 `2.0`；runtime ROI 总是输出 21 点。
-- HCF：`models/hand_classifier/handedness-handpresence-0814/model.onnx`，输入灰度 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits；模型 ID 从版本目录名生成，仅运行于 RTMPose runtime ROI。旧模型仅作归档。
+- HCF：`models/hand_classifier/v1-mobilenet_v3_large/model.onnx`，输入灰度 `[N,1,256,256]`，输出 `handedness` 与 `hand_presence` 两个 `[N,2]` logits；模型 ID 为 `hand-classifier-v1-mobilenet_v3_large`，运行于 RTMPose/HaMeR runtime ROI。旧模型仅作归档。
 - 负样本 `negative-review` 预审核复用同一 `hand_classifier.model_onnx_path`，并在所选/排除清单及 README 中记录实际 HCF 模型 ID。
 - MediaPipe TFLite 补救：仅当 RTMPose/HaMeR Train runtime 未通过边界或已开启的连接长度门控时，使用纯 Hand Landmarker TFLite 重预测 21 点；presence/handedness 仍只采用 HCF。
 - HaMeR：在独立 `.hamer` 环境加载 official CVPR24 checkpoint，`rescale=0.75`、CUDA；输出按 Hand ROI 像素域裁到 `[0,255]` 后应用与 RTMPose 相同的四项 Train 门控及 TFLite 几何补救。HaMeR 内部 ViTPose/亮度 handedness fallback 不进入 HLMF。
@@ -36,7 +36,7 @@ Hand ROI 的模型输入契约是解码后的单通道 `uint8 256×256` 像素�
 
 ONNX/TFLite 模型遵循仓库现有忽略策略，不纳入 Git；代码和配置通过 Git 同步，模型需在执行环境中单独部署。
 
-ONNX Runtime 使用逐模型 provider：Eos-2.1 Palm 与 HCF 0814 默认 `auto`（CUDA 可用时使用 GPU，否则回退 CPU），RTMPose 固定 CPU；后者是因为 GPU 虽更快，但在人工复核 Eval 上轻微降低了关键点精度。RTMPose/HCF 动态 batch 默认为 `64`，Palm 模型输入固定为 batch 1。可在 `onnx_runtime.model_providers` 中改为 `auto|cuda|cpu`，实测依据见性能报告。
+ONNX Runtime 使用逐模型 provider：Eos-2.1 Palm 与 HCF v1 MobileNetV3-Large 默认 `auto`（CUDA 可用时使用 GPU，否则回退 CPU），RTMPose 固定 CPU；后者是因为 GPU 虽更快，但在人工复核 Eval 上轻微降低了关键点精度。RTMPose/HCF 动态 batch 默认为 `64`，Palm 模型输入固定为 batch 1。可在 `onnx_runtime.model_providers` 中改为 `auto|cuda|cpu`，实测依据见性能报告。
 
 ## 常用命令
 
@@ -108,7 +108,7 @@ make help
 
 RTMPose 或 HaMeR Train runtime 行满足以下任一条件时整行进入 `ignored.jsonl`：
 
-- `hand_presence.score=P(has_hand)` 缺失、非有限，或低于 `quality.rtmpose_train_hand_presence_threshold`（0814 复核后保持 `0.025`；负候选预审仍独立使用 `0.5`）；
+- `hand_presence.score=P(has_hand)` 缺失、非有限，或低于 `quality.rtmpose_train_hand_presence_threshold`（v1 MobileNetV3-Large 复核后为 `0.5`；负候选预审独立校准后也采用 `0.5`，配置项仍保持独立）；
 - HCF handedness 分数低于 `quality.handedness_review_threshold`（当前 `0.8`）；
 - 42 个 crop 坐标值中，精确边界值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`（当前 `2`）；
 - 开启连接长度门控时，任一指定连接的 crop 像素长度严格超过当前 `near/mid/far` 阈值。
@@ -117,7 +117,7 @@ RTMPose 或 HaMeR Train runtime 行满足以下任一条件时整行进入 `igno
 
 `quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 默认开启。RTMPose/HaMeR 触发边界或已开启的连接长度门控时，程序批量调用 `models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite`；补救结果通过两项几何检查才替换关键点，否则保留原教师点并继续拒绝。关闭后不读取 TFLite 模型或独立环境配置。该补救不是第五条门控，也不使用 TFLite 的 presence/handedness 输出。
 
-Presence、边界和连接长度门控作用于 RTMPose/HaMeR Train runtime；handedness 门控还适用于 MediaPipe Train positive。四条门控均不改变 Eval 发布，Eos low-score candidate 也不应用 runtime 门控。HCF presence 是教师伪标签，Eval 正式真值仍以 CVAT 人工复核为准。本轮按任务要求不修改既有阈值；HaMeR 尚未以新人工 Eval 做正式阈值重校准，因此其门控结论是接入期约束，不是新的模型校准结论。
+Presence、边界和连接长度门控作用于 RTMPose/HaMeR Train runtime；handedness 门控还适用于 MediaPipe Train positive。四条门控均不改变 Eval 发布，Eos low-score candidate 也不应用 runtime 门控。HCF presence 是教师伪标签，Eval 正式真值仍以 CVAT 人工复核为准。HCF 更新只重校准 presence、negative-review 与 handedness；Palm/ROI/landmark 模型均未变化，因此边界和连接长度阈值不重算。HaMeR 几何阈值仍需未来使用新的人审代表性 HaMeR Eval 单独复核。
 
 发布报告会按既有发布优先级对四条门控做互斥计数：单来源写入 `source_publish_report.json`，dataset 总计及 `capture_source_id` 明细写入 `dataset_manifest.json`。
 

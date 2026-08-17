@@ -9,13 +9,13 @@ HaMeR 已作为 `HAND_LANDMARK_BACKEND=hamer` 的独立第三种 Hand landmark �
 ## 模型与环境
 
 - HaMeR repository：`/root/autodl-tmp/HLMF-Enhance/hamer`
-- repository HEAD/config lock：`603105f586337aa704483c4525f5934047f02f2b`
-- HLMF model ID：`hamer-cvpr24-official-603105f`
+- repository HEAD/config lock：`b29f1b397ed5ef36eba8f9498dd719949615fe09`
+- HLMF model ID：`hamer-cvpr24-official-b29f1b3`
 - checkpoint：`_DATA/hamer_ckpts/checkpoints/hamer.ckpt`
 - MANO：`_DATA/data/mano/MANO_RIGHT.pkl`
 - Python：`hamer/.hamer/bin/python`（Python 3.8.10）
 - runtime：CUDA，`rescale=0.75`
-- HCF：`/root/autodl-tmp/HLMF-Enhance/hand_classifier/handedness-handpresence-0814/model.onnx`
+- HCF：`/root/autodl-tmp/HLMF-Enhance/hand_classifier/v1-mobilenet_v3_large/model.onnx`
 
 HaMeR 的 PyTorch、Detectron2、ViTPose、MANO 等依赖保持在 `.hamer`，未并入 `anfab`；HLMF `requirements.txt` 因此不变。HLMF 通过 JSONL request/response worker 一次加载 HaMeR 模型并处理一个来源的全部 runtime ROI。
 
@@ -28,7 +28,7 @@ HaMeR 2D 输出裁到 `[0,255]` 后写入：
 - `source=hamer_official_cvpr24`
 - `label_origin=hamer`
 - `annotation_style=hamer_openpose21_v1`
-- `teacher_model_id=hamer-cvpr24-official-603105f`
+- `teacher_model_id=hamer-cvpr24-official-b29f1b3`
 - `hamer_inference={model_id,device,rescale,flipped,bbox_size,clipped_coordinate_values,handedness_source}`
 
 HCF 的 `handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 由外部模型版本目录产生。low-score Eos candidate 仍不运行 HaMeR/HCF，保持 unresolved candidate 契约。
@@ -48,9 +48,9 @@ HaMeR 错误和 `ignore_reason` 使用 `hamer_*` 前缀，来源与 dataset 报�
 
 ## 阈值状态
 
-本轮没有更新 Eval 或 Hand Classifier，按任务要求不修改现有阈值：presence `0.025`、handedness `0.8`、boundary `2` 及 Eos-2.1 ROI 的 near/mid connection thresholds。
+2026-08-18 外部 HCF 已更新为 v1 MobileNetV3-Large。使用 9,279 条指定人工 Gold 只读回放后，presence 更新为 `0.5`、handedness 保持 `0.8`；negative-review 独立保持 `0.5`。boundary `2` 及 Eos-2.1 ROI 的 near/mid connection thresholds 不变。
 
-Presence/handedness 仍有同一 HCF0814 的校准依据，geometry thresholds 仍绑定同一 Eos-2.1 ROI；但是 HaMeR 权重的输出分布尚未使用新的人审代表性 Eval 正式重校准。因此本次只确认门控已正确接入，不能把现有阈值表述为 HaMeR 模型版本的最终校准结论。批量生产前应先建立并人工复核代表性 HaMeR Eval/Gold，再做只读正式复核。
+Presence/handedness 使用当前 HCF 的模型版本特定校准依据，geometry thresholds 仍绑定同一 Eos-2.1 ROI；HCF 更新不改变 HaMeR 的关键点 geometry，因此不触发边界/连接长度重算。但是 HaMeR 权重的输出分布仍未使用新的人审代表性 Eval 正式重校准，不能把现有 geometry 参数表述为 HaMeR 模型版本的最终校准结论。批量生产前应先建立并人工复核代表性 HaMeR Eval/Gold，再做只读正式复核。
 
 ## 融合策略
 
@@ -62,6 +62,6 @@ Presence/handedness 仍有同一 HCF0814 的校准依据，geometry thresholds �
 
 - 新增 worker 协议、HCF 权威手性、21 点/provenance、candidate skip、四门控互斥分流和 TFLite rescue 单元测试。
 - 本地合成完整测试：79 项通过。
-- 服务器真实 ROI 模块冒烟：`.hamer` CUDA + HCF CUDA 成功输出 21 个有限点；HaMeR model ID、repository commit、HCF0814 teacher ID、Left flip 与 `rescale=0.75` 均按配置写入。
+- 服务器真实 ROI 模块冒烟：`.hamer` CUDA + HCF CUDA 成功输出 21 个有限点；HaMeR model ID、repository commit、HCF teacher ID、Left flip 与 `rescale=0.75` 均按配置写入。2026-08-18 HCF 替换后再次执行针对性接口冒烟。
 - 服务器隔离完整流水线：从正式仓库只读复制 1 张 TIFF 到临时 `HAND_DATASET_ROOT`，执行 Eos-2.1 → 12 ROI（2 runtime、10 low-score candidate）→ HaMeR/HCF → 发布；2 条 runtime 均为 21 个有限点并发布，四门控拒绝均为 0，candidate 保持 unresolved 且不运行 HaMeR/HCF。临时根在核对报告后删除。
 - 正式 `HAND_DATASET_ROOT` 未执行自动标注、发布或 manifest 重建，既有数据资产保持只读。

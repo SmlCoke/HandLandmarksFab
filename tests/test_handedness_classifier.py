@@ -109,6 +109,12 @@ class HandClassifierTests(unittest.TestCase):
 
     def test_model_id_is_derived_from_version_directory(self) -> None:
         self.assertEqual(
+            "hand-classifier-v1-mobilenet_v3_large",
+            hand_classifier_model_id_from_path(
+                Path("models/hand_classifier/v1-mobilenet_v3_large/model.onnx")
+            ),
+        )
+        self.assertEqual(
             "hand-classifier-handedness-handpresence-0809",
             hand_classifier_model_id_from_path(
                 Path("models/hand_classifier/handedness-handpresence-0809/model.onnx")

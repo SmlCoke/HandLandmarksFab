@@ -788,7 +788,7 @@ class DatasetV3Tests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "configs" / "autolabel.yaml"
         )
         classifier = SimpleNamespace(
-            model_id="hand-classifier-handedness-handpresence-0814",
+            model_id="hand-classifier-v1-mobilenet_v3_large",
             provider="CPUExecutionProvider",
             fallback_reason=None,
             classify_batch=lambda images: [
@@ -811,12 +811,12 @@ class DatasetV3Tests(unittest.TestCase):
             )
         classifier_factory.assert_called_once_with(
             Path(__file__).resolve().parents[1]
-            / "models/hand_classifier/handedness-handpresence-0814/model.onnx",
+            / "models/hand_classifier/v1-mobilenet_v3_large/model.onnx",
             "auto",
         )
         review_image = next(Path(result["review_root"]).glob("images/*/*"))
         self.assertEqual(
-            "hand-classifier-handedness-handpresence-0814",
+            "hand-classifier-v1-mobilenet_v3_large",
             result["hand_classifier_model_id"],
         )
         self.assertNotEqual(os.stat(crop).st_ino, os.stat(review_image).st_ino)

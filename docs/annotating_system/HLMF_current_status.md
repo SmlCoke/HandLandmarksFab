@@ -1,6 +1,12 @@
-# HLMF 当前状态（2026-08-17）
+# HLMF 当前状态（2026-08-18）
 
 ## 代码与配置
+
+2026-08-18 默认双头 HCF 已替换为 `models/hand_classifier/v1-mobilenet_v3_large/model.onnx`，模型 ID 为 `hand-classifier-v1-mobilenet_v3_large`；HaMeR 外部副本及默认自动发现路径同步为 `/root/autodl-tmp/HLMF-Enhance/hand_classifier/v1-mobilenet_v3_large/model.onnx`。HaMeR 仓库同步提交为 `b29f1b397ed5ef36eba8f9498dd719949615fe09`，HLMF 锁定的 HaMeR model ID 为 `hamer-cvpr24-official-b29f1b3`。服务器最终 ONNX 为 16,837,557 bytes，SHA-256 `36deea0520a0bba13ce6557906fd94ffd4a65cc290c1a9d9440857f1f830847b`；HLMF 与 HaMeR 副本一致。模型仍使用动态 batch `[N,1,256,256]` 输入以及 `handedness/hand_presence [N,2]` 输出，不需要修改 HLMF runtime 代码或依赖。
+
+新 HCF 只读回放 7 个指定 Gold 来源共 9,279 条 ROI（9,237 hand、42 no_hand）。Train presence 采用独立配置 `0.5`，保留全部 hand 并拒绝全部 no_hand；negative-review 独立保持 `0.5`，在 37,937 个 Eos-2.1 low-score candidate 中选择 553 个，其中 547 个未关联 Gold hand、6 个与 hand 关联。handedness 保持 `0.8`，覆盖 9,101/9,237（98.528%），覆盖内正确 9,051/9,101（99.451%）；逐来源最低覆盖率 95.048%，最低覆盖内准确率 98.455%。7 个 Gold 来源均已进入新模型 train/val split，因此这些结果是配置校准而非独立盲测。
+
+CPU/GPU batch-64 吞吐为 `207.4/4,265.5 images/s`；9,279 条 Gold 的 logits/概率最大差为 `0.009796/0.000623`，presence/handedness argmax、presence `0.5` 和 handedness `0.8` 均无跨设备变化，默认继续 HCF GPU 优先、CPU fallback。本轮没有修改 Eos、ROI、RTMPose、HaMeR 权重/关键点几何或 TFLite，故边界阈值 `2` 与 near/mid 连接长度阈值不重算；正式数据仓只读，既有 published 数据和 HLML snapshot 均未改写。
 
 2026-08-17 已把 HaMeR 接为独立第三种 Hand landmark 后端 `hamer`，默认后端仍为 `rtmpose_onnx`。HaMeR 使用 `/root/autodl-tmp/HLMF-Enhance/hamer/.hamer`、official checkpoint 与 MANO 资产，模型 ID 为 `hamer-cvpr24-official-603105f`、`rescale=0.75`、CUDA；PyTorch/Detectron2 等依赖不进入 `anfab`，因此 `requirements.txt` 未变化。HLMF 主环境先用 `HLMF-Enhance/hand_classifier/handedness-handpresence-0814/model.onnx` 批量产生 presence/handedness，HCF 手性直接决定 HaMeR 左右手翻转；HaMeR 自带 ViTPose/亮度 handedness fallback 不参与发布链路。
 
@@ -18,11 +24,11 @@ Eos-2.1 的能力契约仍为 `supported_capture_distances: [near, mid]`。历�
 
 Eos-2.1 ONNX full checker 通过，接口为 153 个节点、160 个 initializer、1,368,068 个 initializer element。该模型没有配套 TensorFlow/H5 参考，因此不宣称 TF↔ONNX 一致性；128 张真实输入的 CPU↔GPU raw 最大差为 `7.15e-07`，正式解码 0 次不一致。CPU/GPU 吞吐为 `199.3/573.2 images/s`，保持 GPU 优先、CPU fallback。完整审计位于 `assets/palm_detector/eos_2_1_adaptation.md`。
 
-RTMPose runtime ROI 当前使用 `models/hand_classifier/handedness-handpresence-0814/model.onnx`，模型 ID 为 `hand-classifier-handedness-handpresence-0814`；旧 HCF 不再参与推理。服务器主环境使用 `onnxruntime-gpu==1.18.0`。Palm/HCF 默认 CUDA 且不可用时回退 CPU，RTMPose 模型未变并沿用既有人工 Gold 精度结论固定 CPU；RTMPose/HCF batch 为 64。完整 HCF 校准与设备报告位于 `assets/hand_classifier/handedness_handpresence_0814.md` 和 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。Eos low-score candidate 仍不在自动标注阶段运行 RTMPose/HCF。
+RTMPose/HaMeR runtime ROI 当前使用 v1 MobileNetV3-Large HCF；旧 HCF 不再参与新推理。服务器主环境使用 `onnxruntime-gpu==1.18.0`。Palm/HCF 默认 CUDA 且不可用时回退 CPU，RTMPose 模型未变并沿用既有人工 Gold 精度结论固定 CPU；RTMPose/HCF batch 为 64。完整 HCF 校准与设备报告位于 `assets/hand_classifier/v1_mobilenet_v3_large.md` 和 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。Eos low-score candidate 仍不在自动标注阶段运行 RTMPose/HaMeR/HCF。
 
-0814 HCF 自带验证集指标：presence accuracy `0.984676`、presence ROC AUC `0.997041`、混淆矩阵 `[[369,40],[7,2651]]`；handedness accuracy `0.971783`、ROC AUC `0.996871`、混淆矩阵 `[[1345,54],[21,1238]]`。0814 的 train/validation split 已覆盖本次 7 个 Gold 来源，因此统一回放用于配置校准，不是独立盲测，结果可能乐观。
+v1 MobileNetV3-Large 自带验证集指标：presence accuracy `0.999299`、presence ROC AUC `0.999964`、混淆矩阵 `[[1204,2],[1,3073]]`；handedness accuracy `0.994470`、ROC AUC `0.999723`、混淆矩阵 `[[1589,10],[7,1468]]`。
 
-当前 Train 质量配置：handedness review threshold 为 `0.8`；RTMPose/HaMeR Train runtime 的 `P(has_hand)` 阈值为 `0.025`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝；连接对长度门控默认开启，并按 `near/mid/far` 使用独立阈值。连接长度严格超过阈值时以对应 `<family>_connection_length_gate` 进入 `ignored.jsonl`，等于阈值及长度 0 通过。关闭该开关不影响其余三条门控。Eval、MediaPipe 和 Eos low-score candidate 不应用 runtime presence/边界/连接长度门控。
+当前 Train 质量配置：handedness review threshold 为 `0.8`；RTMPose/HaMeR Train runtime 的 `P(has_hand)` 阈值为 `0.5`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝；连接对长度门控默认开启，并按 `near/mid/far` 使用独立阈值。连接长度严格超过阈值时以对应 `<family>_connection_length_gate` 进入 `ignored.jsonl`，等于阈值及长度 0 通过。关闭该开关不影响其余三条门控。Eval、MediaPipe 和 Eos low-score candidate 不应用 runtime presence/边界/连接长度门控。
 
 发布时已新增四门控互斥统计：每个 `source_publish_report.json` 记录当前 capture source/variant 的四项淘汰数，`dataset_manifest.json` 记录 dataset 总计和每个 `capture_source_id` 合计；多门控同时失败时按既有 `presence → boundary → connection length → handedness/其他` 优先级只归因一次。
 
@@ -30,7 +36,7 @@ RTMPose Train 几何补救现已默认开启：RTMPose 点触发边界或已开�
 
 服务器已部署 Python 3.11 `venv` 与 `tflite-runtime 2.14.0`。真实只读 ROI 冒烟输出 21 个有限坐标；端到端补救冒烟中，伪造 RTMPose 行同时触发边界和两条连接长度错误，TFLite 复检错误清零，HCF presence/handedness 保持不变，最终以 1 条 positive、0 条 ignored 完成分流。
 
-0814 阈值复核只读使用 9,279 条 near/mid 人工 Gold ROI：9,237 hand、42 no_hand。Train presence `0.025` 保留全部 hand，并拒绝 41/42 no_hand（97.619%）；提高到 `0.5` 会漏掉 4 条 hand，因此保持 `0.025`。负样本预审仍使用独立 `0.5` 并由人工兜底。handedness `0.8` 覆盖 9,099/9,237（98.506%），覆盖内准确率为 99.275%，较 0.7 减少 21 个覆盖内错误；逐来源覆盖率最低为 97.027%。
+历史 0814 阈值复核只读使用相同 9,279 条 near/mid 人工 Gold ROI，结论记录于归档报告；自 2026-08-18 起不再作为默认 HCF 的门限依据。
 
 连接长度门控已针对 Eos-2.1 ROI 正式重算：程序在 7 个指定 `FullEnhanceVal0801` Gold 来源的原图上重新检测，把 9,237 条人工 image-space 关键点投影到新 crop，其中 near 2,345、mid 6,892。阈值继续采用各连接 `ceil(P99.95 × 1.05)`；Gold 保留 9,203/9,237（99.632%）。同一 ROI 上的 RTMPose CPU 回放命中 454 条，其中 243 条平均点误差至少 10 px。far 无正式 2.1 Gold，仅保留距离硬门控后不可达的历史阈值。可复现工具位于 `tools/analyze_eos_hcf_recalibration.py`，完整结果位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。
 
@@ -101,9 +107,9 @@ Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`�
 - `FullEnhance0801/eos_1.0-gate` 的 95 个发布来源完整保留；
 - `FullEnhanceVal0808/eos_1.0-gate_r2` 的 CVAT 导入、发布和 dataset manifest 均已完成；
 - 统一重标定工具对 7 个指定 Gold 来源只读运行；Eos-2.1 重建 ROI 的 near/mid 报告与 YAML 的 40 个新阈值一致，far 的 20 个历史值被明确标为无 2.1 正式样本；
-- 三个 ONNX 模型的设备结论已同步；Eos-2.1 Palm CPU/GPU 为 `199.3/573.2 images/s`，HCF0814 为 `333.9/8478.6 images/s`，RTMPose 沿用上一轮精度回放并固定 CPU；
-- HCF0814 的 ONNX full checker、142 节点、110 个 initializer、1,515,612 个参数元素及输入输出契约通过；9,279 条人工 Gold 的 CPU/GPU argmax 与 presence 0.025/0.5、handedness 0.8 门控均 0 次跨设备变化；
-- HCF0814 在 9,237 个 Eos-2.1 重建 positive ROI 上保持 presence 0.025 全保留；采用的 handedness 0.8 在正式 Gold 上覆盖 98.506%、覆盖内准确率 99.275%；
+- 三个 ONNX 模型的设备结论已同步；Eos-2.1 Palm CPU/GPU 为 `199.3/573.2 images/s`，HCF v1 MobileNetV3-Large 为 `207.4/4265.5 images/s`，RTMPose 沿用上一轮精度回放并固定 CPU；
+- HCF v1 MobileNetV3-Large 的 ONNX full checker、162 节点、130 个 initializer、4,194,668 个参数元素及输入输出契约通过；9,279 条人工 Gold 的 CPU/GPU argmax 与 presence `0.5`、handedness `0.8` 门控均 0 次跨设备变化；
+- HCF v1 MobileNetV3-Large 在正式 Gold 上以 presence `0.5` 保留全部 9,237 个 hand 并拒绝全部 42 个 no_hand；handedness `0.8` 覆盖 98.528%、覆盖内准确率 99.451%；
 - Eos-2.1 ONNX full checker、Anchor/score/NMS/max/ROI、历史 far 兼容性与 CPU/GPU 解码一致性回放通过；score `0.25` 在 near/mid Gold 上关联 9,237/9,237 个 hand；
 - 隔离临时仓库真实流水线验证 provider 为 Palm CUDA / RTMPose CPU / HCF CUDA，10 条 runtime ROI 使用 batch 64；负样本 HCF 预审、进度条和两级门控统计字段均通过，临时目录已删除；
 - `requirements.txt` 已从 CPU Runtime 改为 `onnxruntime-gpu==1.18.0`，并固定兼容的 NumPy `<2`、OpenCV `<4.11`；服务器 `anfab` 已更新且 `pip check` 通过。TFLite 继续使用独立的 `requirements-mediapipe-tflite.txt` 和 Python 3.11 环境。

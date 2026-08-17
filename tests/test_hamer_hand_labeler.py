@@ -36,7 +36,7 @@ def _config(*, rescue_enabled: bool = False) -> dict:
         "hamer": {"hand_classifier_model_onnx_path": "unused.onnx"},
         "quality": {
             "handedness_review_threshold": 0.8,
-            "rtmpose_train_hand_presence_threshold": 0.025,
+            "rtmpose_train_hand_presence_threshold": 0.5,
             "rtmpose_train_boundary_coordinate_reject_threshold": 2,
             "rtmpose_train_connection_length_gate_enabled": True,
             "rtmpose_train_connection_length_thresholds_px": _thresholds(),
@@ -69,7 +69,7 @@ def _manifest(crop_path: Path, *, candidate: bool = False) -> dict:
 class _Classifier:
     provider = "FakeExecutionProvider"
     fallback_reason = None
-    model_id = "hand-classifier-handedness-handpresence-0814"
+    model_id = "hand-classifier-v1-mobilenet_v3_large"
     result = {
         "handedness": {"label": "Right", "score": 0.93},
         "hand_presence": {"present": True, "score": 0.98},
@@ -87,7 +87,7 @@ class _HaMeRClient:
     device = "cuda"
     rescale = 0.75
     repository_path = Path("/hamer")
-    repository_commit = "603105f586337aa704483c4525f5934047f02f2b"
+    repository_commit = "b29f1b397ed5ef36eba8f9498dd719949615fe09"
     checkpoint_path = Path("/hamer/hamer.ckpt")
     points = [[60.0 + index, 70.0 + index] for index in range(21)]
     calls = 0

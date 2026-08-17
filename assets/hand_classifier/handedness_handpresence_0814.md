@@ -1,10 +1,12 @@
 # Hand Classifier 0814 接入与校准
 
-## 结论
+## 结论（历史）
 
-`handedness-handpresence-0814` 已通过 ONNX 接口、人工 Gold 回放、Eos-2.1 重建 ROI 回放和设备一致性检查，可作为 HLMF 默认 HCF。模型路径为 `models/hand_classifier/handedness-handpresence-0814/model.onnx`，模型 ID 为 `hand-classifier-handedness-handpresence-0814`。
+本报告保留 0814 模型当时的接入与校准结果。自 2026-08-18 起，默认 HCF 已由 `v1-mobilenet_v3_large` 取代；当前路径、阈值和设备结论见 `assets/hand_classifier/v1_mobilenet_v3_large.md`，不得从本报告继承。
 
-RTMPose Train presence 阈值保持 `0.025`；负候选人工预审仍保持独立 `0.5`；handedness review 阈值从 `0.7` 调整为 `0.8`。HCF 继续使用 `auto`（CUDA 优先、CPU fallback），batch 保持 64。
+`handedness-handpresence-0814` 当时已通过 ONNX 接口、人工 Gold 回放、Eos-2.1 重建 ROI 回放和设备一致性检查，并曾作为 HLMF 默认 HCF。模型路径为 `models/hand_classifier/handedness-handpresence-0814/model.onnx`，模型 ID 为 `hand-classifier-handedness-handpresence-0814`。
+
+0814 当时的 RTMPose Train presence 阈值为 `0.025`；负候选人工预审独立为 `0.5`；handedness review 阈值为 `0.8`。这些都是 0814 专属历史结论。
 
 ## 模型与自带指标
 

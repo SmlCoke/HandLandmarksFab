@@ -1,8 +1,8 @@
-# Iris Eval 就绪度评估（2026-08-16）
+# Iris Eval 就绪度评估（2026-08-18）
 
 ## 结论
 
-当前 7 个已发布来源、9,279 条人工 Gold 是 Eos-2.1/HCF0814 配置校准及后续 Iris near/mid 评估的固定标准集。它覆盖 val/test、near/mid、complex/white、bright/dark 和 peak/soar，但人员与会话仍集中在 s01，不能据此宣称跨人员、跨会话或 far 泛化。
+当前 7 个已发布来源、9,279 条人工 Gold 是 Eos-2.1/HCF 配置校准及后续 Iris near/mid 评估的固定标准集。它覆盖 val/test、near/mid、complex/white、bright/dark 和 peak/soar，但人员与会话仍集中在 s01，不能据此宣称跨人员、跨会话或 far 泛化。
 
 这些标签由历史 Eos-2.0 变体发布；Eos-2.1 的 Palm、ROI 与连接阈值校准从原图重新检测并投影人工 image-space 点，没有把旧 crop 几何冒充新模型输出。Eos-1.0 只能单独作为 legacy/stress 回放，不能与 Eos-2.1 合并为 headline 指标。
 
@@ -23,7 +23,7 @@ Val 共 6,937 条，Test 共 2,342 条。训练和模型选择只使用 Val 指�
 
 ## 独立性边界
 
-HCF0814 的 train/validation split 已覆盖上述全部 7 个来源，其中 5 个进入 train、2 个进入 validation。因此这批 Gold 可以校准 HLMF 的 HCF 门控，却不是 HCF0814 的独立盲测，相关结果可能乐观。下一次录制应优先增加未参与训练的新人员/新会话、white-dark near/mid，并冻结为新的 HCF/Iris blind test。
+当前 v1 MobileNetV3-Large HCF 的 train/validation split 已覆盖上述全部 7 个来源，其中 5 个进入 train、2 个进入 validation。因此这批 Gold 可以校准 HLMF 的 HCF 门控，却不是该 HCF 的独立盲测，相关结果可能乐观。下一次录制应优先增加未参与训练的新人员/新会话、white-dark near/mid，并冻结为新的 HCF/Iris blind test。
 
 Eos-2.1 在这批 near/mid Gold 上完成 Palm 与 ROI 回放；历史 far 兼容回放召回不足，当前能力契约继续拒绝 far。不得用删除 far 原图、复用 Eos-1.0 far 结果或只报告已检出 ROI 的方式绕过 Palm 能力边界。
 

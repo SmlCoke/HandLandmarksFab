@@ -146,8 +146,8 @@ hamer_geometry_rescue (optional)
 - `label_origin=rtmpose`；
 - `annotation_style=rtmpose_m_hand5_v1`；
 - `teacher_model_id=rtmpose-m_hand5_256x256_onnx`；
-- `handedness_teacher_model_id=hand-classifier-handedness-handpresence-0814`；
-- `hand_presence_teacher_model_id=hand-classifier-handedness-handpresence-0814`；
+- `handedness_teacher_model_id=hand-classifier-v1-mobilenet_v3_large`；
+- `hand_presence_teacher_model_id=hand-classifier-v1-mobilenet_v3_large`；
 - `handedness.label=Left|Right`，score 为 HCF 胜出类 softmax 概率；
 - `hand_presence.present` 为 HCF presence argmax（0 no_hand、1 has_hand）；
 - `hand_presence.score` 始终为 `P(has_hand)`，不是胜出类别置信度。
@@ -159,8 +159,8 @@ HCF runtime 输入为 `[N,1,256,256]` float32；灰度除以 255 后按 `mean=0.
 - `source=hamer_official_cvpr24`；
 - 21 点顺序与 RTMPose/MediaPipe 相同，采用 OpenPose/COCO-wholebody hand order；
 - `label_origin=hamer`、`annotation_style=hamer_openpose21_v1`；
-- `teacher_model_id=hamer-cvpr24-official-603105f`；
-- `handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 来自 `hamer.hand_classifier_model_onnx_path`，当前为 `hand-classifier-handedness-handpresence-0814`；
+- `teacher_model_id=hamer-cvpr24-official-b29f1b3`；
+- `handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 来自 `hamer.hand_classifier_model_onnx_path`，当前为 `hand-classifier-v1-mobilenet_v3_large`；
 - HCF `Left|Right` 直接决定 HaMeR 左右手输入翻转，HaMeR 内部 ViTPose/亮度 handedness fallback 不参与 HLMF；
 - `hamer_inference` 记录 `model_id/device/rescale/flipped/bbox_size/clipped_coordinate_values/handedness_source`；
 - HaMeR 2D 输出映射回原 `256×256` ROI 后裁到 `[0,255]`，归一化仍为 `crop_px/255`。
@@ -222,7 +222,7 @@ HaMeR runtime 在同一报告记录 `execution_provider=cuda|cpu`、HCF ONNX pro
 
 `palm_detection_report.json.onnx_runtime.model_contract` 记录 Eos model ID/相对路径、输入名称/形状/类型、四个输出名称/形状、预处理、layout、feature levels、anchor 总数及 score/NMS/max/negative 阈值。运行前模型输入输出必须与配置完全匹配；不匹配时明确终止，不产生 Palm manifest。
 
-`onnx_runtime.provider` 及 `onnx_runtime.model_providers.{palm,rtmpose,hand_classifier}` 只接受 `auto|cuda|cpu`；`auto` 为 CUDA 优先并允许 CPU fallback，`cuda` 在 CUDA provider 未激活时失败，`cpu` 固定 CPU。`onnx_runtime.batch_size` 必须是正整数。当前 HCF 模型路径为 `models/hand_classifier/handedness-handpresence-0814/model.onnx`。HCF 模型 ID 固定由该路径的父目录名生成；版本目录必须是安全名称，当前得到 `hand-classifier-handedness-handpresence-0814`，防止模型路径与标签 provenance 漂移。
+`onnx_runtime.provider` 及 `onnx_runtime.model_providers.{palm,rtmpose,hand_classifier}` 只接受 `auto|cuda|cpu`；`auto` 为 CUDA 优先并允许 CPU fallback，`cuda` 在 CUDA provider 未激活时失败，`cpu` 固定 CPU。`onnx_runtime.batch_size` 必须是正整数。当前 HCF 模型路径为 `models/hand_classifier/v1-mobilenet_v3_large/model.onnx`。HCF 模型 ID 固定由该路径的父目录名生成；版本目录必须是安全名称，当前得到 `hand-classifier-v1-mobilenet_v3_large`，防止模型路径与标签 provenance 漂移。
 
 ## 7. Train 发布分流
 
@@ -235,7 +235,7 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 - `quality.rtmpose_train_connection_length_gate_enabled` 为布尔开关，缺省及正式配置均为 `true`。开启时按 capture source 距离读取 `quality.rtmpose_train_connection_length_thresholds_px.<distance>`；任一连接长度严格超过阈值时，quality error 为 `<family>_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，`ignore_reason=<family>_connection_length_gate`。21 点无效时 error 为 `<family>_connection_length_landmarks_invalid`。等于阈值和长度为 0 均通过；关闭时不解析距离或阈值。`<family>` 为 `rtmpose|hamer`。
 - `quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 缺省及正式配置均为 `true`。开启时，边界或已开启的连接长度门控失败会触发 TFLite 重预测；两项几何复检通过才替换关键点。关闭时不读取 `mediapipe_tflite` 配置、模型或独立环境。它不是新的门控，不改变既有 quality error 与 `ignore_reason`。
 
-当前 HCF0814 的 handedness review 阈值为 `0.8`，RTMPose/HaMeR Train presence 阈值为 `0.025`，边界阈值为 2；0–1 个边界值通过。near/mid 的 20 对连接阈值绑定 Eos-2.1 ROI 几何与 7 个最新人工 Gold 来源；far 只保留距离能力门控后不可达的历史值。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 主链路或 Eos negative candidate；成功补救行仍属于原 runtime family，继续应用三条 runtime 门控。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。`negative_review.hand_presence_threshold=0.5` 是独立的候选预审 argmax 分界，不等于 Train presence 门控阈值。本轮没有新 HaMeR 人工 Eval，四项阈值按任务要求保持不变，不构成 HaMeR 专属正式重校准结论。
+当前 HCF v1 MobileNetV3-Large 的 handedness review 阈值为 `0.8`，RTMPose/HaMeR Train presence 阈值为 `0.5`，边界阈值为 2；0–1 个边界值通过。near/mid 的 20 对连接阈值绑定 Eos-2.1 ROI 几何与 7 个最新人工 Gold 来源；far 只保留距离能力门控后不可达的历史值。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 主链路或 Eos negative candidate；成功补救行仍属于原 runtime family，继续应用三条 runtime 门控。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。`negative_review.hand_presence_threshold=0.5` 是独立校准的候选预审分界；它与 Train presence 当前数值相同，但配置和用途不得合并。HCF 不改变几何，因此本轮不重算边界/连接长度；没有新 HaMeR 人工 Eval，geometry 参数仍不构成 HaMeR 专属正式重校准结论。
 
 双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
 
@@ -321,7 +321,7 @@ GoldSource/HardSamples/<hard_dataset_id>/published/hard_labels.jsonl
 GoldSource/HardSamples/<hard_dataset_id>/published/manifest.json
 ```
 
-`negative_review.hand_presence_threshold` 必须是 `[0,1]` 内有限数，缺省及正式配置为 `0.5`。预审核从 `hand_classifier.model_onnx_path` 加载与 RTMPose runtime 相同的当前 HCF；当前模型 ID 为 `hand-classifier-handedness-handpresence-0814`。`candidate_manifest.jsonl` 仅含 `P(has_hand)<threshold` 的行；`precheck_excluded.jsonl` 保存其余行。两者的 `negative_review_precheck` 包含 `hand_presence_score`、`threshold`、`selected_for_human_review` 和实际 `model_id`，`README.json` 也记录该模型 ID。人工发布前仍必须复核所选图片。
+`negative_review.hand_presence_threshold` 必须是 `[0,1]` 内有限数，缺省及正式配置为 `0.5`。预审核从 `hand_classifier.model_onnx_path` 加载与 RTMPose runtime 相同的当前 HCF；当前模型 ID 为 `hand-classifier-v1-mobilenet_v3_large`。`candidate_manifest.jsonl` 仅含 `P(has_hand)<threshold` 的行；`precheck_excluded.jsonl` 保存其余行。两者的 `negative_review_precheck` 包含 `hand_presence_score`、`threshold`、`selected_for_human_review` 和实际 `model_id`，`README.json` 也记录该模型 ID。人工发布前仍必须复核所选图片。
 
 困难样本必须经过 `prepare-hard-review → CVAT 1.1 精修 → import-hard-review → publish-hard-review`。导入要求请求与 XML 一一覆盖且无 blocking error；`ignore_for_training` 行不发布，其余人工 positive/negative 均可发布。`hard_dataset_id` 是通用数据身份，不得包含训练 run/snapshot/round 语义；同一训练流程的跨轮 ROI 去重由 HLML snapshot ledger 保证。
 

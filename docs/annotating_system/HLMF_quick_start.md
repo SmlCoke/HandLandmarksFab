@@ -25,9 +25,9 @@ make test
 mkdir -p models/mediapipe/hand_landmarker_tflite
 # 将 Eos-2.1 部署到 models/palm_detector/eos-2.1/model_384x224_opt.onnx。
 # 将 hand_landmark_full.tflite 部署到上述目录。
-# 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0814/model.onnx。
+# 将双头 HCF 部署到 models/hand_classifier/v1-mobilenet_v3_large/model.onnx。
 # HaMeR 复用 /root/autodl-tmp/HLMF-Enhance/hamer/.hamer 和现有模型资产；
-# 外部 HCF 默认位于 HLMF-Enhance/hand_classifier/handedness-handpresence-0814/model.onnx。
+# 外部 HCF 默认位于 HLMF-Enhance/hand_classifier/v1-mobilenet_v3_large/model.onnx。
 ```
 
 输出：代码和环境检查结果。默认链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue。Eos-2.1 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，只支持 near/mid，默认 proposal variant 为 `eos-2.1`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
@@ -50,7 +50,7 @@ make palm-distance-check \
 
 ## 3. Train 自动标注
 
-输入：已注册 train 来源、Eos、所选 RTMPose/HaMeR 教师、对应双头 HCF 和 TFLite 补救资产；当前 HCF0814 的 handedness/presence 门控阈值分别为 `0.8/0.025`，连接长度门控及 `rtmpose_train_mediapipe_tflite_rescue_enabled` 均默认开启。分别设为 `false` 可独立关闭连接长度门控或补救。
+输入：已注册 train 来源、Eos、所选 RTMPose/HaMeR 教师、对应双头 HCF 和 TFLite 补救资产；当前 HCF v1 MobileNetV3-Large 的 handedness/presence 门控阈值分别为 `0.8/0.5`，negative-review 阈值独立为 `0.5`，连接长度门控及 `rtmpose_train_mediapipe_tflite_rescue_enabled` 均默认开启。分别设为 `false` 可独立关闭连接长度门控或补救。
 
 ```bash
 make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
