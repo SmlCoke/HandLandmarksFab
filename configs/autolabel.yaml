@@ -88,6 +88,16 @@ rtmpose:
   model_onnx_path: models/rtmpose/rtmpose-m_hand5_256x256.onnx
   simcc_split_ratio: 2.0
 
+hamer:
+  repository_path: "${HLMF_HAMER_REPOSITORY:-/root/autodl-tmp/HLMF-Enhance/hamer}"
+  repository_commit: 603105f586337aa704483c4525f5934047f02f2b
+  python_executable: "${HLMF_HAMER_PYTHON:-/root/autodl-tmp/HLMF-Enhance/hamer/.hamer/bin/python}"
+  checkpoint_path: "${HLMF_HAMER_CHECKPOINT:-/root/autodl-tmp/HLMF-Enhance/hamer/_DATA/hamer_ckpts/checkpoints/hamer.ckpt}"
+  model_id: hamer-cvpr24-official-603105f
+  rescale: 0.75
+  device: cuda
+  hand_classifier_model_onnx_path: "${HLMF_HAMER_HAND_CLASSIFIER_MODEL:-/root/autodl-tmp/HLMF-Enhance/hand_classifier/handedness-handpresence-0814/model.onnx}"
+
 mediapipe_tflite:
   model_asset_path: models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
   python_executable: "${HLMF_MEDIAPIPE_TFLITE_PYTHON:-/root/miniconda3/envs/hlmf-mp-tflite/bin/python}"
@@ -103,11 +113,12 @@ quality:
   # 0814 Gold replay elbow: 98.506% coverage at 99.275% in-coverage accuracy.
   handedness_review_threshold: 0.8
   # P(has_hand); revalidated on 9,279 human-reviewed near/mid Gold ROIs for 0814.
+  # HaMeR uses the same external HCF and therefore the same unchanged threshold.
   rtmpose_train_hand_presence_threshold: 0.025
   rtmpose_train_boundary_coordinate_reject_threshold: 2
-  # Retry RTMPose Train rows that fail a geometry gate with the landmark-only TFLite model.
+  # Retry RTMPose/HaMeR Train rows that fail a geometry gate with the landmark-only TFLite model.
   rtmpose_train_mediapipe_tflite_rescue_enabled: true
-  # Strictly greater than one of these crop-pixel limits rejects an RTMPose Train runtime row.
+  # Strictly greater than one of these crop-pixel limits rejects an RTMPose/HaMeR Train runtime row.
   rtmpose_train_connection_length_gate_enabled: true
   rtmpose_train_connection_length_thresholds_px:
     near:

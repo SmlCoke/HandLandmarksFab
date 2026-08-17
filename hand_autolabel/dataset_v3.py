@@ -980,6 +980,17 @@ def apply_label_provenance(
                 "mediapipe_tflite_rescue_v1",
                 "mediapipe-hand-landmark-full-tflite",
             )
+        if source == "hamer_official_cvpr24":
+            model_id = str(
+                source_row.get("teacher_model_id") or "hamer-official-cvpr24"
+            )
+            return "hamer", "hamer_openpose21_v1", model_id
+        if source == "mediapipe_hand_landmarker_full_tflite_hamer_rescue":
+            return (
+                "mediapipe",
+                "mediapipe_tflite_rescue_v1",
+                "mediapipe-hand-landmark-full-tflite",
+            )
         if source == "eos_negative_candidate_unassessed":
             return "unresolved", "unlabeled_v1", None
         return "mediapipe", "mediapipe_v1", "mediapipe_hand_landmarker_task"

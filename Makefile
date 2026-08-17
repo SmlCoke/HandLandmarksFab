@@ -39,8 +39,8 @@ help:
 	@echo Configs: autolabel.yaml=automatic labels, review.yaml=Hand CVAT, datasets.yaml=publication, cvat_label.json=CVAT schema
 	@echo   make source-check DATASET_SCOPE=pretrain/eval/gold DATASET_ID=... CAPTURE_SOURCE_ID=... PROPOSAL_VARIANT=eos-2.1
 	@echo   make palm-distance-check CAPTURE_SOURCE_ID=...  Check current Palm model distance support
-	@echo   make train-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
-	@echo   make eval-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
+	@echo   make train-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx/hamer] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
+	@echo   make eval-autolabel ... [HAND_LANDMARK_BACKEND=mediapipe_tasks/rtmpose_onnx/hamer] [ROI_VISUALIZATION=true/false] [ORIGINAL_VISUALIZATION=true/false]
 	@echo   make gold-autolabel DATASET_SCOPE=gold ...  Auto-label a new recorded Gold Train source before CVAT review
 	@echo   make autolabel-visualize-roi ...  Render existing draft on Hand ROI images
 	@echo   make autolabel-visualize-original ... [ORIGINAL_VIDEO=true/false]

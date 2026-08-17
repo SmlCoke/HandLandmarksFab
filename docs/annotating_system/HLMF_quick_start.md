@@ -2,7 +2,7 @@
 
 ## 1. 环境检查
 
-输入：仓库、现有 `anfab` 环境、`models/palm_detector/eos-2.1/model_384x224_opt.onnx` 和 Hand landmark ONNX；RTMPose 模式还需要双头 HCF，以及默认开启的 MediaPipe TFLite 补救模型和独立环境。
+输入：仓库、现有 `anfab` 环境、`models/palm_detector/eos-2.1/model_384x224_opt.onnx` 和 Hand landmark 资产；RTMPose 模式还需要双头 HCF，HaMeR 模式需要 HLMF-Enhance 的 `.hamer`/checkpoint/MANO/HCF；两种 runtime 模式都使用默认开启的 MediaPipe TFLite 补救模型和独立环境。
 
 ```bash
 cd /root/HandLandmarksFab
@@ -26,6 +26,8 @@ mkdir -p models/mediapipe/hand_landmarker_tflite
 # 将 Eos-2.1 部署到 models/palm_detector/eos-2.1/model_384x224_opt.onnx。
 # 将 hand_landmark_full.tflite 部署到上述目录。
 # 将双头 HCF 部署到 models/hand_classifier/handedness-handpresence-0814/model.onnx。
+# HaMeR 复用 /root/autodl-tmp/HLMF-Enhance/hamer/.hamer 和现有模型资产；
+# 外部 HCF 默认位于 HLMF-Enhance/hand_classifier/handedness-handpresence-0814/model.onnx。
 ```
 
 输出：代码和环境检查结果。默认链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue。Eos-2.1 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，只支持 near/mid，默认 proposal variant 为 `eos-2.1`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
@@ -48,16 +50,21 @@ make palm-distance-check \
 
 ## 3. Train 自动标注
 
-输入：已注册 train 来源、Eos、RTMPose、双头 HCF 和 TFLite 补救资产；当前 HCF0814 的 handedness/presence 门控阈值分别为 `0.8/0.025`，连接长度门控及 `rtmpose_train_mediapipe_tflite_rescue_enabled` 均默认开启。分别设为 `false` 可独立关闭连接长度门控或补救。
+输入：已注册 train 来源、Eos、所选 RTMPose/HaMeR 教师、对应双头 HCF 和 TFLite 补救资产；当前 HCF0814 的 handedness/presence 门控阈值分别为 `0.8/0.025`，连接长度门控及 `rtmpose_train_mediapipe_tflite_rescue_enabled` 均默认开启。分别设为 `false` 可独立关闭连接长度门控或补救。
 
 ```bash
 make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
   PROPOSAL_VARIANT=eos-2.1 HAND_LANDMARK_BACKEND=rtmpose_onnx
+
+make train-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
+  CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
+  PROPOSAL_VARIANT=eos-2.1-hamer HAND_LANDMARK_BACKEND=hamer
 ```
 
-输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 与可选 TFLite 补救记录的 draft、三类发布 JSONL 和 QC；source report 记录四条门控互斥淘汰数，dataset manifest 记录 dataset 总计及各 capture source 明细。补救关闭时保持原 RTMPose 分流，连接长度门控关闭时其余三条门控仍正常工作。
+输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含所选 landmark provenance、HCF presence/handedness 与可选 TFLite 补救记录的 draft、三类发布 JSONL 和 QC；source report 记录四条门控互斥淘汰数，dataset manifest 记录 dataset 总计及各 capture source 明细。补救关闭时保持原教师分流，连接长度门控关闭时其余三条门控仍正常工作。
 
 批量处理全部含 `images/` 的 train 来源；无需预先运行 `source-check`：
 
@@ -78,6 +85,12 @@ make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
   DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
   CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
   PROPOSAL_VARIANT=eos-2.1 HAND_LANDMARK_BACKEND=rtmpose_onnx
+
+# HaMeR Eval 使用新 variant，后续仍必须 CVAT 复核：
+make eval-autolabel HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+  DATASET_SCOPE=eval DATASET_ID=FullEnhanceVal0801 \
+  CAPTURE_SOURCE_ID=complex-mid-bright-random-val-s01-peak \
+  PROPOSAL_VARIANT=eos-2.1-hamer HAND_LANDMARK_BACKEND=hamer
 ```
 
 输出：Palm、单通道 `uint8 256×256` 无损 PNG ROI、含 HCF presence/handedness 的 draft 和 QC；Train presence 阈值不作用于 Eval，正式评估标签仍需 CVAT 复核。

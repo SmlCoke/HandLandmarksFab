@@ -79,11 +79,17 @@ def _quality_gate_rejection_counts(
     counts = _empty_quality_gate_counts()
     for row in ignored_rows:
         reason = str(row.get("ignore_reason") or "")
-        if reason == "rtmpose_hand_presence_gate":
+        if reason in {"rtmpose_hand_presence_gate", "hamer_hand_presence_gate"}:
             counts["hand_presence"] += 1
-        elif reason == "rtmpose_boundary_coordinate_gate":
+        elif reason in {
+            "rtmpose_boundary_coordinate_gate",
+            "hamer_boundary_coordinate_gate",
+        }:
             counts["boundary_coordinate"] += 1
-        elif reason == "rtmpose_connection_length_gate":
+        elif reason in {
+            "rtmpose_connection_length_gate",
+            "hamer_connection_length_gate",
+        }:
             counts["connection_length"] += 1
         elif reason == "automatic_positive_failed_quality_gate" and any(
             str(warning).startswith("low_handedness_score:")
@@ -133,7 +139,7 @@ def _parser() -> argparse.ArgumentParser:
         }:
             command.add_argument(
                 "--hand-landmark-backend",
-                choices=("mediapipe_tasks", "rtmpose_onnx"),
+                choices=("mediapipe_tasks", "rtmpose_onnx", "hamer"),
                 default=None,
                 help="Override hand_landmark.backend for this run.",
             )
@@ -559,7 +565,21 @@ def _run_mediapipe(
         "total": stats["total"],
         "positive": stats["positive"],
         "teacher_abstain": stats["negative"],
-        "label_origin": "mediapipe" if backend == "mediapipe_tasks" else "rtmpose",
+        "label_origin": {
+            "mediapipe_tasks": "mediapipe",
+            "rtmpose_onnx": "rtmpose",
+            "hamer": "hamer",
+        }[backend],
+        "hamer": {
+            "model_id": backend_info.get("hamer_model_id"),
+            "repository_path": backend_info.get("hamer_repository_path"),
+            "repository_commit": backend_info.get("hamer_repository_commit"),
+            "checkpoint_path": backend_info.get("hamer_checkpoint_path"),
+            "device": backend_info.get("hamer_device"),
+            "rescale": backend_info.get("hamer_rescale"),
+        }
+        if backend == "hamer"
+        else None,
         "roi_visualization": roi_visualization_report,
         "original_image_visualization": original_visualization_report,
     }
@@ -591,7 +611,7 @@ def _run_roi_visualization(
 
     visualization_rows = rows
     excluded_non_runtime = 0
-    if hand_landmark_backend == "rtmpose_onnx":
+    if hand_landmark_backend in {"rtmpose_onnx", "hamer"}:
         visualization_rows = [
             row for row in rows if str(row.get("proposal_kind")) == "runtime"
         ]
@@ -647,11 +667,19 @@ def _run_existing_roi_visualization(
         backend_report = json.loads(backend_report_path.read_text(encoding="utf-8"))
         backend = str(backend_report.get("hand_landmark_backend") or "")
     if not backend:
-        backend = (
-            "rtmpose_onnx"
-            if any(str(row.get("source")) == "rtmpose_m_hand5_onnx" for row in rows)
-            else "mediapipe_tasks"
-        )
+        sources = {str(row.get("source")) for row in rows}
+        if sources & {
+            "hamer_official_cvpr24",
+            "mediapipe_hand_landmarker_full_tflite_hamer_rescue",
+        }:
+            backend = "hamer"
+        elif sources & {
+            "rtmpose_m_hand5_onnx",
+            "mediapipe_hand_landmarker_full_tflite_rtmpose_rescue",
+        }:
+            backend = "rtmpose_onnx"
+        else:
+            backend = "mediapipe_tasks"
     return _run_roi_visualization(
         args,
         cfg,
@@ -914,27 +942,55 @@ def _partition_labels(
             "warnings": quality_warnings,
             "errors": quality_errors,
         }
-        presence_gate_failed = any(
-            str(error).startswith("rtmpose_hand_presence_score_")
-            for error in quality_errors
+        presence_gate_family = next(
+            (
+                family
+                for family in ("rtmpose", "hamer")
+                if any(
+                    str(error).startswith(f"{family}_hand_presence_score_")
+                    for error in quality_errors
+                )
+            ),
+            None,
         )
-        connection_gate_failed = any(
-            str(error).startswith("rtmpose_connection_length_")
-            for error in quality_errors
+        connection_gate_family = next(
+            (
+                family
+                for family in ("rtmpose", "hamer")
+                if any(
+                    str(error).startswith(f"{family}_connection_length_")
+                    for error in quality_errors
+                )
+            ),
+            None,
         )
-        if split == "train" and presence_gate_failed:
+        boundary_gate_family = next(
+            (
+                family
+                for family in ("rtmpose", "hamer")
+                if any(
+                    str(error).startswith(
+                        f"{family}_boundary_coordinate_values:"
+                    )
+                    for error in quality_errors
+                )
+            ),
+            None,
+        )
+        if split == "train" and presence_gate_family is not None:
             row["train_eligible"] = False
-            row["ignore_reason"] = "rtmpose_hand_presence_gate"
+            row["ignore_reason"] = f"{presence_gate_family}_hand_presence_gate"
             ignored.append(row)
         elif split == "train" and present and (quality_errors or quality_needs_review):
             row["train_eligible"] = False
-            if any(
-                str(error).startswith("rtmpose_boundary_coordinate_values:")
-                for error in quality_errors
-            ):
-                row["ignore_reason"] = "rtmpose_boundary_coordinate_gate"
-            elif connection_gate_failed:
-                row["ignore_reason"] = "rtmpose_connection_length_gate"
+            if boundary_gate_family is not None:
+                row["ignore_reason"] = (
+                    f"{boundary_gate_family}_boundary_coordinate_gate"
+                )
+            elif connection_gate_family is not None:
+                row["ignore_reason"] = (
+                    f"{connection_gate_family}_connection_length_gate"
+                )
             else:
                 row["ignore_reason"] = "automatic_positive_failed_quality_gate"
             ignored.append(row)

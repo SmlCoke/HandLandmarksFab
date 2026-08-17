@@ -23,6 +23,10 @@ RTMPOSE_TRAIN_RUNTIME_SOURCES = {
     "rtmpose_m_hand5_onnx",
     "mediapipe_hand_landmarker_full_tflite_rtmpose_rescue",
 }
+HAMER_TRAIN_RUNTIME_SOURCES = {
+    "hamer_official_cvpr24",
+    "mediapipe_hand_landmarker_full_tflite_hamer_rescue",
+}
 
 
 def validate_image_file(path: Path, expected_width: int, expected_height: int) -> Dict[str, Any]:
@@ -102,11 +106,25 @@ def _points_out_of_bounds(points: Iterable[Mapping[str, Any]], width: int, heigh
     return count
 
 
-def _is_rtmpose_train_runtime(row: Mapping[str, Any]) -> bool:
+def _quality_gated_train_runtime_family(
+    row: Mapping[str, Any],
+) -> str | None:
+    if (
+        str(row.get("split")) != "train"
+        or str(row.get("proposal_kind")) != "runtime"
+    ):
+        return None
+    source = str(row.get("source"))
+    if source in RTMPOSE_TRAIN_RUNTIME_SOURCES:
+        return "rtmpose"
+    if source in HAMER_TRAIN_RUNTIME_SOURCES:
+        return "hamer"
+    return None
+
+
+def _is_quality_gated_train_runtime(row: Mapping[str, Any]) -> bool:
     return (
-        str(row.get("split")) == "train"
-        and str(row.get("proposal_kind")) == "runtime"
-        and str(row.get("source")) in RTMPOSE_TRAIN_RUNTIME_SOURCES
+        _quality_gated_train_runtime_family(row) is not None
     )
 
 
@@ -131,7 +149,7 @@ def validate_rtmpose_boundary_threshold(cfg: Mapping[str, Any]) -> int:
 def _rtmpose_boundary_coordinate_count(
     row: Mapping[str, Any], cfg: Mapping[str, Any]
 ) -> int:
-    if not _is_rtmpose_train_runtime(row):
+    if not _is_quality_gated_train_runtime(row):
         return 0
     width = int(row.get("width", cfg["hand_roi"]["output_width"]))
     height = int(row.get("height", cfg["hand_roi"]["output_height"]))
@@ -256,7 +274,8 @@ def rtmpose_connection_lengths_px(
 def _rtmpose_connection_length_gate_errors(
     row: Mapping[str, Any], cfg: Mapping[str, Any]
 ) -> List[str]:
-    if not _is_rtmpose_train_runtime(row):
+    family = _quality_gated_train_runtime_family(row)
+    if family is None:
         return []
     if not _rtmpose_connection_gate_enabled(cfg):
         return []
@@ -266,23 +285,23 @@ def _rtmpose_connection_length_gate_errors(
         distance = parse_capture_source_id(str(capture_source_id))["distance"]
     except DatasetContractError as exc:
         raise ValueError(
-            "RTMPose connection gate requires a valid capture_source_id"
+            "runtime connection gate requires a valid capture_source_id"
         ) from exc
     if distance not in thresholds:
         raise ValueError(
-            f"RTMPose connection gate has no thresholds for distance {distance!r}"
+            f"runtime connection gate has no thresholds for distance {distance!r}"
         )
     try:
         lengths = rtmpose_connection_lengths_px(row.get("landmarks_crop_px") or [])
     except ValueError:
-        return ["rtmpose_connection_length_landmarks_invalid"]
+        return [f"{family}_connection_length_landmarks_invalid"]
     errors: List[str] = []
     for pair in RTMPOSE_CONNECTION_PAIRS:
         length = lengths[pair]
         threshold = thresholds[distance][pair]
         if length > threshold:
             errors.append(
-                "rtmpose_connection_length_exceeded:"
+                f"{family}_connection_length_exceeded:"
                 f"{pair[0]}-{pair[1]}:{length:.6f}>{threshold:.6f}:"
                 f"distance={distance}"
             )
@@ -292,16 +311,17 @@ def _rtmpose_connection_length_gate_errors(
 def rtmpose_geometry_gate_errors(
     row: Mapping[str, Any], cfg: Mapping[str, Any]
 ) -> List[str]:
-    """Return the unchanged boundary/connection errors for an RTMPose Train row."""
+    """Return boundary/connection errors for a gated Train runtime teacher."""
 
-    if not _is_rtmpose_train_runtime(row):
+    family = _quality_gated_train_runtime_family(row)
+    if family is None:
         return []
     errors: List[str] = []
     boundary_threshold = validate_rtmpose_boundary_threshold(cfg)
     boundary_count = _rtmpose_boundary_coordinate_count(row, cfg)
     if boundary_count >= boundary_threshold:
         errors.append(
-            f"rtmpose_boundary_coordinate_values:{boundary_count}>={boundary_threshold}"
+            f"{family}_boundary_coordinate_values:{boundary_count}>={boundary_threshold}"
         )
     errors.extend(_rtmpose_connection_length_gate_errors(row, cfg))
     return errors
@@ -310,7 +330,8 @@ def rtmpose_geometry_gate_errors(
 def _rtmpose_hand_presence_gate_error(
     row: Mapping[str, Any], cfg: Mapping[str, Any]
 ) -> str | None:
-    if not _is_rtmpose_train_runtime(row):
+    family = _quality_gated_train_runtime_family(row)
+    if family is None:
         return None
     raw_threshold = cfg.get("quality", {}).get(
         "rtmpose_train_hand_presence_threshold", 0.5
@@ -327,16 +348,16 @@ def _rtmpose_hand_presence_gate_error(
         )
     score = (row.get("hand_presence") or {}).get("score")
     if score is None:
-        return "rtmpose_hand_presence_score_missing"
+        return f"{family}_hand_presence_score_missing"
     try:
         score_value = float(score)
     except (TypeError, ValueError):
-        return "rtmpose_hand_presence_score_non_finite"
+        return f"{family}_hand_presence_score_non_finite"
     if not np.isfinite(score_value):
-        return "rtmpose_hand_presence_score_non_finite"
+        return f"{family}_hand_presence_score_non_finite"
     if score_value < threshold:
         return (
-            f"rtmpose_hand_presence_score_below_threshold:"
+            f"{family}_hand_presence_score_below_threshold:"
             f"{score_value:.6f}<{threshold:.6f}"
         )
     return None

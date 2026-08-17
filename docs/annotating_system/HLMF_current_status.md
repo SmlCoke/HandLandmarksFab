@@ -1,8 +1,14 @@
-# HLMF 当前状态（2026-08-16）
+# HLMF 当前状态（2026-08-17）
 
 ## 代码与配置
 
-HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。默认标注链路已切换为 RTMPose-m Hand5 + 双头 Hand Classifier + 四项质量门控 + MediaPipe Hand Landmarker TFLite 几何补救；MediaPipe Tasks 仍可作为单次显式覆盖。
+2026-08-17 已把 HaMeR 接为独立第三种 Hand landmark 后端 `hamer`，默认后端仍为 `rtmpose_onnx`。HaMeR 使用 `/root/autodl-tmp/HLMF-Enhance/hamer/.hamer`、official checkpoint 与 MANO 资产，模型 ID 为 `hamer-cvpr24-official-603105f`、`rescale=0.75`、CUDA；PyTorch/Detectron2 等依赖不进入 `anfab`，因此 `requirements.txt` 未变化。HLMF 主环境先用 `HLMF-Enhance/hand_classifier/handedness-handpresence-0814/model.onnx` 批量产生 presence/handedness，HCF 手性直接决定 HaMeR 左右手翻转；HaMeR 自带 ViTPose/亮度 handedness fallback 不参与发布链路。
+
+HaMeR Train runtime 已接入与 RTMPose 相同的 HCF presence、边界坐标、连接长度、HCF handedness 四项门控和 MediaPipe TFLite 几何补救；错误与 ignore reason 使用 `hamer_*` family 前缀，但 source/dataset report 仍聚合到原四个互斥统计项。HaMeR Eval/Gold 仍必须经过 CVAT 人工复核。本轮没有更新 Eval/HCF，按任务要求保持 `0.025/0.8/2/near-mid connection thresholds` 不变；这些值尚未构成 HaMeR 权重的正式新 Eval 重校准结论。
+
+本次接入没有运行正式 `HAND_DATASET_ROOT` 的自动标注、发布或 manifest 重建，服务器既有 EValSource/PretrainSource/GoldSource/Registry 均保持只读。新增代码测试覆盖 HaMeR worker 协议、HCF 权威手性、21 点/provenance、四门控互斥分流、candidate 跳过和 TFLite rescue；完整单元测试为 79 项。真实 ROI 冒烟以 HaMeR CUDA/HCF CUDA 输出 21 个有限点；隔离完整流水线从正式仓库只读复制 1 张 TIFF，得到 2 个 runtime ROI、10 个 unresolved candidate，2 条 HaMeR 标签均通过四门控并发布，临时数据根已删除。
+
+HLMF 3.0 统一入口为 `scripts/hlmf.py` 和 Makefile；公开配置为 `configs/autolabel.yaml`、`configs/review.yaml`、`configs/datasets.yaml`、`configs/cvat_label.json`。默认标注链路为 RTMPose-m Hand5 + 双头 Hand Classifier + 四项质量门控 + MediaPipe Hand Landmarker TFLite 几何补救；MediaPipe Tasks 与 HaMeR 可作为两条独立的单次显式覆盖。
 
 2026-08-16 新增两个与训练 run 解耦的 Gold 发布合同：困难 ROI 经 CVAT 1.1 精修后发布到 `GoldSource/HardSamples/<hard_dataset_id>`；新录制 train 来源复用 Eval 的自动标注与人工 CVAT 链路，positive/negative 一并发布到 `GoldSource/ReviewedDatasets/<dataset_id>`。旧 `Selections` 已发布资产仍可被 HLML 读取，新困难复核不再使用删除式流程。Registry 通过新增表扩展，不迁移或改写既有 EValSource/PretrainSource 资产。
 
@@ -16,7 +22,7 @@ RTMPose runtime ROI 当前使用 `models/hand_classifier/handedness-handpresence
 
 0814 HCF 自带验证集指标：presence accuracy `0.984676`、presence ROC AUC `0.997041`、混淆矩阵 `[[369,40],[7,2651]]`；handedness accuracy `0.971783`、ROC AUC `0.996871`、混淆矩阵 `[[1345,54],[21,1238]]`。0814 的 train/validation split 已覆盖本次 7 个 Gold 来源，因此统一回放用于配置校准，不是独立盲测，结果可能乐观。
 
-当前 Train 质量配置：handedness review threshold 为 `0.8`；RTMPose Train runtime 的 `P(has_hand)` 阈值为 `0.025`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝；连接对长度门控默认开启，并按 `near/mid/far` 使用独立阈值。连接长度严格超过阈值时以 `rtmpose_connection_length_gate` 进入 `ignored.jsonl`，等于阈值及长度 0 通过。关闭该开关不影响其余三条门控。Eval、MediaPipe 和 Eos low-score candidate 不应用 RTMPose Train presence/边界/连接长度门控。
+当前 Train 质量配置：handedness review threshold 为 `0.8`；RTMPose/HaMeR Train runtime 的 `P(has_hand)` 阈值为 `0.025`；42 个 crop 坐标值中精确边界值达到 2 个时拒绝；连接对长度门控默认开启，并按 `near/mid/far` 使用独立阈值。连接长度严格超过阈值时以对应 `<family>_connection_length_gate` 进入 `ignored.jsonl`，等于阈值及长度 0 通过。关闭该开关不影响其余三条门控。Eval、MediaPipe 和 Eos low-score candidate 不应用 runtime presence/边界/连接长度门控。
 
 发布时已新增四门控互斥统计：每个 `source_publish_report.json` 记录当前 capture source/variant 的四项淘汰数，`dataset_manifest.json` 记录 dataset 总计和每个 `capture_source_id` 合计；多门控同时失败时按既有 `presence → boundary → connection length → handedness/其他` 优先级只归因一次。
 

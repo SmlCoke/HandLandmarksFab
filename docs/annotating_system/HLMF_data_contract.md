@@ -131,6 +131,8 @@ human_modified_landmark_ids
 human_modified_handedness
 human_modified_presence
 rtmpose_geometry_rescue (optional)
+hamer_inference (optional)
+hamer_geometry_rescue (optional)
 ```
 
 ### MediaPipe
@@ -150,11 +152,24 @@ rtmpose_geometry_rescue (optional)
 - `hand_presence.present` 为 HCF presence argmax（0 no_hand、1 has_hand）；
 - `hand_presence.score` 始终为 `P(has_hand)`，不是胜出类别置信度。
 
-HCF runtime 输入为 `[N,1,256,256]` float32；灰度除以 255 后按 `mean=0.485/std=0.229` 归一化。模型必须暴露动态 batch 的 `input`，以及 `handedness`、`hand_presence` 两个 `[N,2]` float 输出。该 HCF 只用于 RTMPose runtime ROI，Train 和 Eval 都执行；输出是教师伪标签，不等价于人工真值。Eval 经 CVAT 导入后，人工 presence 的 `score` 可为 null，教师身份由 provenance 字段保留。
+HCF runtime 输入为 `[N,1,256,256]` float32；灰度除以 255 后按 `mean=0.485/std=0.229` 归一化。模型必须暴露动态 batch 的 `input`，以及 `handedness`、`hand_presence` 两个 `[N,2]` float 输出。该 HCF 用于 RTMPose/HaMeR runtime ROI，Train 和 Eval 都执行；输出是教师伪标签，不等价于人工真值。Eval 经 CVAT 导入后，人工 presence 的 `score` 可为 null，教师身份由 provenance 字段保留。
 
-### RTMPose 的 MediaPipe TFLite 几何补救
+### HaMeR + HCF runtime
 
-该补救只处理 RTMPose Train runtime 中未通过边界或已开启连接长度门控的行。成功时：
+- `source=hamer_official_cvpr24`；
+- 21 点顺序与 RTMPose/MediaPipe 相同，采用 OpenPose/COCO-wholebody hand order；
+- `label_origin=hamer`、`annotation_style=hamer_openpose21_v1`；
+- `teacher_model_id=hamer-cvpr24-official-603105f`；
+- `handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 来自 `hamer.hand_classifier_model_onnx_path`，当前为 `hand-classifier-handedness-handpresence-0814`；
+- HCF `Left|Right` 直接决定 HaMeR 左右手输入翻转，HaMeR 内部 ViTPose/亮度 handedness fallback 不参与 HLMF；
+- `hamer_inference` 记录 `model_id/device/rescale/flipped/bbox_size/clipped_coordinate_values/handedness_source`；
+- HaMeR 2D 输出映射回原 `256×256` ROI 后裁到 `[0,255]`，归一化仍为 `crop_px/255`。
+
+HaMeR 在仓库外的 `.hamer` 环境中运行，worker 响应必须与全部 runtime `crop_id` 一一对应并包含 21 个有限点。HCF 仍由 HLMF 主环境批量执行，`hand_presence.score` 仍保存 `P(has_hand)`。其 HCF 模型路径与默认 RTMPose HCF 路径相互独立配置，但发布前应部署同一版本。
+
+### RTMPose/HaMeR 的 MediaPipe TFLite 几何补救
+
+该补救只处理 RTMPose/HaMeR Train runtime 中未通过边界或已开启连接长度门控的行。成功时：
 
 - `source=mediapipe_hand_landmarker_full_tflite_rtmpose_rescue`；
 - `label_origin=mediapipe`、`annotation_style=mediapipe_tflite_rescue_v1`；
@@ -176,6 +191,8 @@ HCF runtime 输入为 `[N,1,256,256]` float32；灰度除以 255 后按 `mean=0.
 ```
 
 补救失败时 `accepted=false`，保留原 RTMPose 坐标和 provenance。TFLite 的 handflag、handedness、world landmarks 不进入标签。
+
+HaMeR 行使用同样的 metadata 结构，但字段名为 `hamer_geometry_rescue`；成功 source 为 `mediapipe_hand_landmarker_full_tflite_hamer_rescue`，失败时保留 HaMeR 坐标/provenance。两条链路的 HCF 字段均不被 TFLite 替换。
 
 ### 未推理 candidate
 
@@ -201,6 +218,8 @@ mediapipe_tflite_rescue.enabled/model_id/attempted/accepted/rejected
 
 MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 的实际 ONNX provider、fallback 原因、batch size、HCF 模型 ID 和 HCF 推理数。Palm 的 `palm_detection_report.json.onnx_runtime` 记录 provider、fallback 原因及固定 batch 1 的原因；顶层 `capture_distance_policy` 记录 Palm model ID、实际 distance、支持列表和 `supported=true`。
 
+HaMeR runtime 在同一报告记录 `execution_provider=cuda|cpu`、HCF ONNX provider/batch/model ID，并增加 `hamer.model_id/repository_path/repository_commit/checkpoint_path/device/rescale`。运行前实际 Git HEAD 必须与配置的 full commit ID 完全一致。报告路径为兼容消费者仍保持 `mediapipe_report.json`；路径名不代表实际 backend。
+
 `palm_detection_report.json.onnx_runtime.model_contract` 记录 Eos model ID/相对路径、输入名称/形状/类型、四个输出名称/形状、预处理、layout、feature levels、anchor 总数及 score/NMS/max/negative 阈值。运行前模型输入输出必须与配置完全匹配；不匹配时明确终止，不产生 Palm manifest。
 
 `onnx_runtime.provider` 及 `onnx_runtime.model_providers.{palm,rtmpose,hand_classifier}` 只接受 `auto|cuda|cpu`；`auto` 为 CUDA 优先并允许 CPU fallback，`cuda` 在 CUDA provider 未激活时失败，`cpu` 固定 CPU。`onnx_runtime.batch_size` 必须是正整数。当前 HCF 模型路径为 `models/hand_classifier/handedness-handpresence-0814/model.onnx`。HCF 模型 ID 固定由该路径的父目录名生成；版本目录必须是安全名称，当前得到 `hand-classifier-handedness-handpresence-0814`，防止模型路径与标签 provenance 漂移。
@@ -209,14 +228,14 @@ MediaPipe 的 HCF 字段为空/0。RTMPose runtime 记录 RTMPose 与双头 HCF 
 
 Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`。
 
-- RTMPose Train runtime 的 `hand_presence.score=P(has_hand)` 缺失或非有限：quality error 为 `rtmpose_hand_presence_score_missing|non_finite`，`ignore_reason=rtmpose_hand_presence_gate`。
-- RTMPose Train runtime 的 `P(has_hand)` 严格低于 `quality.rtmpose_train_hand_presence_threshold`：quality error 为 `rtmpose_hand_presence_score_below_threshold:{score}<{threshold}`，`ignore_reason=rtmpose_hand_presence_gate`。等于阈值时通过。
-- Train positive 的 handedness score 低于 `quality.handedness_review_threshold`：`ignore_reason=automatic_positive_failed_quality_gate`。
-- RTMPose Train runtime 的 42 个 crop x/y 值中，精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`：quality error 为 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，`ignore_reason=rtmpose_boundary_coordinate_gate`。
-- `quality.rtmpose_train_connection_length_gate_enabled` 为布尔开关，缺省及正式配置均为 `true`。开启时按 capture source 距离读取 `quality.rtmpose_train_connection_length_thresholds_px.<distance>`；任一连接长度严格超过阈值时，quality error 为 `rtmpose_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，`ignore_reason=rtmpose_connection_length_gate`。21 点无效时 error 为 `rtmpose_connection_length_landmarks_invalid`。等于阈值和长度为 0 均通过；关闭时不解析距离或阈值。
+- RTMPose/HaMeR Train runtime 的 `hand_presence.score=P(has_hand)` 缺失或非有限：quality error 为 `<family>_hand_presence_score_missing|non_finite`，`ignore_reason=<family>_hand_presence_gate`。
+- RTMPose/HaMeR Train runtime 的 `P(has_hand)` 严格低于 `quality.rtmpose_train_hand_presence_threshold`：quality error 为 `<family>_hand_presence_score_below_threshold:{score}<{threshold}`，`ignore_reason=<family>_hand_presence_gate`。等于阈值时通过。
+- Train positive 的 handedness score 低于 `quality.handedness_review_threshold`：`ignore_reason=automatic_positive_failed_quality_gate`；适用于 MediaPipe、RTMPose 和 HaMeR。
+- RTMPose/HaMeR Train runtime 的 42 个 crop x/y 值中，精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold`：quality error 为 `<family>_boundary_coordinate_values:<count>>=<threshold>`，`ignore_reason=<family>_boundary_coordinate_gate`。
+- `quality.rtmpose_train_connection_length_gate_enabled` 为布尔开关，缺省及正式配置均为 `true`。开启时按 capture source 距离读取 `quality.rtmpose_train_connection_length_thresholds_px.<distance>`；任一连接长度严格超过阈值时，quality error 为 `<family>_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，`ignore_reason=<family>_connection_length_gate`。21 点无效时 error 为 `<family>_connection_length_landmarks_invalid`。等于阈值和长度为 0 均通过；关闭时不解析距离或阈值。`<family>` 为 `rtmpose|hamer`。
 - `quality.rtmpose_train_mediapipe_tflite_rescue_enabled` 缺省及正式配置均为 `true`。开启时，边界或已开启的连接长度门控失败会触发 TFLite 重预测；两项几何复检通过才替换关键点。关闭时不读取 `mediapipe_tflite` 配置、模型或独立环境。它不是新的门控，不改变既有 quality error 与 `ignore_reason`。
 
-当前 HCF0814 的 handedness review 阈值为 `0.8`，RTMPose Train presence 阈值为 `0.025`，边界阈值为 2；0–1 个边界值通过。near/mid 的 20 对连接阈值绑定 Eos-2.1 ROI 几何与 7 个最新人工 Gold 来源；far 只保留距离能力门控后不可达的历史值。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 主链路或 Eos negative candidate；成功补救行仍属于 RTMPose Train runtime 链路，继续应用三条 RTMPose 专用门控。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。`negative_review.hand_presence_threshold=0.5` 是独立的候选预审 argmax 分界，不等于 Train presence 门控阈值。
+当前 HCF0814 的 handedness review 阈值为 `0.8`，RTMPose/HaMeR Train presence 阈值为 `0.025`，边界阈值为 2；0–1 个边界值通过。near/mid 的 20 对连接阈值绑定 Eos-2.1 ROI 几何与 7 个最新人工 Gold 来源；far 只保留距离能力门控后不可达的历史值。Presence、边界和连接长度门控不应用于 Eval、MediaPipe 主链路或 Eos negative candidate；成功补救行仍属于原 runtime family，继续应用三条 runtime 门控。Train candidate 进入 `candidate_negatives.jsonl`，不进入正样本。`negative_review.hand_presence_threshold=0.5` 是独立的候选预审 argmax 分界，不等于 Train presence 门控阈值。本轮没有新 HaMeR 人工 Eval，四项阈值按任务要求保持不变，不构成 HaMeR 专属正式重校准结论。
 
 双头 HCF 的 presence/handedness 属于教师伪标签；正式 Val/Test 评估必须使用 CVAT 人工确认标签。
 
@@ -226,7 +245,7 @@ Train quality gate 失败的行进入 `ignored.jsonl` 且 `train_eligible=false`
 
 ## 8. Eval/Recorded Gold、CVAT 与发布
 
-Eval draft 不是正式真值，RTMPose Train presence、边界和连接长度门控均不作用于 Eval。CVAT frame 依据 ROI 图片完整 basename（包含扩展名）的字典序映射到 manifest；导入后也按完整 basename 精确匹配。因此擅自更换 ROI 后缀会使既有 CVAT XML 无法直接导入，即使稳定 ROI ID 没有变化。导入后产生 `hand_landmarks_reviewed.jsonl`。人工改变 presence 时设置 `human_modified_presence=true`，改变 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
+Eval draft 不是正式真值，RTMPose/HaMeR Train presence、边界和连接长度门控均不作用于 Eval。CVAT frame 依据 ROI 图片完整 basename（包含扩展名）的字典序映射到 manifest；导入后也按完整 basename 精确匹配。因此擅自更换 ROI 后缀会使既有 CVAT XML 无法直接导入，即使稳定 ROI ID 没有变化。导入后产生 `hand_landmarks_reviewed.jsonl`。人工改变 presence 时设置 `human_modified_presence=true`，改变 handedness 时设置 `human_modified_handedness=true`，修点 ID 写入 `human_modified_landmark_ids`。
 
 Val/Test 发布输出 `hand_evaluation_labels.jsonl` 和 `ignored.jsonl`，不发布 negative candidate。Eval 限额按整个 split 的 prospective dataset manifest 统计，配置位于：
 
@@ -242,7 +261,7 @@ Recorded Gold 必须是 `scope=gold` 的新录制 train 来源，不能引用既
 
 ## 9. 可视化与视频
 
-ROI 可视化目录是 `02_roi_crops/<variant>/hand_landmarks_roi_visualization/`。RTMPose 独立重建时从既有 QC 报告确定后端，只接受 `proposal_kind=runtime`；MediaPipe 保持原行为。
+ROI 可视化目录是 `02_roi_crops/<variant>/hand_landmarks_roi_visualization/`。RTMPose/HaMeR 独立重建时从既有 QC 报告确定后端，只接受 `proposal_kind=runtime`；MediaPipe 保持原行为。
 
 原图可视化 PNG 位于 `visualizations/original_image_landmarks/<variant>/`。默认视频位于同级 `<variant>.mp4`，PNG 按文件名字典序写入，默认 30 FPS、codec `mp4v`。`ORIGINAL_VIDEO=false` 时不生成视频。
 

@@ -2,7 +2,7 @@
 
 ## 1. 系统边界与身份
 
-HLMF 从 Eos Palm Detector 的 proposal 开始工作。程序原样使用 bbox、p0、p9，构造固定 `256×256` Hand ROI；Palm 几何和 ROI 不允许人工修改。Hand landmark 教师可以是 MediaPipe Tasks 或 RTMPose-m Hand5，人工只复核 Hand ROI 内的 21 点、handedness、`no_hand` 和 `ignore_for_training`。
+HLMF 从 Eos Palm Detector 的 proposal 开始工作。程序原样使用 bbox、p0、p9，构造固定 `256×256` Hand ROI；Palm 几何和 ROI 不允许人工修改。Hand landmark 教师可以是 MediaPipe Tasks、RTMPose-m Hand5 或 HaMeR，人工只复核 Hand ROI 内的 21 点、handedness、`no_hand` 和 `ignore_for_training`。
 
 所有持久数据写入 `HAND_DATASET_ROOT`，不绑定训练 run ID。每个来源由下列七段 ID 唯一描述：
 
@@ -38,7 +38,9 @@ make test
   -r requirements-mediapipe-tflite.txt
 ```
 
-Eos、MediaPipe Task、RTMPose 和 HCF ONNX 按仓库既有策略被 Git 忽略，需要在执行环境单独部署。当前默认 Eos-2.1、双头 HCF 与上一版归档路径为：
+HaMeR 同样不把 PyTorch、Detectron2、MANO 等依赖并入 `anfab`。它使用既有 `/root/autodl-tmp/HLMF-Enhance/hamer/.hamer`（Python 3.8.10）及该仓库的 official checkpoint/MANO 资产；HLMF 只通过一次批量子进程调用它。HaMeR 的 presence/handedness 仍由 `anfab` 中的 HCF ONNX runner 计算，模型路径指向 HLMF-Enhance 的独立副本。
+
+Eos、MediaPipe Task、RTMPose、HaMeR checkpoint/MANO 和 HCF ONNX 按仓库既有策略不通过本仓库 Git 部署，需要在执行环境单独准备。当前默认 Eos-2.1、双头 HCF 与上一版归档路径为：
 
 ```text
 models/palm_detector/eos-2.1/model_384x224_opt.onnx
@@ -77,6 +79,15 @@ onnx_runtime:
 rtmpose:
   model_onnx_path: models/rtmpose/rtmpose-m_hand5_256x256.onnx
   simcc_split_ratio: 2.0
+hamer:
+  repository_path: /root/autodl-tmp/HLMF-Enhance/hamer
+  repository_commit: 603105f586337aa704483c4525f5934047f02f2b
+  python_executable: /root/autodl-tmp/HLMF-Enhance/hamer/.hamer/bin/python
+  checkpoint_path: /root/autodl-tmp/HLMF-Enhance/hamer/_DATA/hamer_ckpts/checkpoints/hamer.ckpt
+  model_id: hamer-cvpr24-official-603105f
+  rescale: 0.75
+  device: cuda
+  hand_classifier_model_onnx_path: /root/autodl-tmp/HLMF-Enhance/hand_classifier/handedness-handpresence-0814/model.onnx
 mediapipe_tflite:
   model_asset_path: models/mediapipe/hand_landmarker_tflite/hand_landmark_full.tflite
   python_executable: /root/miniconda3/envs/hlmf-mp-tflite/bin/python
@@ -99,7 +110,7 @@ visualization:
   train_max_samples: 200
 ```
 
-配置原则：Eos-2.1 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。7 个最新 Gold 来源的只读回放表明，`score=0.25、NMS=0.10、max_detections=2` 在 9,237 个 hand 上达到 100% 匹配召回，且比更低 score 少保留误候选；ROI `scale=1.8、shift_y=-0.1` 的关键点覆盖率为 99.999%，同时避免更大 scale 降低手部在 crop 中的占用率。全局默认标注链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue；命令行后端只覆盖当前执行。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.1 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。SimCC split ratio 与模型绑定为 `2.0`。HCF 模型 ID 自动由 `model_onnx_path` 的父目录生成，切换版本时只需修改该路径，但版本目录必须使用安全名称。`negative_review.hand_presence_threshold=0.5` 只用于负样本预审，严格低于模型 argmax 分界的候选才进入人工 review。0814 在 9,279 条人工复核 near/mid Gold ROI 上重校准后，`rtmpose_train_hand_presence_threshold=0.025` 继续作为 RTMPose Train runtime 最小 `P(has_hand)`；低于阈值、缺失或非有限时整行拒绝，等于阈值通过。两项阈值用途不同，不应联动修改。handedness 阈值越高，Train 被忽略的低置信行越多；边界阈值表示 42 个 x/y 值中允许出现多少个精确边界值，当前达到 2 个即拒绝。连接长度门控默认开启；关闭时完全跳过距离解析和阈值校验。TFLite 补救也默认开启；关闭时不解析其模型和 Python 环境配置，原四条门控照常执行。
+配置原则：Eos-2.1 固定使用灰度 `INTER_AREA 384×224`、`/255`、NCHW 输入；两个矩形 feature level 使用模型配套的 840 anchors，检测在 level 合并后执行全局 NMS。7 个最新 Gold 来源的只读回放表明，`score=0.25、NMS=0.10、max_detections=2` 在 9,237 个 hand 上达到 100% 匹配召回，且比更低 score 少保留误候选；ROI `scale=1.8、shift_y=-0.1` 的关键点覆盖率为 99.999%，同时避免更大 scale 降低手部在 crop 中的占用率。全局默认标注链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue；MediaPipe Tasks 与 HaMeR 仅作为单次显式后端覆盖。HaMeR `rescale=0.75` 来自现有 SC132GS ROI 实测，HCF 的 Left/Right 直接决定其内部水平翻转；不启用 HaMeR 工具自带的 ViTPose/亮度 fallback，以保证关键点手性与发布的 HCF handedness 一致。ONNX `auto` 表示 CUDA 可用时优先 GPU、否则回退 CPU；`cuda` 要求 GPU provider 必须激活，`cpu` 固定 CPU。性能与人工复核 Eval 回放表明 Eos-2.1 Palm/HCF 采用 `auto`，RTMPose 因 GPU 关键点精度轻微下降而固定 CPU；RTMPose/HCF 使用动态 batch 64，Palm 模型输入固定为 batch 1，详见 `assets/device_perf/onnx_cpu_gpu_benchmark.md`。HaMeR 当前固定 CUDA 且无自动 CPU fallback。SimCC split ratio 与模型绑定为 `2.0`。HCF 模型 ID 自动由模型路径的父目录生成；HaMeR 链路使用 `hamer.hand_classifier_model_onnx_path`，其他链路使用 `hand_classifier.model_onnx_path`，两者应部署同一版本。`negative_review.hand_presence_threshold=0.5` 只用于负样本预审。0814 的 `rtmpose_train_hand_presence_threshold=0.025` 也作用于 HaMeR Train runtime；handedness、边界和连接长度阈值同样复用且本轮按任务要求不修改。由于本轮没有创建新 HaMeR Eval/Gold，不能把这些参数表述为针对 HaMeR 正式重校准的结论。连接长度门控与 TFLite 补救均默认开启，关闭时各自独立跳过。
 
 `palm.supported_capture_distances` 是与 Palm 权重绑定的必填能力资产；缺失、为空或格式非法时，所有模型相关阶段在写入前终止。
 
@@ -152,11 +163,18 @@ make train-autolabel \
   CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
   PROPOSAL_VARIANT=eos-2.1 \
   HAND_LANDMARK_BACKEND=rtmpose_onnx
+
+make train-autolabel \
+  HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab \
+  DATASET_SCOPE=pretrain DATASET_ID=FullEnhance0801 \
+  CAPTURE_SOURCE_ID=white-mid-bright-fist-train-s01-peak \
+  PROPOSAL_VARIANT=eos-2.1-hamer \
+  HAND_LANDMARK_BACKEND=hamer
 ```
 
-输入：已注册原图、Eos/RTMPose/HCF 模型、TFLite 补救资产和 `configs/autolabel.yaml`。
+输入：已注册原图、Eos、所选 RTMPose/HaMeR/MediaPipe 教师、对应 HCF、TFLite 补救资产和 `configs/autolabel.yaml`。HaMeR 还要求现有 `.hamer` 环境、checkpoint、MANO 资产及 HLMF-Enhance HCF ONNX。
 
-处理：Eos 生成 runtime 与 low-score candidate proposal；程序构造固定 `256×256` 灰度 ROI；RTMPose runtime ROI 同时运行 RTMPose 与 HCF。Train 行若未通过边界或已开启的连接长度门控，则把失败 ROI 一次性提交给独立 TFLite worker；补救点通过两项几何门控才替换 RTMPose 点。candidate 不运行 RTMPose/HCF/TFLite。Train 最后按原四条门控分流发布。
+处理：Eos 生成 runtime 与 low-score candidate proposal，程序构造固定 `256×256` 灰度 ROI。RTMPose runtime ROI 批量运行 RTMPose 与 HCF；HaMeR runtime ROI 先批量运行外部 HCF，再把 HCF Left/Right 和 ROI 路径交给 `.hamer` worker，单次加载模型后逐 ROI 生成 21 点。HaMeR 原始 2D 点裁到 `[0,255]`，越界值因而成为边界坐标并进入同一几何门控。Train 行若未通过边界或已开启的连接长度门控，则把失败 ROI 一次性提交给独立 TFLite worker；补救点通过两项几何门控才替换原教师点。candidate 不运行 landmark/HCF/TFLite。Train 最后按原四条门控分流发布。
 
 输出：
 
@@ -173,34 +191,38 @@ make train-autolabel \
 
 ROI 使用无损 PNG 保存，模型实际读取的是解码后的 `uint8` 灰度像素，而不是 PNG/TIFF 容器。板端输入为摄像头 `SSNE_Y_8` 内存并现场构造 ROI，也不会读取 TIFF 文件作为 Hand Landmarker 输入。对同一 `uint8` ROI，改用无损 TIFF 不改变像素域，只会改变文件路径和存储开销。
 
-## 5. RTMPose 与 HCF 推理契约
+## 5. RTMPose、HaMeR 与 HCF 推理契约
 
 RTMPose 灰度 ROI 复制为 RGB，使用官方 mean/std，输出两个 `[N,21,512]` SimCC logits。坐标直接对原始 logits 取 argmax，再除以 `2.0`，不执行 softmax；输出夹到 `[0,255]`。默认关键点分数为 x/y 峰值较小者。
 
 双头 HCF 输入是灰度 `[N,1,256,256]`：转 float、除以 255，再以 `mean=0.485/std=0.229` 归一化。输出名称必须恰为 `handedness` 和 `hand_presence`，形状均为 `[N,2]`。handedness 的 argmax 映射 `0=Left、1=Right`，胜出类 softmax 概率写入 `handedness.score`；presence 的 argmax 映射 `0=no_hand、1=has_hand`，无论胜出类别为何，`hand_presence.score` 始终保存 `P(has_hand)`。
 
-两个模型都校验输入输出名称、动态 batch、固定通道/空间/类别形状、float 类型和有限值。RTMPose/HCF 按 `onnx_runtime.batch_size` 批量处理 ROI；每个模型按独立 provider 配置创建会话。实际 provider、CPU fallback 原因、batch size、HCF 模型 ID 和推理数量写入 `qc/<variant>/mediapipe_report.json`（报告路径沿用现有位置）。Palm 实际 provider 写入 `palm_detection_report.json`。
+HaMeR worker 从 `predict_hand_keypoints.py` 复用已验证的 full-ROI ViTDet 预处理、MANO 回归和逆仿射投影：灰度 ROI 复制为三通道，`rescale=0.75`，输出 OpenPose/COCO-wholebody 顺序的 21 个 ROI 像素坐标。HCF 的 `Left/Right` 直接传给 worker；Left 输入在 HaMeR 内部翻转为右手模型域，输出再镜像回原 ROI。HLMF 不运行 HaMeR 工具内的 ViTPose 或亮度 handedness fallback，也不消费其 3D/MANO/camera 输出。worker 在 `.hamer` 环境、HaMeR 仓库工作目录内启动，模型一次加载后处理整个来源的 runtime 请求；任一请求缺失或重复、非有限、非 21 点时整次来源失败，不写部分 draft。
 
-RTMPose runtime ROI 固定输出 21 点，并在 Train 与 Eval 都运行一次双头 HCF；`hand_presence.present` 和 `hand_presence.score` 是 HCF 教师输出，不是人工真值。Eos low-score candidate 不运行 RTMPose/HCF，关键点为空、handedness 为 `unknown/null`、两个 HCF provenance ID 均为 null，继续进入 `candidate_negatives.jsonl` 人工链路。
+RTMPose/HCF 都校验输入输出名称、动态 batch、固定通道/空间/类别形状、float 类型和有限值，并按 `onnx_runtime.batch_size` 批量处理 ROI。HaMeR 校验仓库 HEAD 与 `repository_commit` 完全一致，并校验 Python、checkpoint、model ID、device、rescale 与 worker 响应。实际 provider/device、fallback 原因、batch size、HCF 模型 ID、HaMeR model/repository/commit/checkpoint/rescale 和推理数量写入 `qc/<variant>/mediapipe_report.json`（报告路径沿用现有位置）。Palm 实际 provider 写入 `palm_detection_report.json`。
 
-TFLite worker 输入为灰度 ROI，经 `224×224` 双线性缩放、三通道复制和 `/255` 后送入 `hand_landmark_full.tflite`。坐标按 `raw/224×256` 解码；模型输出的 handflag、handedness 和 world landmarks 不进入 HLMF。补救成功行的关键点教师为 `mediapipe-hand-landmark-full-tflite`，HCF 的 presence/handedness 及其 teacher ID 原样保留。补救失败时保留 RTMPose 点，并在 `rtmpose_geometry_rescue` 中记录触发错误和 TFLite 结果错误。
+RTMPose/HaMeR runtime ROI 固定输出 21 点，并在 Train 与 Eval 都运行一次双头 HCF；`hand_presence.present` 和 `hand_presence.score` 是 HCF 教师输出，不是人工真值。Eos low-score candidate 不运行 landmark/HCF，关键点为空、handedness 为 `unknown/null`、两个 HCF provenance ID 均为 null，继续进入 `candidate_negatives.jsonl` 人工链路。
+
+TFLite worker 输入为灰度 ROI，经 `224×224` 双线性缩放、三通道复制和 `/255` 后送入 `hand_landmark_full.tflite`。坐标按 `raw/224×256` 解码；模型输出的 handflag、handedness 和 world landmarks 不进入 HLMF。补救成功行的关键点教师为 `mediapipe-hand-landmark-full-tflite`，HCF 的 presence/handedness 及其 teacher ID 原样保留。补救失败时保留原点；RTMPose/HaMeR 分别在 `rtmpose_geometry_rescue`/`hamer_geometry_rescue` 记录触发错误和 TFLite 结果错误。
 
 ## 6. Train 质量门控
 
 质量门控只改变发布分流，不改变 Palm 或 ROI：
 
-1. **Hand presence 置信度门控**：仅对 RTMPose Train runtime 读取 `hand_presence.score=P(has_hand)`。分数缺失、非有限或严格低于 `quality.rtmpose_train_hand_presence_threshold` 时，以 `ignore_reason=rtmpose_hand_presence_gate` 进入 `ignored.jsonl`；等于阈值通过。
-2. **Handedness 置信度门控**：所有 Train positive 的 handedness 分数严格低于 `quality.handedness_review_threshold` 时，以 `ignore_reason=automatic_positive_failed_quality_gate` 进入 `ignored.jsonl`。该规则同时适用于 RTMPose 与 MediaPipe。
-3. **边界坐标门控**：仅对 RTMPose Train runtime 统计 21 点的 42 个 crop x/y 值。精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `rtmpose_boundary_coordinate_values:<count>>=<threshold>`，并以 `ignore_reason=rtmpose_boundary_coordinate_gate` 进入 `ignored.jsonl`。
-4. **连接对长度门控**：仅在 `quality.rtmpose_train_connection_length_gate_enabled=true` 时对 RTMPose Train runtime 生效。程序按 capture source 的 `near/mid/far` 选择阈值，计算 20 条连接的 crop 像素欧氏距离；任一长度严格超过阈值时写入 `rtmpose_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，并以 `ignore_reason=rtmpose_connection_length_gate` 进入 `ignored.jsonl`。等于阈值及长度为 0 均通过；关闭开关时不解析距离或阈值。
+1. **Hand presence 置信度门控**：对 RTMPose/HaMeR Train runtime 读取 `hand_presence.score=P(has_hand)`。分数缺失、非有限或严格低于 `quality.rtmpose_train_hand_presence_threshold` 时，以 `<family>_hand_presence_gate` 进入 `ignored.jsonl`；等于阈值通过。
+2. **Handedness 置信度门控**：所有 Train positive 的 handedness 分数严格低于 `quality.handedness_review_threshold` 时，以 `ignore_reason=automatic_positive_failed_quality_gate` 进入 `ignored.jsonl`。该规则同时适用于 RTMPose、HaMeR 与 MediaPipe。
+3. **边界坐标门控**：对 RTMPose/HaMeR Train runtime 统计 21 点的 42 个 crop x/y 值。精确为 `0.0` 或 `255.0` 的值达到 `quality.rtmpose_train_boundary_coordinate_reject_threshold` 时，写入 `<family>_boundary_coordinate_values:<count>>=<threshold>`，并以 `<family>_boundary_coordinate_gate` 进入 `ignored.jsonl`。
+4. **连接对长度门控**：仅在 `quality.rtmpose_train_connection_length_gate_enabled=true` 时对 RTMPose/HaMeR Train runtime 生效。程序按 capture source 的 `near/mid/far` 选择阈值，计算 20 条连接的 crop 像素欧氏距离；任一长度严格超过阈值时写入 `<family>_connection_length_exceeded:<pair>:<length>><threshold>:distance=<distance>`，并以 `<family>_connection_length_gate` 进入 `ignored.jsonl`。等于阈值及长度为 0 均通过；关闭开关时不解析距离或阈值。`<family>` 为 `rtmpose|hamer`。
 
-当前 RTMPose Train presence 阈值为 `0.025`，边界阈值为 2，因此 0–1 个边界值通过。Presence、边界和连接长度门控作用于 RTMPose Train runtime 链路，包括成功采用 TFLite 补救点的行；Eval、MediaPipe 主链路和 Eos low-score candidate 不应用这三条 RTMPose 专用门控。
+当前 RTMPose/HaMeR Train presence 阈值为 `0.025`，边界阈值为 2，因此 0–1 个边界值通过。Presence、边界和连接长度门控作用于两条 runtime 链路，包括成功采用 TFLite 补救点的行；Eval、MediaPipe 主链路和 Eos low-score candidate 不应用这三条 runtime 门控。
 
-TFLite 补救不是第五条门控。执行顺序为：RTMPose/HCF → 几何预检 → 必要时 TFLite 重预测并复检 → 四条质量门控发布分流。补救后的 presence/handedness 仍只来自 HCF；最终拒绝原因优先级保持 `presence → boundary → connection length → handedness/其他`。
+TFLite 补救不是第五条门控。执行顺序为：所选 landmark 教师/HCF → 几何预检 → 必要时 TFLite 重预测并复检 → 四条质量门控发布分流。补救后的 presence/handedness 仍只来自 HCF；最终拒绝原因优先级保持 `presence → boundary → connection length → handedness/其他`。
 
 `source-publish` 按上述发布优先级为每条 rejected 行只归因一次，并把四项互斥计数写入 `source_publish_report.json.quality_gate_rejections`。`dataset_manifest.json` 同时保存 dataset 合计、每个 `capture_source_id` 合计及 `quality_gate_counting_policy=exclusive_by_publish_routing_priority`；其他通用质量问题不计入四项统计。
 
 Presence 阈值应在每次 HCF 更新后使用正式仓库只读的人工复核 ROI 重新校准。0814 在 9,237 条 hand、42 条 no_hand 上，Train 阈值 `0.025` 保留全部 hand，并拒绝 41 条 no_hand（97.619%）；提高到 `0.5` 会漏掉 4 条 hand，因此保持 `0.025`。`negative_review.hand_presence_threshold=0.5` 仍是负候选人工预审分界；Eos low-score 候选中的 HCF 分数不能替代负样本真值。handedness `0.8` 在 9,237 条有效人工标签上覆盖 98.506%，覆盖范围内准确率 99.275%，作为覆盖率与准确率的折中。三项阈值用途不同。由于 HCF0814 的训练/验证拆分已覆盖这 7 个来源，这次回放用于配置校准，不应表述为独立盲测；更新模型后仍应补充未见过的新 Gold。
+
+本轮新增 HaMeR 后端但没有更新 Eval 或 HCF，因此按任务要求不改四项阈值。Presence/handedness 阈值仍有同一 HCF0814 的校准依据，边界/连接阈值仍绑定同一 Eos-2.1 ROI 几何；不过 HaMeR 权重的输出分布尚未用新的人审代表性 Eval 正式重校准。采用 HaMeR 批量生产前应先发布代表性 HaMeR Eval/Gold，并以隔离只读分析复核四门控命中率；当前参数只表示接入行为固定，不代表 HaMeR 模型版本的最终门控结论。
 
 near/mid 连接长度阈值来自 `FullEnhanceVal0801` 指定的 7 个最新 Gold 来源：程序用 Eos-2.1 在原图上重新检测并以当前 ROI 几何投影 9,237 条人工关键点，再按距离和连接取 `ceil(P99.95 × 1.05)`。Gold 共保留 9,203/9,237（99.632%）。Eos-2.1 的 far 历史标签兼容回放召回不足，因此能力契约仍只支持 near/mid；far 没有正式新样本，YAML 只保留不可达的历史阈值。完整分布、阈值与 RTMPose 回放结果位于 `assets/quality_gate/rtmpose_connection_length_distribution.md`。更新 Eos、ROI、HCF 或正式 Gold 后，在服务器隔离输出目录重新执行统一只读工具：
 
@@ -261,6 +283,8 @@ Dataset manifest 只聚合至少存在一个 `qc/<variant>/source_publish_report
 
 - MediaPipe：`label_origin=mediapipe`、`annotation_style=mediapipe_v1`。
 - RTMPose：`label_origin=rtmpose`、`annotation_style=rtmpose_m_hand5_v1`、`teacher_model_id=rtmpose-m_hand5_256x256_onnx`。
+- HaMeR：`label_origin=hamer`、`annotation_style=hamer_openpose21_v1`、`teacher_model_id=hamer-cvpr24-official-603105f`；`hamer_inference` 记录 model/device/rescale/flip/bbox/clipped count/handedness source。
+- HaMeR TFLite 补救：关键点 provenance 切为 `mediapipe/mediapipe_tflite_rescue_v1`，保留 `hamer_geometry_rescue` 与 HCF teacher ID。
 - 双头 HCF：`handedness_teacher_model_id` 与 `hand_presence_teacher_model_id` 均由模型版本目录生成；当前为 `hand-classifier-handedness-handpresence-0814`。
 - 人工复核记录 `human_reviewed`、`human_modified_landmark_ids`、`human_modified_handedness` 和 `human_modified_presence`；修点后使用 `*_human_corrected/project_consensus_v1`。
 - 未推理 candidate：两个 HCF teacher ID 均为 null，provenance 为 `unresolved/unlabeled_v1`，不伪装为教师标签。
@@ -273,7 +297,7 @@ Dataset manifest 只聚合至少存在一个 `qc/<variant>/source_publish_report
 make autolabel-visualize-roi ... PROPOSAL_VARIANT=eos-2.1
 ```
 
-RTMPose 根据既有 QC 报告读取实际教师后端，并只抽样 runtime ROI；不会受后来修改 YAML 的影响。MediaPipe 保持原抽样行为。Train 最多按 `train_max_samples` 确定性均匀抽样；Val/Test 渲染全部适用行。
+RTMPose/HaMeR 根据既有 QC 报告读取实际教师后端，并只抽样 runtime ROI；不会受后来修改 YAML 的影响。MediaPipe 保持原抽样行为。Train 最多按 `train_max_samples` 确定性均匀抽样；Val/Test 渲染全部适用行。
 
 原图可视化：
 

@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping
 
+from .hamer_hand_labeler import label_roi_manifest_hamer
 from .mediapipe_roi_labeler import label_roi_manifest as label_roi_manifest_mediapipe
 from .rtmpose_hand_labeler import label_roi_manifest_rtmpose
 
 
-SUPPORTED_HAND_LANDMARK_BACKENDS = ("mediapipe_tasks", "rtmpose_onnx")
+SUPPORTED_HAND_LANDMARK_BACKENDS = ("mediapipe_tasks", "rtmpose_onnx", "hamer")
 
 
 def label_hand_landmark_manifest(
@@ -36,6 +37,13 @@ def label_hand_landmark_manifest(
         }
     if backend == "rtmpose_onnx":
         return label_roi_manifest_rtmpose(
+            manifest_rows,
+            cfg,
+            root,
+            show_progress=show_progress,
+        )
+    if backend == "hamer":
+        return label_roi_manifest_hamer(
             manifest_rows,
             cfg,
             root,
