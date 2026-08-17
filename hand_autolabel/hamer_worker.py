@@ -166,6 +166,7 @@ class HaMeRWorkerClient:
             write_jsonl(request_path, request_rows)
             environment = os.environ.copy()
             environment.setdefault("PYOPENGL_PLATFORM", "egl")
+            environment.setdefault("TORCH_CUDNN_V8_API_DISABLED", "1")
             result = subprocess.run(
                 [
                     str(self.python_executable),

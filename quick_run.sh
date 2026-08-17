@@ -7,9 +7,9 @@ readonly HLMF_REPO=/root/HandLandmarksFab
 readonly HLML_REPO=/root/HandLandmarkerLab
 readonly CUDA_LIBRARY_DIR=/usr/local/cuda-11.2/targets/x86_64-linux/lib
 readonly HAMER_PYTHON=/root/autodl-tmp/HLMF-Enhance/hamer/.hamer/bin/python
-readonly PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate-r3
+readonly PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate-r4
 readonly HAND_LANDMARK_BACKEND=hamer
-readonly RUN_ID=iris-1.2-geometry-eos2.1-hamer-hcf-v1mv3l-r3
+readonly RUN_ID=iris-1.2-geometry-eos2.1-hamer-hcf-v1mv3l-r4
 readonly -a DATASET_IDS=(
   FullEnhance0801
   FullEnhance0803
@@ -18,6 +18,9 @@ readonly -a DATASET_IDS=(
 )
 
 export LD_LIBRARY_PATH="$CUDA_LIBRARY_DIR:/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# HaMeR's PyTorch/cuDNN combination cannot always build a cuDNN v8 execution
+# plan on the RTX 3090. Use the stable legacy cuDNN API for HaMeR inference.
+export TORCH_CUDNN_V8_API_DISABLED=1
 export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
 export HAND_TRAIN_ROOT=/root/autodl-tmp/TrainFab/HLML-4.0
 export HLML_SNAPSHOT_ID="$RUN_ID"
