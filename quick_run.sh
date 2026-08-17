@@ -1,23 +1,45 @@
-cd ~/HandLandmarksFab
-conda activate anfab
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Autolabel by Eos-2.1 + HaMeR + hcf: v1-mobilenet-v3-large
-make batch-train-autolabel DATASET_ID=FullEnhance0801 PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate HAND_LANDMARK_BACKEND=hamer
-make batch-train-autolabel DATASET_ID=FullEnhance0803 PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate HAND_LANDMARK_BACKEND=hamer
-make batch-train-autolabel DATASET_ID=FullEnhance0810 PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate HAND_LANDMARK_BACKEND=hamer
-make batch-train-autolabel DATASET_ID=FullEnhance0817 PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate HAND_LANDMARK_BACKEND=hamer
+source /root/miniconda3/etc/profile.d/conda.sh
 
-cd ~/HandLandmarkerLab/
-conda activate hand-landmarker-tf29 
+readonly HLMF_REPO=/root/HandLandmarksFab
+readonly HLML_REPO=/root/HandLandmarkerLab
+readonly PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate
+readonly HAND_LANDMARK_BACKEND=hamer
+readonly RUN_ID=iris-1.2-geometry-eos2.1-hamer-hcf-v1mv3l-r1
+readonly -a DATASET_IDS=(
+  FullEnhance0801
+  FullEnhance0803
+  FullEnhance0810
+  FullEnhance0817
+)
+
 export HAND_DATASET_ROOT=/root/autodl-tmp/DatesetFab
 export HAND_TRAIN_ROOT=/root/autodl-tmp/TrainFab/HLML-4.0
-export HLML_SNAPSHOT_ID=Iris_1.2-Eos_2.1-hcf_v1mv3l-r1
-export HLML_EXPERIMENT_ID=Iris_1.2-Eos_2.1-hcf_v1mv3l-r1
-export HLML_RELEASE_ID=Iris_1.2-Eos_2.1-hcf_v1mv3l-r1
+export HLML_SNAPSHOT_ID="$RUN_ID"
+export HLML_EXPERIMENT_ID="$RUN_ID"
+export HLML_RELEASE_ID="$RUN_ID"
+export HLML_STAGE=geometry
 
-# check and audit
+# Parse all HLML public configs before starting the expensive annotation stage.
+conda activate hand-landmarker-tf29
+cd "$HLML_REPO"
 make config-check
-make data-audit HLML_STAGE=geometry
 
+# Publish the Eos-2.1 + HaMeR + HCF v1 variant for every supported Train source.
+conda activate anfab
+cd "$HLMF_REPO"
+for dataset_id in "${DATASET_IDS[@]}"; do
+  make batch-train-autolabel \
+    HAND_DATASET_ROOT="$HAND_DATASET_ROOT" \
+    DATASET_ID="$dataset_id" \
+    PROPOSAL_VARIANT="$PROPOSAL_VARIANT" \
+    HAND_LANDMARK_BACKEND="$HAND_LANDMARK_BACKEND"
+done
+
+# The geometry target performs its own data audit before training.
+conda activate hand-landmarker-tf29
+cd "$HLML_REPO"
 make geometry
-make val HLML_STAGE=geometry
+make val
