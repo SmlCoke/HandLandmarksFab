@@ -2,6 +2,12 @@
 
 ## 代码与配置
 
+2026-08-18 `quick_run.sh` 已切换到全新 `eos_2.1-hamer-v1mv3l-gate-r4`，对应 HLML snapshot/experiment/release ID 为 `iris-1.2-geometry-eos2.1-hamer-hcf-v1mv3l-r4`。HLML geometry 训练集选择 `FullEnhance0801/0803/0810/0817` 的 r4 变体，Val/Test 数据集配置保持不变。失败的 r3 已产生部分隔离资产，不再重用，也未被 HLML 选择。
+
+r3 失败原因是 HaMeR 所用 PyTorch/cuDNN v8 在部分 ROI 上无法选择执行计划，报错为 `GET was unable to find an engine to execute this computation`；Palm 与 HCF CUDA 本身正常。HaMeR worker 和 `quick_run.sh` 现均设置 `TORCH_CUDNN_V8_API_DISABLED=1`，改用兼容的 legacy cuDNN API；服务器同一真实 ROI 的 CUDA 推理已返回 21 点。
+
+r4 正式任务正在服务器 `screen` 会话 `hlmf-quick-r4` 中运行，screen 日志为 `/root/autodl-tmp/DatesetFab/Logs/quick_run-r4.screen.log`。启动预检确认 Palm/HCF 为 `CUDAExecutionProvider`、HaMeR 为 RTX 3090 CUDA；现场 HaMeR worker 占用约 6.4 GiB 显存、GPU 利用率约 73%–75%。`FullEnhance0801` 前三个来源 `complex-mid-bright-fist-train-s01-peak`、`complex-mid-bright-fist-train-s01-soar`、`complex-mid-bright-flat-train-s01-peak` 已依次显示 `OK`，第四来源已开始；任务保持 Detached，可用 `screen -r hlmf-quick-r4` 接管。
+
 2026-08-18 默认双头 HCF 已替换为 `models/hand_classifier/v1-mobilenet_v3_large/model.onnx`，模型 ID 为 `hand-classifier-v1-mobilenet_v3_large`；HaMeR 外部副本及默认自动发现路径同步为 `/root/autodl-tmp/HLMF-Enhance/hand_classifier/v1-mobilenet_v3_large/model.onnx`。HaMeR 仓库同步提交为 `b29f1b397ed5ef36eba8f9498dd719949615fe09`，HLMF 锁定的 HaMeR model ID 为 `hamer-cvpr24-official-b29f1b3`。服务器最终 ONNX 为 16,837,557 bytes，SHA-256 `36deea0520a0bba13ce6557906fd94ffd4a65cc290c1a9d9440857f1f830847b`；HLMF 与 HaMeR 副本一致。模型仍使用动态 batch `[N,1,256,256]` 输入以及 `handedness/hand_presence [N,2]` 输出，不需要修改 HLMF runtime 代码或依赖。
 
 新 HCF 只读回放 7 个指定 Gold 来源共 9,279 条 ROI（9,237 hand、42 no_hand）。Train presence 采用独立配置 `0.5`，保留全部 hand 并拒绝全部 no_hand；negative-review 独立保持 `0.5`，在 37,937 个 Eos-2.1 low-score candidate 中选择 553 个，其中 547 个未关联 Gold hand、6 个与 hand 关联。handedness 保持 `0.8`，覆盖 9,101/9,237（98.528%），覆盖内正确 9,051/9,101（99.451%）；逐来源最低覆盖率 95.048%，最低覆盖内准确率 98.455%。7 个 Gold 来源均已进入新模型 train/val split，因此这些结果是配置校准而非独立盲测。

@@ -114,6 +114,26 @@ visualization:
 
 `palm.supported_capture_distances` 是与 Palm 权重绑定的必填能力资产；缺失、为空或格式非法时，所有模型相关阶段在写入前终止。
 
+### 2.1 PretrainSource 标注与 HLML geometry 快速运行
+
+仓库根目录的 `quick_run.sh` 串联 HLML 配置解析、四个 PretrainSource 数据集的 Train 自动标注、geometry 训练和 val。脚本当前选择 `FullEnhance0801/0803/0810/0817`，标注后端为 HaMeR，proposal variant 与 HLML snapshot/experiment/release ID 都在脚本顶部显式声明。每次从头重跑必须先换用从未写入过的新 variant，并同步修改 HLML `configs/datasets.yaml` 的 geometry 训练集选择；Val/Test 配置保持不变。
+
+输入是四个 PretrainSource 数据集、Eos-2.1、HCF、HaMeR 环境/模型资产、HLMF/HLML 两个仓库及 `HAND_TRAIN_ROOT`。脚本先在 `hand-landmarker-tf29` 环境运行 HLML `config-check`，再在 `anfab` 环境严格确认 Palm/HCF 均激活 `CUDAExecutionProvider` 且 HaMeR 可见 CUDA，随后逐数据集执行 `batch-train-autolabel`。全部标注成功后才进入 HLML geometry 与 val。
+
+服务器 CUDA 11 动态库目录必须进入 `LD_LIBRARY_PATH`。当前 HaMeR 的 PyTorch/cuDNN 组合还必须设置 `TORCH_CUDNN_V8_API_DISABLED=1`，使用兼容的 legacy cuDNN API，避免 cuDNN v8 在部分 ROI 上报 `GET was unable to find an engine to execute this computation`；`quick_run.sh` 与 HaMeR worker 子进程均设置该值。
+
+正式长任务用持久终端启动，以便 SSH 断开后继续运行并可由其他终端接管：
+
+```bash
+screen -L \
+  -Logfile /root/autodl-tmp/DatesetFab/Logs/quick_run-<variant>.screen.log \
+  -dmS hlmf-quick-<variant> \
+  bash -lc 'cd /root/HandLandmarksFab && exec ./quick_run.sh'
+screen -r hlmf-quick-<variant>
+```
+
+输出包括各来源的 proposal/ROI/draft/published labels/QC、四个 PretrainSource dataset manifest，以及后续 `HAND_TRAIN_ROOT` 下的 HLML geometry 训练资产。`Ctrl-a d` 只从 screen 脱离，不停止任务。
+
 ## 3. 来源注册与图像检查
 
 输入目录：

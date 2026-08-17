@@ -32,6 +32,22 @@ mkdir -p models/mediapipe/hand_landmarker_tflite
 
 输出：代码和环境检查结果。默认链路为 RTMPose + Hand Classifier + 质量门控 + MediaPipe Hand Landmarker TFLite rescue。Eos-2.1 参数为 score `0.25`、全局 NMS `0.10`、ROI scale `1.8/1.8`，只支持 near/mid，默认 proposal variant 为 `eos-2.1`；设备为 Palm/HCF GPU（不可用时回退 CPU）、RTMPose CPU，RTMPose/HCF batch 为 64。
 
+### 1.1 当前 PretrainSource → geometry 快速任务
+
+输入：`FullEnhance0801/0803/0810/0817`、HLMF/HLML 环境及模型资产。当前新变体为 `eos_2.1-hamer-v1mv3l-gate-r4`，HLML geometry 训练集使用四个数据集的该变体；Val/Test 配置不变。
+
+```bash
+screen -L \
+  -Logfile /root/autodl-tmp/DatesetFab/Logs/quick_run-r4.screen.log \
+  -dmS hlmf-quick-r4 \
+  bash -lc 'cd /root/HandLandmarksFab && exec ./quick_run.sh'
+
+screen -r hlmf-quick-r4
+# 脱离但保持运行：Ctrl-a d
+```
+
+输出：r4 标注变体、四个训练 dataset manifest，以及全部标注完成后生成的 HLML geometry/val 资产。脚本会设置 CUDA 11 动态库路径和 HaMeR 所需的 `TORCH_CUDNN_V8_API_DISABLED=1`，并在写数据前严格检查 Palm/HCF/HaMeR GPU。
+
 ## 2. 注册来源
 
 输入：`<source>/images/*.tif[f]`。
