@@ -7,9 +7,9 @@ readonly HLMF_REPO=/root/HandLandmarksFab
 readonly HLML_REPO=/root/HandLandmarkerLab
 readonly CUDA_LIBRARY_DIR=/usr/local/cuda-11.2/targets/x86_64-linux/lib
 readonly HAMER_PYTHON=/root/autodl-tmp/HLMF-Enhance/hamer/.hamer/bin/python
-readonly PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate-r2
+readonly PROPOSAL_VARIANT=eos_2.1-hamer-v1mv3l-gate-r3
 readonly HAND_LANDMARK_BACKEND=hamer
-readonly RUN_ID=iris-1.2-geometry-eos2.1-hamer-hcf-v1mv3l-r2
+readonly RUN_ID=iris-1.2-geometry-eos2.1-hamer-hcf-v1mv3l-r3
 readonly -a DATASET_IDS=(
   FullEnhance0801
   FullEnhance0803
