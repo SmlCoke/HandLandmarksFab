@@ -64,9 +64,3 @@ for dataset_id in "${DATASET_IDS[@]}"; do
     PROPOSAL_VARIANT="$PROPOSAL_VARIANT" \
     HAND_LANDMARK_BACKEND="$HAND_LANDMARK_BACKEND"
 done
-
-# The geometry target performs its own data audit before training.
-conda activate hand-landmarker-tf29
-cd "$HLML_REPO"
-make geometry
-make val

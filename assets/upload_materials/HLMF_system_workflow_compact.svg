@@ -1,0 +1,233 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600" viewBox="0 0 1600 1600" role="img" aria-labelledby="title desc">
+  <title id="title">HLMF 数据标注流程图·PPT 精简版</title>
+  <desc id="desc">单通道图像依次经过 Eos Palm Detector、固定 Hand ROI、多教师标注、几何补救和质量门控，再进入自动标注、人工真值、负样本和困难样本链路。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f5fbff"/>
+      <stop offset="0.55" stop-color="#f8f7ff"/>
+      <stop offset="1" stop-color="#fff9f1"/>
+    </linearGradient>
+    <linearGradient id="head" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#075985"/>
+      <stop offset="1" stop-color="#4f46a5"/>
+    </linearGradient>
+    <linearGradient id="teacherBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f0edff"/>
+      <stop offset="1" stop-color="#e8f4ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="7" result="blur"/>
+      <feOffset in="blur" dx="0" dy="7" result="offset"/>
+      <feFlood flood-color="#24354d" flood-opacity="0.14" result="color"/>
+      <feComposite in="color" in2="offset" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="13" markerHeight="13" refX="11" refY="6.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 L12 6.5 L1 12 Z" fill="#20718d"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="13" markerHeight="13" refX="11" refY="6.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 L12 6.5 L1 12 Z" fill="#6554b4"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="13" markerHeight="13" refX="11" refY="6.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 L12 6.5 L1 12 Z" fill="#d97706"/>
+    </marker>
+    <style>
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "PingFang SC", Arial, sans-serif; fill: #162238; }
+      .title { font-size: 58px; font-weight: 800; fill: #fff; letter-spacing: 2px; }
+      .subtitle { font-size: 24px; font-weight: 500; fill: #dceeff; }
+      .stage { font-size: 21px; font-weight: 800; letter-spacing: 1px; }
+      .card-title { font-size: 29px; font-weight: 800; }
+      .card-sub { font-size: 21px; font-weight: 600; }
+      .body { font-size: 19px; font-weight: 500; }
+      .small { font-size: 16px; font-weight: 500; }
+      .white { fill: #fff; }
+      .muted { fill: #637087; }
+      .blue { fill: #075985; }
+      .green { fill: #18724c; }
+      .purple { fill: #5b49a6; }
+      .orange { fill: #b85f00; }
+      .flow { fill: none; stroke: #20718d; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .flow-purple { fill: none; stroke: #6554b4; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowPurple); }
+      .flow-orange { fill: none; stroke: #d97706; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowOrange); }
+      .dash { stroke-dasharray: 12 10; }
+      .card { fill: #fff; stroke: #c9d5e4; stroke-width: 2.5; filter: url(#shadow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1600" rx="36" fill="url(#bg)"/>
+  <rect width="1600" height="135" rx="36" fill="url(#head)"/>
+  <rect y="98" width="1600" height="37" fill="url(#head)"/>
+  <text x="68" y="72" class="title">HLMF · 数据标注流程</text>
+  <text x="70" y="111" class="subtitle">多教师协同 · 质量门控 · 自动标注与人工 Gold 闭环</text>
+  <text x="1530" y="79" text-anchor="end" class="card-sub white">Iris Dataset Fabrication</text>
+
+  <!-- Stage labels -->
+  <text x="66" y="179" class="stage blue">01 · 数据输入</text>
+  <text x="434" y="179" class="stage blue">02 · Palm 定位</text>
+  <text x="802" y="179" class="stage green">03 · Hand ROI</text>
+  <text x="1170" y="179" class="stage purple">04 · 多教师标注</text>
+
+  <!-- Input card -->
+  <rect x="60" y="200" width="310" height="280" rx="28" fill="#e8f7fb" stroke="#7abccc" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="104" y="250" width="128" height="90" rx="15" fill="#16809a"/>
+  <rect x="232" y="270" width="44" height="50" rx="7" fill="#16809a"/>
+  <circle cx="168" cy="295" r="29" fill="#e8f7fb" stroke="#fff" stroke-width="8"/>
+  <circle cx="168" cy="295" r="11" fill="#16809a"/>
+  <path d="M119 250 L139 228 H194 L214 250" fill="#16809a"/>
+  <rect x="95" y="368" width="240" height="58" rx="14" fill="#fff" stroke="#9acbd5"/>
+  <text x="215" y="394" text-anchor="middle" class="card-sub blue">单通道灰度图像</text>
+  <text x="215" y="418" text-anchor="middle" class="small muted">TIFF · SC132GS</text>
+  <circle cx="116" cy="451" r="7" fill="#34a77b"/>
+  <text x="135" y="458" class="body">来源检查与注册</text>
+
+  <path d="M382 340 H413" class="flow"/>
+
+  <!-- Eos card -->
+  <rect x="428" y="200" width="310" height="280" rx="28" fill="#eaf3ff" stroke="#729ac8" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="468" y="238" width="230" height="126" rx="17" fill="#d7e8fb" stroke="#4b7eaf" stroke-width="3"/>
+  <rect x="511" y="263" width="140" height="76" rx="12" fill="none" stroke="#12658d" stroke-width="7"/>
+  <circle cx="538" cy="314" r="8" fill="#12658d"/>
+  <circle cx="624" cy="283" r="8" fill="#12658d"/>
+  <path d="M538 314 Q580 270 624 283" fill="none" stroke="#12658d" stroke-width="5" stroke-dasharray="8 6"/>
+  <text x="583" y="402" text-anchor="middle" class="card-title blue">Eos-2.1</text>
+  <text x="583" y="435" text-anchor="middle" class="card-sub">Palm Detector</text>
+  <rect x="506" y="449" width="154" height="24" rx="12" fill="#dff4e9"/>
+  <text x="583" y="467" text-anchor="middle" class="small green">near / mid</text>
+
+  <path d="M750 340 H781" class="flow"/>
+
+  <!-- ROI card -->
+  <rect x="796" y="200" width="310" height="280" rx="28" fill="#ebf8f1" stroke="#79b99a" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="872" y="238" width="158" height="158" rx="18" fill="#d2eee0" stroke="#267956" stroke-width="3"/>
+  <path d="M852 275 V238 H889 M1013 218 H1050 V255 M1050 379 V416 H1013 M889 416 H852 V379" fill="none" stroke="#267956" stroke-width="8" stroke-linecap="round"/>
+  <path d="M912 350 Q918 298 951 278 Q983 297 991 350" fill="none" stroke="#267956" stroke-width="8" stroke-linecap="round"/>
+  <path d="M929 305 L916 266 M948 291 L948 250 M967 301 L979 262" fill="none" stroke="#267956" stroke-width="8" stroke-linecap="round"/>
+  <text x="951" y="436" text-anchor="middle" class="card-title green">256 × 256</text>
+  <text x="951" y="465" text-anchor="middle" class="body">固定 Hand ROI</text>
+
+  <path d="M1118 340 H1149" class="flow"/>
+
+  <!-- Teacher hub -->
+  <rect x="1164" y="200" width="376" height="280" rx="28" fill="url(#teacherBg)" stroke="#9586ce" stroke-width="2.5" filter="url(#shadow)"/>
+  <circle cx="1352" cy="276" r="42" fill="#6554b4"/>
+  <circle cx="1352" cy="276" r="12" fill="#fff"/>
+  <path d="M1352 234 V216 M1316 255 L1300 246 M1388 255 L1404 246 M1316 297 L1300 306 M1388 297 L1404 306" stroke="#6554b4" stroke-width="8" stroke-linecap="round"/>
+  <path d="M1352 318 V336" stroke="#6554b4" stroke-width="8" stroke-linecap="round"/>
+  <rect x="1192" y="346" width="101" height="66" rx="14" fill="#6554b4"/>
+  <text x="1243" y="375" text-anchor="middle" class="body white">RTMPose</text>
+  <text x="1243" y="398" text-anchor="middle" class="small white">默认</text>
+  <rect x="1301" y="346" width="101" height="66" rx="14" fill="#238d8b"/>
+  <text x="1352" y="374" text-anchor="middle" class="body white">MediaPipe</text>
+  <text x="1352" y="398" text-anchor="middle" class="small white">Tasks</text>
+  <rect x="1410" y="346" width="101" height="66" rx="14" fill="#9450a5"/>
+  <text x="1461" y="375" text-anchor="middle" class="body white">HaMeR</text>
+  <text x="1461" y="398" text-anchor="middle" class="small white">覆盖</text>
+  <text x="1352" y="450" text-anchor="middle" class="card-sub purple">21 点关键点教师</text>
+
+  <!-- Middle: confidence, rescue, gate -->
+  <path d="M1352 492 V528 H290 V550" class="flow-purple"/>
+  <path d="M1352 492 V528 H763 V550" class="flow-purple"/>
+  <path d="M1352 492 V528 H1280 V550" class="flow-purple"/>
+
+  <rect x="60" y="550" width="460" height="300" rx="28" fill="#eef6ff" stroke="#739bc8" stroke-width="2.5" filter="url(#shadow)"/>
+  <text x="92" y="593" class="stage blue">05 · 置信度教师</text>
+  <rect x="92" y="624" width="396" height="173" rx="22" fill="#fff" stroke="#8eb0d2" stroke-width="2"/>
+  <circle cx="178" cy="710" r="57" fill="#dcecff"/>
+  <path d="M178 680 A30 30 0 1 1 153 727" fill="none" stroke="#3977ae" stroke-width="10" stroke-linecap="round"/>
+  <path d="M153 727 L147 707 M153 727 L173 720" fill="none" stroke="#3977ae" stroke-width="8" stroke-linecap="round"/>
+  <text x="260" y="683" class="card-title blue">双头 HCF</text>
+  <text x="260" y="720" class="card-sub">Hand Presence</text>
+  <text x="260" y="753" class="card-sub">Handedness</text>
+  <text x="290" y="828" text-anchor="middle" class="small muted">RTMPose / HaMeR 置信度来源</text>
+
+  <rect x="550" y="550" width="426" height="300" rx="28" fill="#fff7e9" stroke="#dda252" stroke-width="2.5" filter="url(#shadow)"/>
+  <text x="582" y="593" class="stage orange">06 · 几何补救</text>
+  <circle cx="763" cy="700" r="94" fill="#fff" stroke="#df9a3b" stroke-width="3"/>
+  <path d="M718 735 L736 697 L758 716 L779 666 L809 689" fill="none" stroke="#d97706" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="718" cy="735" r="10" fill="#d97706"/>
+  <circle cx="736" cy="697" r="10" fill="#d97706"/>
+  <circle cx="758" cy="716" r="10" fill="#d97706"/>
+  <circle cx="779" cy="666" r="10" fill="#d97706"/>
+  <circle cx="809" cy="689" r="10" fill="#d97706"/>
+  <path d="M826 650 A77 77 0 0 1 837 727" fill="none" stroke="#d97706" stroke-width="7" stroke-linecap="round" marker-end="url(#arrowOrange)"/>
+  <text x="763" y="816" text-anchor="middle" class="card-title orange">TFLite Rescue</text>
+
+  <rect x="1006" y="550" width="534" height="300" rx="28" fill="#fff7e9" stroke="#dda252" stroke-width="2.5" filter="url(#shadow)"/>
+  <text x="1038" y="593" class="stage orange">07 · Train 质量门控</text>
+  <path d="M1055 631 H1491 L1434 760 H1112 Z" fill="#fff" stroke="#dc9b40" stroke-width="3"/>
+  <path d="M1249 760 H1297 V810 H1249 Z" fill="#f2bd70" stroke="#dc9b40" stroke-width="3"/>
+  <circle cx="1140" cy="674" r="29" fill="#e4effd"/>
+  <path d="M1125 675 l10 10 20-25" fill="none" stroke="#3977ae" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1180" y="682" class="card-sub">Presence</text>
+  <circle cx="1346" cy="674" r="29" fill="#f0e9ff"/>
+  <path d="M1332 673 H1360 M1346 659 V687" stroke="#6c55b1" stroke-width="7" stroke-linecap="round"/>
+  <text x="1384" y="682" class="card-sub">Handedness</text>
+  <circle cx="1140" cy="731" r="29" fill="#fff0dc"/>
+  <path d="M1126 745 V717 H1154 V745" fill="none" stroke="#d97706" stroke-width="7"/>
+  <text x="1180" y="739" class="card-sub">边界坐标</text>
+  <circle cx="1346" cy="731" r="29" fill="#e8f7ed"/>
+  <circle cx="1333" cy="738" r="6" fill="#267956"/><circle cx="1346" cy="718" r="6" fill="#267956"/><circle cx="1360" cy="740" r="6" fill="#267956"/>
+  <path d="M1333 738 L1346 718 L1360 740" fill="none" stroke="#267956" stroke-width="6"/>
+  <text x="1384" y="739" class="card-sub">连接长度</text>
+
+  <!-- Divider and routing -->
+  <path d="M1273 864 V910 H800 V940" class="flow-orange"/>
+  <path d="M1352 492 H1560 V1000 H593" class="flow-purple dash"/>
+  <text x="1524" y="930" text-anchor="end" class="small purple">Eval / Gold 进入人工复核</text>
+  <path d="M583 492 V900 H994 V1000" class="flow-orange dash"/>
+  <text x="622" y="927" class="small orange">Eos 低分候选</text>
+
+  <text x="60" y="982" class="stage blue">08 · 多链路标注与发布</text>
+  <rect x="60" y="1000" width="350" height="310" rx="27" fill="#eaf8f1" stroke="#79b99a" stroke-width="2.5" filter="url(#shadow)"/>
+  <circle cx="235" cy="1082" r="48" fill="#267956"/>
+  <path d="M211 1083 l17 17 35-44" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="235" y="1161" text-anchor="middle" class="card-title green">Train 自动标注</text>
+  <rect x="97" y="1190" width="276" height="51" rx="25" fill="#d7efe2"/>
+  <text x="235" y="1224" text-anchor="middle" class="card-sub green">质量门控发布</text>
+  <text x="235" y="1280" text-anchor="middle" class="body muted">大规模预训练数据</text>
+
+  <rect x="430" y="1000" width="350" height="310" rx="27" fill="#f1edff" stroke="#9685cf" stroke-width="2.5" filter="url(#shadow)"/>
+  <circle cx="605" cy="1082" r="48" fill="#6554b4"/>
+  <circle cx="591" cy="1071" r="12" fill="#fff"/>
+  <path d="M568 1112 Q591 1086 614 1112" fill="#fff"/>
+  <path d="M617 1084 l11 11 22-28" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="605" y="1161" text-anchor="middle" class="card-title purple">Eval / Gold</text>
+  <rect x="467" y="1190" width="276" height="51" rx="25" fill="#e2daf8"/>
+  <text x="605" y="1224" text-anchor="middle" class="card-sub purple">CVAT 人工复核</text>
+  <text x="605" y="1280" text-anchor="middle" class="body muted">人工评估真值</text>
+
+  <rect x="800" y="1000" width="350" height="310" rx="27" fill="#fff6e9" stroke="#dfa25a" stroke-width="2.5" filter="url(#shadow)"/>
+  <circle cx="975" cy="1082" r="48" fill="#d97706"/>
+  <path d="M947 1071 H1003 M956 1087 H994 M967 1103 H983" stroke="#fff" stroke-width="9" stroke-linecap="round"/>
+  <text x="975" y="1161" text-anchor="middle" class="card-title orange">负样本链路</text>
+  <rect x="837" y="1190" width="276" height="51" rx="25" fill="#ffe6c5"/>
+  <text x="975" y="1224" text-anchor="middle" class="card-sub orange">HCF 预审 + 人审</text>
+  <text x="975" y="1280" text-anchor="middle" class="body muted">高质量 no-hand</text>
+
+  <rect x="1170" y="1000" width="370" height="310" rx="27" fill="#fff0f2" stroke="#d68a95" stroke-width="2.5" filter="url(#shadow)"/>
+  <circle cx="1355" cy="1082" r="48" fill="#b95666"/>
+  <path d="M1327 1098 L1344 1081 L1358 1091 L1382 1058" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="1327" cy="1098" r="7" fill="#fff"/><circle cx="1344" cy="1081" r="7" fill="#fff"/><circle cx="1358" cy="1091" r="7" fill="#fff"/><circle cx="1382" cy="1058" r="7" fill="#fff"/>
+  <text x="1355" y="1161" text-anchor="middle" class="card-title" fill="#9e3f4f">困难样本链路</text>
+  <rect x="1207" y="1190" width="296" height="51" rx="25" fill="#f8dce1"/>
+  <text x="1355" y="1224" text-anchor="middle" class="card-sub" fill="#9e3f4f">挖掘 + CVAT 精修</text>
+  <text x="1355" y="1280" text-anchor="middle" class="body muted">持续回流增强</text>
+
+  <!-- Published dataset -->
+  <path d="M235 1325 V1365 H800" class="flow"/>
+  <path d="M605 1325 V1365 H800" class="flow-purple"/>
+  <path d="M975 1325 V1365 H800" class="flow-orange"/>
+  <path d="M1355 1325 V1365 H800" class="flow-purple"/>
+  <rect x="190" y="1385" width="1220" height="145" rx="31" fill="#213751" filter="url(#shadow)"/>
+  <g transform="translate(254 1421)">
+    <ellipse cx="42" cy="14" rx="42" ry="14" fill="#8bd0e7"/>
+    <rect x="0" y="14" width="84" height="52" fill="#5ca7c3"/>
+    <ellipse cx="42" cy="66" rx="42" ry="14" fill="#8bd0e7"/>
+    <path d="M0 34 C0 42 84 42 84 34 M0 53 C0 61 84 61 84 53" fill="none" stroke="#d8f3fb" stroke-width="4"/>
+  </g>
+  <text x="800" y="1445" text-anchor="middle" class="card-title white">统一发布数据集</text>
+  <text x="800" y="1484" text-anchor="middle" class="card-sub white">Labels · Manifest · Registry · Provenance</text>
+  <rect x="1092" y="1422" width="250" height="67" rx="33" fill="#fff"/>
+  <text x="1217" y="1466" text-anchor="middle" class="card-title blue">→ Iris 训练</text>
+  <text x="1510" y="1570" text-anchor="end" class="small muted">HLMF 3.0 · PPT compact edition</text>
+</svg>
