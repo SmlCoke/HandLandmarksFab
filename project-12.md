@@ -67,7 +67,7 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 
 ## 四、项目技术路线详细拆解
 
-**暂定**的技术路线为：Sign2Skeletion2Gloss：
+项目技术路线为：Sign2Skeletion2Gloss：
 
 1. 先完成手语动作视频 -> 骨骼关键点动作序列的转化，即Sign2Skeletion；
 2. 在上一步基础上再将骨骼关键点动作序列转化为Gloss序列，即 Skeletion2Gloss；
@@ -80,7 +80,7 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 **物理动作：** 从摄像头的连续视频流中，逐帧提取人体和手部的关键点。
 **方法**：抛弃容易受光照干扰且极其耗费算力的 RGB 全图，仅提取**双手及上半身骨骼点坐标**，实现极度降维。
 
-如下是成熟可用并且适合我们端侧部署的工业算法：
+如下是成熟可用并且适合我们端侧部署，或者适合作为教师模型的工业算法：
 
 - HaGRIDv2 YOLOv10n Hand Detector: Hand 检测
 - Google MediaPipe
@@ -111,7 +111,7 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 
 - Method1: MS-TCN，获取：https://github.com/yabufarha/ms-tcn
 - Method2: Causal TCN，获取：https://github.com/philipperemy/keras-tcn
-- Method3: SSTCN, 获取: https://github.com/jackyjsy/CVPR21Chal-SLR(孤立词分类)
+- Method3: SSTCN, 获取: https://github.com/jackyjsy/CVPR21Chal-SLR (孤立词分类)
 
 这个阶段的网络结构比较简单，算力要求和延迟低。但是必须自己训练，这些网络不是专用的 **坐标->手语词汇表概率矩阵** 逻辑。
 
@@ -154,13 +154,13 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 
 - SLR500(**重要**)：大规模数据集，500词，125, 000视频，包含 RGB、深度图 (Depth) 以及骨架
 (Skeleton) 3种模态，获取途径： https://ustc-slr.github.io/datasets/2015_csl/ ，需要签署协议，
-向USTC申请。该协议必须由全职员工签署（学生签署不予接受）。**于0419获得该数据集**
+向USTC申请。该协议必须由全职员工签署（学生签署不予接受）。**于0419获得该数据集（目前最高价值）**
 
 #### (2) 中文连续手语数据集
 
 - CSL-Daily(**重要**)：大规模数据集，能够用于手语翻译，2000词，20, 654个视频，30fps。获取途径：
  https://ustc-slr.github.io/datasets/2021_csl_daily/ ，申请方法同上。**于0419获得该数据集**
-- CE-CSL：大规模数据集，4973个训练集视频、500个test集视频（PDF中显示为513个）、516个dev集视频。训练集一共3840个词（PDF中显示为3800词）、dev集一共821个词、test集一共757个词。标注含有自然语言标注和Gloss标注，输入模态为RGB视频，没有提供关键点序列，但是已经通过Mediapipe提取好了每个视频的关键点序列。获取途径：https://github.com/woshisad159/TFNet.git . **目前主要使用该数据集（目前最高价值），优点是标注清晰且视频分辨率较高。已经保存到 Peak 本地、Quark 网盘以及 AutoDL 服务器**。该数据集的关键点个数为65，分别是pos的23个关键点，以及左右手各21各关键点，因此特征向量维度：130。
+- CE-CSL：大规模数据集，4973个训练集视频、500个test集视频（PDF中显示为513个）、516个dev集视频。训练集一共3840个词（PDF中显示为3800词）、dev集一共821个词、test集一共757个词。标注含有自然语言标注和Gloss标注，输入模态为RGB视频，没有提供关键点序列，但是已经通过Mediapipe提取好了每个视频的关键点序列。获取途径：https://github.com/woshisad159/TFNet.git . **已经保存到 Peak 本地、Quark 网盘。但目前放弃使用该数据集，因为 Gloss 重复次数较少、拖尾严重**。该数据集的关键点个数为65，分别是pos的23个关键点，以及左右手各21各关键点，因此特征向量维度：130。
 
 ## 六、 鲁棒性与三类异常处理机制
 
@@ -254,21 +254,36 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 
 #### 7.1.3 全国总决赛（Current）
 
-目前正在进行全国总决赛的工作，主要包括：
+目前全国总决赛结束，最终版本模型的精度（自建 benchmark）、上板工作情况：
 
-- 重训 Palm Detector
-- 重训 Hand Landmarker
-- 重训 Gloss Translator，以及增加分类头数量
+**(1) Eos 模型 benchmark（自建数据集）**：
 
-成员分工
+| 模型 | Params | 平均 IOU | Precision | Recall | AP@0.5 | 
+| --- | --- | --- | --- | --- | --- |
+| **Eos-2.1(Final version)** | **1.368M** | 0.861 | 96.03% | **99.57%** | **98.92%** | 
+| HaGRIDv2 YOLOv10n Hand Detector | 2.720M | **0.912** | **99.34%** | 96.26% | 97.91% |
+| 100DOH Faster R-CNN X101-FPN | 104.8 M | 0.865 | 98.59% | 93.75% | 97.52% | 
 
-| 成员 | 分工 |
-| --- | --- |
-| draong | 重训 Palm Detector |
-| peak | 重训 Hand Landmarker |
-| soar | 重训 Gloss Translator |
+**(2) Iris 模型 benchmark（自建数据集）**：
 
-> 我们还为这三种模型分别取了适合发布的产品系列名字：Palm Detector -> AetherSign Eos 系列模型，或者简称 Eos; Hand Landmarker -> AetherSign Iris 系列模型，或者简称 Iris; Gloss Translator -> AetherSign Muse 系列模型，或者简称 Muse。
+| 模型 | Mean pixel error | P95 pixel error | Handedness Acc | Params | delay@A1 |
+|---|---|---|---|---|---|
+| **AetherSign: Iris-2.0-lite** | 10.43(↓52.5%) | 24.98(↓54.6%) | 89.55%(↓2.4%) | **0.85 M(↓55.5%)** | **≈20 ms** |
+| **AetherSign: Iris-2.0-pro** | 10.14(↓53.8%) | 23.77(↓56.8%) | 81.59%(↓11.1%) | 1.91 M | ≈22 ms |
+| **AetherSign: Iris-2.0-max** | 9.71(↓55.8%) | 23.26(↓57.7%) | 98.26%(↑7.0%) | 1.91 M | ≈22 ms |
+| MediaPipe Hand TFLite | 7.46 | 20.95 | **99.00%** | 2.71 M | N/A |
+| RTMPose-m Hand5 | **6.37** | **18.76** | N/A | 13.76 M | N/A |
+| HaMeR-CVPR24 | 7.89 | 20.06 | N/A | 672 M | N/A |
+| Hamba-NeurIPS24 | 7.91 | 20.28 | N/A | 733 M | N/A |
+| **Iris-1.0（分赛区版本 Baseline）** | 21.97 | 55.01 | 91.79% | 1.91M | ≈ 25ms |
+
+**(3) 应用实际上板延迟**：
+
+| 模式 | 有效测试时长 | 应用FPS | R=FPSapp/90 | E2E平均 | E2E P95 | FPS P5-P95 | Hand触发率 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Palm | 98.4s | 27.38 | 0.304 | 36.48ms | 36.75ms | 27.21-27.59 | 0% |
+| Palm+Hand | 65.8s | 14.77 | 0.164 | 67.69ms | 78.00ms | 12.82-27.59 | 93.1% |
+| Fullcascade | 80.9s | 19.47 | 0.216 | 51.33ms | 78.00ms | 12.82-27.78 | 37.7% |
 
 ### 7.2 困难及解决办法
 
@@ -288,7 +303,7 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 1. **模型精度**：
     1. 板端运行时，Hand Landmarker 模型相比初赛已经有很大提升，但是部分手势仍然**偏差较大/塌缩严重**；
     2. Palm Detector 模型依旧是初赛的版本，没有重训，**存在一定漏检情况（但优于 Google MediaPipe）**，且**高度依赖于特定的摄像头距离**，否则检测成功率大幅下降。
-    3. 根据以上亮点，Gloss Translator 模型的分类准确率也不理想，板端运行时状态糟糕。
+    3. 根据以上两点，Gloss Translator 模型的分类准确率也不理想，板端运行时状态糟糕。
 2. 目前**最严重的瓶颈是 Hand Landmarker 的精度提升**，目前已经尝试了多重手段：
     1. pretrain (geometry+multitask) -> multi-finetune 多阶段训练策略
     2. Google MediaPipe 自动标注 pesudo 标签，扩充 pretrain 数据集
@@ -312,8 +327,16 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 1. 延续 pretrain (geometry+multitask) -> multi-finetune 多阶段训练策略
 2. 继续扩充 pretrain 数据集，并且依旧是 Google MediaPipe 自动标注标签（经过实测，**Google MediaPipe 只要能够成功检出手掌，则关键点检测一定准确**）。这一次重点在于**数据集的多样性**。
 
+#### 7.2.3 全国总决赛
 
-### 7.3 未来规划
+该阶段未遇到严重瓶颈，如下陈述的困难均是当前 Sign2Skeleton2Gloss 链路以及 Flyingchip A1 硬件限制下难以避免的困难：
+
+1. **模型精度无法继续突破**：
+    - **Eos**: 经过重训练，Eos(Palm Detector) 模型已经能够处理 near 以及 mid 距离下的非常多样化的手势姿态，**漏检率大幅下降**；但是一旦遇到 **far 情况**或者**特别极端的手势**（例如90°角度使得手掌呈现一条线状），依旧会漏检，当前泛化特性仅围绕基本手势状态（例如平摊、握拳、数字1、OK等）以及五类手语词展开；**置信度区分不足**，大部分确实有手的 Anchor 的有手判断置信度都显著低于 0.5，极低，无法获取一个绝对稳定的阈值区分有手和无手状态。
+    - **Iris**: 经过重训练，**平均像素误差大幅下降**，从分赛区阶段的 20 px 左右下降到 8 px 左右，但这仍旧是一个**比较高的误差**（相比 RTMPose-m Hand5 等开源模型）。此外，**hand presence 分类头训练完全失败，当前全部输出 0.99+**，即无论什么 Hand ROI 统统判定为有手，其原因一方面来自前续模型 **Eos 的低置信度区分导致自动标注的训练集无法提供有效的训练样本**，另一方面来自 Iris 模型本身的数据集构建/训练策略问题。
+2. **实际部署上板延迟巨大**：目前 Fullcascade 模式，**端到端 P95 延迟约 78ms**，远高于实时性要求的 11ms。但这是应用场景——手语翻译的本身限制，其要求完整走完：Sign2Skeleton2Gloss 链路，才能输出最终的手语词汇表预测结果，但是 Flying A1 提供的单核 Cortex-A7 **无法支持多核流水线**，NPU **无法支持并行推理**，并且严重怀疑当前 Eos 和 Iris 模型的结构限制**无法吃满 NPU 利用率**。
+
+### 7.3 项目日志
 
 下面仅展示全国总决赛的日志，分赛区决赛和初赛阶段的日志不再展示。
 
@@ -374,23 +397,19 @@ Eos-2.1 模型 + Iris-1.1 + Muse-1.0 模型完整级联链路在板端运行效�
 2. Eos 模型正在进行 Benchmark 测试
 3. Muse 模型正在利用新训好的 Iris-2.0-lite (multitask) 模型和 Iris-2.0-max (multi-finetune) 进行重新数据标注和重新训练。
 
-Iris 模型在验证集上的精度指标
+#### 08-20 目前情况
 
-| 模型 | handedness acc | presence acc | mean landmarks error | size | quantized size | 
-| --- | --- | --- | --- | --- | --- | 
-| Iris-1.1 | 91.76% | 99.56% | 9.53 px| 
-| Iris-2.0-lite (multitask) | 91.79% | 99.86% | 10.51 px|
-| Iris-2.0-lite (multi-finetune) | 90.05% | 99.86% | 11.15 px|
-| Iris-2.0-pro (multitask) | 92.24% | 99.86% | **8.70 px**|
-| Iris-2.0-pro (multi-finetune) | 88.16% | 99.87% | 9.35 px|
-| Iris-2.0-max (multitask) | 94.42% | 99.87% | 8.96 px|
-| Iris-2.0-max (multi-finetune) | **97.02%** | 99.87% | 9.49 px|
+PPT 制作完成，目前正在撰写技术文档。
 
-目前：
+Peak 负责 Iris 模型相关部分的撰写。
 
-- dragon 成员负责 Eos model 的 Benchmark 测试
-- Peak 成员正在打磨 PPT
-- soar 成员正在进行 Muse 模型的重新训练
+#### 08-22 目前情况
+
+作品准备完毕、所有文档材料已经提交，正在准备正式答辩。
+
+#### 08-25 目前情况
+
+全国总决赛答辩结束，最终成绩：全国一等奖。
 
 ## 八、团队信息
 * **团队名称：** PeakDragonSoar (巅峰龙翔)
