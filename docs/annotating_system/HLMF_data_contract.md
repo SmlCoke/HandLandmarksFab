@@ -68,12 +68,6 @@ split 在来源注册阶段写入所有 manifest，不在发布阶段随机生�
 
 ROI ID 不包含图片扩展名，但 `crop_path/crop_relpath` 是精确文件引用。Registry 会校验完整相对路径；文件从 `.png` 改为 `.tiff` 时，不能只改磁盘文件而不迁移 Registry 和所有 manifest/label 引用。
 
-### 3.1 当前 quick_run 训练数据选择
-
-`quick_run.sh` 当前为 `FullEnhance0801/0803/0810/0817` 的每个受支持 Train capture source 生成 `proposal_variant=eos_2.1-hamer-v1mv3l-gate-r4`。HLML geometry 的训练集选择必须以四个数据集各自 `dataset_manifest.json` 中该精确 variant 的 `hand_training_labels.jsonl` 为入口；不同 variant 的 Palm、ROI、draft、labels 与 QC 不得混用。HLML Val/Test 继续使用其独立既有配置，不读取这个 PretrainSource r4 变体。
-
-重跑时不能覆盖已经产生部分或完整数据的 variant。应同时更新 `quick_run.sh` 的 proposal variant/run ID 和 HLML geometry 数据集配置，使用全新名称；旧变体目录保留为隔离资产，除非另行执行精确变体删除合同。
-
 ## 4. Palm 与 ROI manifest
 
 Eos 产生 `proposal_kind=runtime|negative_candidate`。ROI manifest 至少保存 dataset/source/split、raw/ROI ID、proposal variant/slot/kind、Palm score、`palm_valid`、crop 路径与尺寸、ROI rect/corners 和 ROI contract version。

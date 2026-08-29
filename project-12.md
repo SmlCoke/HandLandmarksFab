@@ -1,7 +1,7 @@
 
 # 🚀 【集创赛·思特威杯】项目背景与系统架构全景指南 V6
 
-> Last Updated: 2026-08-19
+> Last Updated: 2026-08-29
 
 ## 一、 赛事背景与赛题约束
 
@@ -252,7 +252,7 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 - **palm_hand mode**: 约 60 ms 
 - **fullcascade mode**: 约 62 ms
 
-#### 7.1.3 全国总决赛（Current）
+#### 7.1.3 全国总决赛（Final）
 
 目前全国总决赛结束，最终版本模型的精度（自建 benchmark）、上板工作情况：
 
@@ -322,7 +322,7 @@ A1 NPU 不支持或者效率极低的，但是很常见/使用频率高的算子
 5. 分赛区阶段，验证(Val)集和测试(Test)集中有大量人工标注的 Hand ROI，而预训练的训练集全部来自于 Google MediaPipe，这**两者的标注风格不一致**，**很有可能就是我们当时在训练时，“训练 Loss 一直下降、而验证 Loss 变化无常甚至上升”的原因之一**。
     1. 但是经过实验，Google MediaPipe 在 Val 集上的平均像素误差约为 6px，而我们训练的 Hand Landmarker 在 Val 集上的平均像素误差约为 21px，说明 Google MediaPipe 的标注风格和我们人工标注的风格**不是主要原因**。
 
-对于 Hand Landamrker 的精度提升，全国总决赛阶段，打算尝试的解决策略有：
+对于 Hand Landmarker 的精度提升，全国总决赛阶段采用的解决策略有：
 
 1. 延续 pretrain (geometry+multitask) -> multi-finetune 多阶段训练策略
 2. 继续扩充 pretrain 数据集，并且依旧是 Google MediaPipe 自动标注标签（经过实测，**Google MediaPipe 只要能够成功检出手掌，则关键点检测一定准确**）。这一次重点在于**数据集的多样性**。

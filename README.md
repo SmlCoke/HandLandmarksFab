@@ -2,6 +2,8 @@
 
 HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。系统默认从 Eos-2.1 Palm Detector 的 bbox、p0、p9 构造固定 `256×256` Hand ROI，再执行 RTMPose-m Hand5 + 双头 HCF + 质量门控 + MediaPipe Hand Landmarker TFLite rescue；MediaPipe Tasks 与 HaMeR 是两条独立的显式覆盖链路。
 
+> **比赛归档状态：** AetherSign 已于 2026-08-25 完成全国总决赛答辩并获得全国一等奖。本仓库针对本届比赛的数据制作使命已经完成，最终可复现代码状态由 annotated tag `HLMF-3.0-final` 固定。仓库中的模型权重与正式数据仓仍按既有策略独立保存，不包含在 Git tag 中。
+
 当前 Eos-2.1 在 latest Gold 上重新校准后仍只支持 near/mid；历史 far 回放的召回不足。HLMF、后续 Iris/Muse 和端侧演示因此仅支持 near/mid。far 原始来源应保留，但不得进入 Eos-2.1 的 Palm→ROI→Landmark→复核→发布链路；单来源命令会硬拒绝，批处理会显式跳过。
 
 本仓库只制作 Hand Landmarker 数据。Palm 几何不能人工修改，人工复核对象是程序生成的 Hand ROI、21 个关键点、handedness 以及 `no_hand/ignore_for_training` 状态。

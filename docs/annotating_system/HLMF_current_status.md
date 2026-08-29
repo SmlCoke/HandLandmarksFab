@@ -1,12 +1,29 @@
-# HLMF 当前状态（2026-08-18）
+# HLMF 当前状态（2026-08-29，比赛收官归档）
 
-## 代码与配置
+## 项目归档状态
 
-2026-08-18 `quick_run.sh` 已切换到全新 `eos_2.1-hamer-v1mv3l-gate-r4`，对应 HLML snapshot/experiment/release ID 为 `iris-1.2-geometry-eos2.1-hamer-hcf-v1mv3l-r4`。HLML geometry 训练集选择 `FullEnhance0801/0803/0810/0817` 的 r4 变体，Val/Test 数据集配置保持不变。失败的 r3 已产生部分隔离资产，不再重用，也未被 HLML 选择。
+- AetherSign 已于 2026-08-25 完成全国总决赛答辩，最终成绩为全国一等奖。
+- HLMF 针对本届比赛承担的 Hand Landmarker 数据制作使命已经完成；本仓库进入收官归档状态，不再声明仍有正在执行的标注或训练任务。
+- 最终代码状态使用 annotated tag `HLMF-3.0-final` 固定。仓库继续沿用 HLMF 3.0 名称与数据契约，不为归档人为提升主版本号。
+- 最终默认链路为 Eos-2.1 Palm Detector、RTMPose-m Hand5、双头 HCF、四项质量门控和 MediaPipe Hand Landmarker TFLite 几何补救；MediaPipe Tasks 与 HaMeR 保留为显式替代后端。
+- 最终能力边界仍为 `near|mid`，不支持 `far`。模型权重、正式 `HAND_DATASET_ROOT` 数据仓及外部 HaMeR/MANO 资产不在 Git 中；复现时必须按 workflow 部署这些资产，并以本 tag 中的配置、模型 ID、阈值和数据契约为准。
+- 比赛期一次性跨仓编排脚本 `quick_run.sh` 与本地 Make 参数示例 `Makefile.local.example` 已在归档提交中删除；复现 HLMF 应使用正式 Makefile、`scripts/hlmf.py` 和四份公共配置，不依赖某次训练 run。
+- 下文服务器任务和数据仓数字是 2026-08-18 最后一次经记录的快照，用于说明比赛阶段的来源与状态，不代表 2026-08-29 仍有任务运行，也不应被解释为对服务器现状的重新核验。
 
-r3 失败原因是 HaMeR 所用 PyTorch/cuDNN v8 在部分 ROI 上无法选择执行计划，报错为 `GET was unable to find an engine to execute this computation`；Palm 与 HCF CUDA 本身正常。HaMeR worker 和 `quick_run.sh` 现均设置 `TORCH_CUDNN_V8_API_DISABLED=1`，改用兼容的 legacy cuDNN API；服务器同一真实 ROI 的 CUDA 推理已返回 21 点。
+## 归档验收（2026-08-29，本地）
 
-r4 正式任务正在服务器 `screen` 会话 `hlmf-quick-r4` 中运行，screen 日志为 `/root/autodl-tmp/DatesetFab/Logs/quick_run-r4.screen.log`。启动预检确认 Palm/HCF 为 `CUDAExecutionProvider`、HaMeR 为 RTX 3090 CUDA；现场 HaMeR worker 占用约 6.4 GiB 显存、GPU 利用率约 73%–75%。`FullEnhance0801` 前三个来源 `complex-mid-bright-fist-train-s01-peak`、`complex-mid-bright-fist-train-s01-soar`、`complex-mid-bright-flat-train-s01-peak` 已依次显示 `OK`，第四来源已开始；任务保持 Detached，可用 `screen -r hlmf-quick-r4` 接管。
+- Python 3.11.4 下 44 个 Python 文件通过与 Makefile `compile` 等价的只读语法检查；
+- 79 项单元测试全部通过；
+- `scripts/hlmf.py --help` 成功加载全部正式 HLMF 3.0 子命令；
+- 本次归档未连接服务器、未运行正式数据任务，也未改写 `HAND_DATASET_ROOT`。
+
+## 最后一次服务器与配置快照（2026-08-18，历史）
+
+在该快照中，当时尚未删除的 `quick_run.sh` 已切换到全新 `eos_2.1-hamer-v1mv3l-gate-r4`，对应 HLML snapshot/experiment/release ID 为 `iris-1.2-geometry-eos2.1-hamer-hcf-v1mv3l-r4`。HLML geometry 训练集选择 `FullEnhance0801/0803/0810/0817` 的 r4 变体，Val/Test 数据集配置保持不变。失败的 r3 已产生部分隔离资产，不再重用，也未被 HLML 选择。
+
+r3 失败原因是 HaMeR 所用 PyTorch/cuDNN v8 在部分 ROI 上无法选择执行计划，报错为 `GET was unable to find an engine to execute this computation`；Palm 与 HCF CUDA 本身正常。当时 HaMeR worker 和 `quick_run.sh` 均设置 `TORCH_CUDNN_V8_API_DISABLED=1`，改用兼容的 legacy cuDNN API；服务器同一真实 ROI 的 CUDA 推理已返回 21 点。
+
+在 2026-08-18 的最后记录时，r4 正式任务位于服务器 `screen` 会话 `hlmf-quick-r4`，screen 日志为 `/root/autodl-tmp/DatesetFab/Logs/quick_run-r4.screen.log`。启动预检确认 Palm/HCF 为 `CUDAExecutionProvider`、HaMeR 为 RTX 3090 CUDA；现场 HaMeR worker 占用约 6.4 GiB 显存、GPU 利用率约 73%–75%。`FullEnhance0801` 前三个来源 `complex-mid-bright-fist-train-s01-peak`、`complex-mid-bright-fist-train-s01-soar`、`complex-mid-bright-flat-train-s01-peak` 已依次显示 `OK`，第四来源已开始。归档步骤未连接服务器重新核验该会话，复现时不得把这段历史记录当作可继续接管的实时任务说明。
 
 2026-08-18 默认双头 HCF 已替换为 `models/hand_classifier/v1-mobilenet_v3_large/model.onnx`，模型 ID 为 `hand-classifier-v1-mobilenet_v3_large`；HaMeR 外部副本及默认自动发现路径同步为 `/root/autodl-tmp/HLMF-Enhance/hand_classifier/v1-mobilenet_v3_large/model.onnx`。HaMeR 仓库同步提交为 `b29f1b397ed5ef36eba8f9498dd719949615fe09`，HLMF 锁定的 HaMeR model ID 为 `hamer-cvpr24-official-b29f1b3`。服务器最终 ONNX 为 16,837,557 bytes，SHA-256 `36deea0520a0bba13ce6557906fd94ffd4a65cc290c1a9d9440857f1f830847b`；HLMF 与 HaMeR 副本一致。模型仍使用动态 batch `[N,1,256,256]` 输入以及 `handedness/hand_presence [N,2]` 输出，不需要修改 HLMF runtime 代码或依赖。
 
@@ -56,7 +73,7 @@ RTMPose Train 几何补救现已默认开启：RTMPose 点触发边界或已开�
 
 2026-08-14 已发布负样本集 `neg-eos_2.0-hcf0813-hp0.5`：HCF 0.5 预审从 573,786 个输入候选选择 167,760 个供人工复核，最终保留 16,910 个真负样本并复制到 published，删除 150,850 个有手或不确定候选。`complex-mid-bright-flat-train-s01-soar` 的 1,136 个候选全部被人工删除；该来源零保留不会阻止整个数据集发布，最终 manifest 含 91 个非空来源、16,910 条 label/图片，Registry 状态为 `published`。
 
-## 服务器数据仓库
+## 最后一次服务器数据仓库快照（2026-08-18，历史）
 
 Eval 数据集 `FullEnhanceVal0801` 当前有 10 个来源：6 个 val、4 个 test，均已发布 `eos-1.0`：
 
@@ -98,7 +115,7 @@ Eval 数据集 `FullEnhanceVal0808` 当前有 3 个 val 来源，每个来源 60
 
 Registry 仍保留历史残留 `white-far-bright-random-val-s01-dragon/eos-1.0`（109 ROI），对应来源目录不存在且不在当前 Eval manifest 中；本轮按约定保留。Registry 当前计数为 7 个 dataset、138 个 capture source、85,779 张 raw image、222 个 active proposal variant、95 个 retired proposal variant、1,825,896 个 ROI；另有 4 个 negative dataset（3 个 published、1 个 reserved）、18,734 条已发布 negative，尚无 published selection。
 
-## 验收状态
+## 最后记录的验收状态（2026-08-18，历史）
 
 - `make compile`：39 个 Python 文件通过语法检查，新增统一重标定工具已纳入；
 - `make test`：73 项测试通过；
