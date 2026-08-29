@@ -4,11 +4,9 @@
 
 <h1>HandLandmarkerFab（HLMF 3.0）</h1>
 
-**AetherSign Hand Landmarker 数据制作、自动标注与人工复核系统**
+**AetherSign Iris 数据制作、自动标注与人工复核系统**
 
 [![Archive](https://img.shields.io/badge/Status-Competition_Final-8B5CF6?style=flat-square)](#-i-项目定位与归档状态) [![Tag](https://img.shields.io/badge/Tag-HLMF_3.0_final-0891B2?style=flat-square)](https://github.com/SmlCoke/HandLandmarksFab/tree/HLMF-3.0-final) [![Tests](https://img.shields.io/badge/Tests-79_Passed-059669?style=flat-square)](#-viii-依赖管理) [![ROI](https://img.shields.io/badge/Hand_ROI-256%C3%97256-2563EB?style=flat-square)](#411-默认-eos-21-配置)
-
-*Eos 发现双手，HLMF 将像素沉淀为可复用的 Iris 训练数据。*
 
 [项目定位](#-i-项目定位与归档状态) · [复现环境](#-ii-全国总决赛阶段复现环境) · [模型配置](#-iv-模型与推理配置) · [常用操作](#-v-常用操作) · [质量边界](#-vii-train-质量边界)
 
@@ -20,7 +18,7 @@
 
 ### 1.1 项目定位
 
-HandLandmarkerFab 是 Hand Landmarker 训练系统的上游数据制作仓库。系统默认从 Eos-2.1 Palm Detector 的 bbox、p0、p9 构造固定 `256×256` Hand ROI，再执行 RTMPose-m Hand5、双头 HCF、质量门控和 MediaPipe Hand Landmarker TFLite rescue；MediaPipe Tasks 与 HaMeR 是两条独立的显式覆盖链路。
+HandLandmarkerFab 是 Hand Landmarker(**即 Iris 模型**) 训练系统的上游数据制作仓库。系统默认从 Eos-2.1 Palm Detector 的 bbox、p0、p9 构造固定 `256×256` Hand ROI，再执行 RTMPose-m Hand5、双头 HCF、质量门控和 MediaPipe Hand Landmarker TFLite rescue；MediaPipe Tasks 与 HaMeR 是两条独立的显式覆盖链路。
 
 #### 1.1.1 仓库边界
 
@@ -109,7 +107,7 @@ AetherSign 正式提交的 Hand Landmarker 为 Iris-2.0-Lite (multitask) 与 Iri
 
 ## ⬡ IV. 模型与推理配置
 
-| 阶段 | 比赛最终默认 | 显式替代 | 主要输出 |
+| 阶段 | 默认 | 显式替代 | 主要输出 |
 | :-- | :-- | :-- | :-- |
 | Palm | Eos-2.1 | — | bbox、p0、p9、proposal score |
 | Hand Landmark | RTMPose-m Hand5 | MediaPipe Tasks、HaMeR | 21 点 Hand ROI 坐标 |
@@ -145,6 +143,8 @@ Eos low-score candidate 不运行 RTMPose/HCF，presence 与 handedness 保持 `
 通过 `HAND_LANDMARK_BACKEND=hamer` 显式启用。HaMeR 在独立 `.hamer` 环境加载 official CVPR24 checkpoint，使用 `rescale=0.75` 和 CUDA，仅负责预测 21 点。输出按 Hand ROI 像素域裁到 `[0,255]`，再应用与 RTMPose 相同的四项 Train 门控和 TFLite 几何补救。
 
 HaMeR 内部 ViTPose/亮度 handedness fallback 不进入 HLMF；外部 HCF 直接决定 HaMeR 左右手翻转及最终 presence/handedness。
+
+比赛最终提交的 Iris-2.0 系列模型的 Hand Landmarker 关键点教师正是 HaMeR，因为其在**SC132GS 域下各种简单或复杂手势下的精度都较高，鲁棒性不错**。
 
 ### 4.3 双头 Hand Classifier（HCF）
 
@@ -380,6 +380,8 @@ TFLite 补救使用独立 Python 3.11 venv 和 `requirements-mediapipe-tflite.tx
 ### 8.3 HaMeR 环境
 
 HaMeR 使用独立 `.hamer` 环境及外部 checkpoint/MANO 资产，PyTorch、Detectron2 等依赖不进入 HLMF 主环境。
+
+如果复现，需要额外在仓库外部克隆 [HaMeR 源码仓库](https://github.com/geopavlakos/hamer.git) 单独进行环境依赖配置。
 
 ---
 
